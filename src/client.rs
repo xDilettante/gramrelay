@@ -137,7 +137,6 @@ impl Bot {
         self.inner.timeout
     }
 
-    #[cfg(feature = "bot")]
     pub(crate) fn identity_key(&self) -> &str {
         let id = self
             .inner

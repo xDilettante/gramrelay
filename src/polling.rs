@@ -1,10 +1,8 @@
-use crate::{Bot, ChatId, EffectOutcome, Error, ErrorKind, Result, Router, Update};
+use crate::{Bot, DispatchOptions, EffectOutcome, Error, ErrorKind, Result, Router, Update};
 use std::{
-    collections::{HashSet, VecDeque},
-    sync::{Arc, Mutex, OnceLock},
+    sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 /// Bounds for the in-memory polling runtime. Durable recovery is a separate integration.
@@ -125,17 +123,11 @@ impl Bot {
         if stop.is_cancelled() {
             return Ok(());
         }
-        let _owner = PollingLease::acquire(self.identity_key())?;
-        let identity = tokio::select! {
+        let _owner = self.claim_update_source()?;
+        tokio::select! {
             _ = stop.cancelled() => return Ok(()),
-            result = self.get_me() => result?,
+            result = self.prepare_router(&mut router) => result?,
         };
-        if !identity.is_bot
-            || self.identity_key().parse::<i64>().ok() != Some(i64::from(identity.id))
-        {
-            return Err(Error::local(ErrorKind::Configuration, "bot_identity"));
-        }
-        router.bind_username(identity.username.as_deref())?;
         let webhook = tokio::select! {
             _ = stop.cancelled() => return Ok(()),
             result = self.get_webhook_info() => result?,
@@ -170,7 +162,10 @@ impl Bot {
                 }
                 continue;
             }
-            let work = process_batch(self, router.clone(), updates, &options);
+            let dispatch = DispatchOptions::default()
+                .max_concurrency(options.max_concurrency)
+                .handler_timeout(options.handler_timeout);
+            let work = self.dispatch_batch(router.clone(), updates, &dispatch);
             tokio::pin!(work);
             tokio::select! {
                 result = &mut work => result?,
@@ -205,117 +200,5 @@ fn next_offset(updates: &[Update], previous: Option<i64>, limit: u8) -> Result<O
             .map(Some)
             .ok_or_else(|| Error::new(ErrorKind::Decode, EffectOutcome::Unknown)),
         None => Ok(previous),
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Key {
-    Chat(ChatId),
-    Global,
-}
-
-fn key(update: &Update) -> Key {
-    update.chat_id().map_or(Key::Global, Key::Chat)
-}
-
-async fn process_batch<S: Send + Sync + 'static>(
-    bot: &Bot,
-    router: Arc<Router<S>>,
-    updates: Vec<Update>,
-    options: &PollingOptions,
-) -> Result<()> {
-    // Unknown scopes must not race a possibly related chat. This includes inline callbacks.
-    let unscoped = updates.iter().any(|update| key(update) == Key::Global);
-    let mut groups: Vec<(Key, Vec<Update>)> = Vec::new();
-    for update in updates {
-        let event_key = if unscoped { Key::Global } else { key(&update) };
-        // ponytail: linear lookup is bounded by Telegram's 100-event batch.
-        if let Some((_, events)) = groups
-            .iter_mut()
-            .find(|(existing, _)| *existing == event_key)
-        {
-            events.push(update);
-        } else {
-            groups.push((event_key, vec![update]));
-        }
-    }
-    let mut pending: VecDeque<_> = groups.into_iter().map(|(_, events)| events).collect();
-    let mut running = JoinSet::new();
-    for _ in 0..options.max_concurrency {
-        if let Some(events) = pending.pop_front() {
-            spawn_group(
-                &mut running,
-                bot.clone(),
-                router.clone(),
-                events,
-                options.handler_timeout,
-            );
-        }
-    }
-    let mut failure = None;
-    while let Some(joined) = running.join_next().await {
-        let result = joined.unwrap_or_else(|_| Err(Error::handler("handler_panic")));
-        if let Err(error) = result
-            && failure.is_none()
-        {
-            failure = Some(error);
-        }
-        if failure.is_none()
-            && let Some(events) = pending.pop_front()
-        {
-            spawn_group(
-                &mut running,
-                bot.clone(),
-                router.clone(),
-                events,
-                options.handler_timeout,
-            );
-        }
-    }
-    failure.map_or(Ok(()), Err)
-}
-
-fn spawn_group<S: Send + Sync + 'static>(
-    running: &mut JoinSet<Result<()>>,
-    bot: Bot,
-    router: Arc<Router<S>>,
-    events: Vec<Update>,
-    timeout: Duration,
-) {
-    running.spawn(async move {
-        for update in events {
-            tokio::time::timeout(timeout, router.dispatch(&bot, update))
-                .await
-                .map_err(|_| Error::new(ErrorKind::Timeout, EffectOutcome::Unknown))??;
-        }
-        Ok(())
-    });
-}
-
-static OWNERS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-struct PollingLease {
-    key: String,
-}
-impl PollingLease {
-    fn acquire(key: &str) -> Result<Self> {
-        let mut owners = OWNERS
-            .get_or_init(Default::default)
-            .lock()
-            .map_err(|_| Error::local(ErrorKind::Configuration, "polling_registry"))?;
-        if !owners.insert(key.to_owned()) {
-            return Err(Error::local(ErrorKind::Capacity, "polling_owner"));
-        }
-        Ok(Self {
-            key: key.to_owned(),
-        })
-    }
-}
-impl Drop for PollingLease {
-    fn drop(&mut self) {
-        if let Some(owners) = OWNERS.get()
-            && let Ok(mut owners) = owners.lock()
-        {
-            owners.remove(&self.key);
-        }
     }
 }

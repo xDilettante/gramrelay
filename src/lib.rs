@@ -13,6 +13,8 @@
 
 mod client;
 mod delivery;
+#[cfg(feature = "bot")]
+mod dispatch;
 mod downloads;
 mod error;
 mod events;
@@ -23,6 +25,7 @@ mod requests;
 mod retry;
 #[cfg(feature = "bot")]
 mod routing;
+mod source;
 mod telemetry;
 #[cfg(feature = "test-kit")]
 pub mod test_kit;
@@ -36,6 +39,8 @@ mod wire;
 pub mod api;
 
 pub use client::{Bot, BotBuilder};
+#[cfg(feature = "bot")]
+pub use dispatch::DispatchOptions;
 pub use downloads::Download;
 pub use error::{EffectOutcome, Error, ErrorKind, Result};
 pub use files::InputFile;
@@ -45,6 +50,7 @@ pub use requests::{AnswerCallbackQuery, RequestFuture, SendDocument, SendMessage
 pub use retry::RetryPolicy;
 #[cfg(feature = "bot")]
 pub use routing::{CallbackContext, MessageContext, MessageEvent, Router, UpdateContext};
+pub use source::UpdateSourceGuard;
 pub use text::{EntityKind, ParseMode, RichText};
 #[cfg(feature = "bot")]
 pub use tokio_util::sync::CancellationToken;
