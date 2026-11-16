@@ -1,1 +1,3 @@
 * text=auto eol=lf
+# Unified diff context lines contain one space for an empty source line.
+vendor/grammers-mtsender/tg-safety.patch -whitespace

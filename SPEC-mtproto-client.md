@@ -84,3 +84,14 @@ all-feature and 197 default tests, four doctests, clean Clippy/fmt, 21 Python
 schema checks, deterministic protocol/agent artifacts and clean audit of 320
 dependencies. One ignored subprocess fixture is invoked by the crash test.
 This evidence does not complete M2 or claim authenticated network compatibility.
+
+Backend patch increment: the pinned grammers-mtsender archive is vendored with
+only sender_pool.rs/Cargo.toml changes plus local tests/provenance. Eight
+downstream regressions and the upstream parser unit pass. Quit/setup/child join,
+panic cleanup, post-quit refusal, sticky update loss, NoRetries I/O and flood
+refusal are covered. tools/verify_grammers.py checks archive SHA-256, unchanged
+source bytes and the exact recorded patch; its three tests bring Python checks
+to 24. Whole-workspace all-feature tests, doctests and Clippy remain passing.
+The owning Client must still provide admission, deadlines, joined replacement,
+authorization and observable application acknowledgement; the backend patch
+does not supply those by itself.

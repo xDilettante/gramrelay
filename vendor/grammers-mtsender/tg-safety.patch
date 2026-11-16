@@ -1,0 +1,325 @@
+--- upstream/Cargo.toml
++++ patched/Cargo.toml
+@@ -13,6 +13,7 @@
+ edition = "2024"
+ name = "grammers-mtsender"
+ version = "0.12.0"
++publish = false
+ authors = ["Lonami Exo <totufals@hotmail.com>"]
+ build = false
+ autolib = false
+@@ -41,6 +42,7 @@
+ resolver = "2"
+ 
+ [features]
++upstream-live-tests = []
+ proxy = [
+     "tokio-socks",
+     "hickory-resolver",
+@@ -54,13 +56,20 @@
+ [[test]]
+ name = "deps"
+ path = "tests/deps.rs"
++required-features = ["upstream-live-tests"]
+ 
+ [[test]]
+ name = "lib"
+ path = "tests/lib.rs"
++required-features = ["upstream-live-tests"]
+ 
+ [dependencies.bytes]
+ version = "1.12.1"
++
++[dependencies.futures-util]
++version = "0.3"
++default-features = false
++features = ["std"]
+ 
+ [dependencies.grammers-mtproto]
+ version = "0.12.0"
+@@ -113,6 +122,10 @@
+ [dev-dependencies.socks5-server]
+ version = "0.10.1"
+ 
++[dev-dependencies.tokio]
++version = "1.54.1"
++features = ["rt-multi-thread"]
++
+ [dev-dependencies.toml]
+ version = "1.2.1"
+ 
+--- upstream/src/sender_pool.rs
++++ patched/src/sender_pool.rs
+@@ -6,6 +6,7 @@
+ // option. This file may not be copied, modified, or distributed
+ // except according to those terms.
+ 
++use futures_util::FutureExt;
+ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+ use std::num::NonZeroU32;
+ use std::ops::{ControlFlow, Deref};
+@@ -21,7 +22,7 @@
+ use grammers_tl_types::{self as tl, Deserializable, enums};
+ use tokio::task::AbortHandle;
+ use tokio::{
+-    sync::{mpsc, oneshot},
++    sync::{mpsc, oneshot, watch},
+     task::JoinSet,
+     time::sleep,
+ };
+@@ -51,7 +52,6 @@
+     Disconnect {
+         dc_id: i32,
+     },
+-    Quit,
+ }
+ 
+ struct Rpc {
+@@ -85,7 +85,11 @@
+ 
+ /// Cheaply cloneable handle to interact with its [`SenderPoolRunner`].
+ #[derive(Clone)]
+-pub struct SenderPoolHandle(mpsc::UnboundedSender<Request>);
++pub struct SenderPoolHandle(
++    mpsc::UnboundedSender<Request>,
++    watch::Sender<bool>,
++    watch::Receiver<bool>,
++);
+ 
+ /// Builder to configure the runner to drive I/O and linked handles.
+ pub struct SenderPool {
+@@ -117,6 +121,8 @@
+     updates_tx: mpsc::Sender<UpdatesLike>,
+     connections: Vec<ConnectionInfo>,
+     connection_pool: JoinSet<Result<(), ReadError>>,
++    shutdown: watch::Receiver<bool>,
++    update_loss: watch::Sender<bool>,
+ }
+ 
+ impl Deref for SenderPoolFatHandle {
+@@ -147,6 +153,9 @@
+         dc_id: i32,
+         body: Vec<u8>,
+     ) -> Result<InvokeResponse, InvocationError> {
++        if *self.1.borrow() {
++            return Err(InvocationError::Dropped("SenderPoolRunner is stopping"));
++        }
+         if body.len() > MAX_REQUEST_SIZE {
+             return Err(InvocationError::Dropped("request body is too large"));
+         }
+@@ -167,13 +176,26 @@
+     /// This is useful after datacenter migrations during sign in,
+     /// when the old connection is known to not be needed anymore.
+     pub fn disconnect_from_dc(&self, dc_id: i32) -> bool {
+-        self.0.send(Request::Disconnect { dc_id }).is_ok()
++        !*self.1.borrow() && self.0.send(Request::Disconnect { dc_id }).is_ok()
+     }
+ 
+     /// Communicate with the running [`SenderPoolRunner`] instance
+     /// to drop all active connections and gracefully stop running.
+     pub fn quit(&self) -> bool {
+-        self.0.send(Request::Quit).is_ok()
++        if self.1.is_closed() {
++            return false;
++        }
++        self.1.send_replace(true);
++        true
++    }
++
++    /// Sticky loss signal for this runner generation, independent of the update queue.
++    ///
++    /// True means an update or connection-closed notification could not be forwarded.
++    /// It is never reset, including after the queue drains or a quiet period.
++    /// Applications must recover the gap before acknowledging subsequent checkpoints.
++    pub fn update_loss(&self) -> watch::Receiver<bool> {
++        self.2.clone()
+     }
+ 
+     /// do [`Self::raw_invoke_in_dc`] with [`Self::check_retry`]
+@@ -213,6 +235,9 @@
+         fail_count: NonZeroU32,
+         slept_so_far: Duration,
+     ) -> ControlFlow<InvocationError, Duration> {
++        if *self.1.borrow() {
++            return ControlFlow::Break(error);
++        }
+         let (tx, rx) = oneshot::channel();
+         if self
+             .0
+@@ -269,6 +294,8 @@
+         let (request_tx, request_rx) = mpsc::unbounded_channel();
+         let (updates_tx, updates_rx) =
+             mpsc::channel(connection_params.updates_channel_capacity.get());
++        let (shutdown_tx, shutdown) = watch::channel(false);
++        let (update_loss, loss_rx) = watch::channel(false);
+ 
+         Self {
+             runner: SenderPoolRunner {
+@@ -279,9 +306,11 @@
+                 updates_tx,
+                 connections: Vec::new(),
+                 connection_pool: JoinSet::new(),
++                shutdown,
++                update_loss,
+             },
+             handle: SenderPoolFatHandle {
+-                thin: SenderPoolHandle(request_tx),
++                thin: SenderPoolHandle(request_tx, shutdown_tx, loss_rx),
+                 session: Arc::clone(&session),
+                 api_id,
+             },
+@@ -291,13 +320,18 @@
+ }
+ 
+ impl SenderPoolRunner {
+-    /// Run the sender pool until [`SenderPoolHandle::quit`] is called or the returned future is dropped.
++    /// Run the sender pool until [`SenderPoolHandle::quit`] is called or all handles close.
+     ///
+     /// Connections will be initiated on-demand whenever the first request to a datacenter is made.
++    /// Call quit and await this future to join every child, including pending connection setup.
++    /// Dropping/aborting this future only aborts children; it cannot await their termination.
+     pub async fn run(mut self) {
++        let outcome = panic::AssertUnwindSafe(async {
++        let mut shutdown = self.shutdown.clone();
+         loop {
+             tokio::select! {
+                 biased;
++                _ = async { let _ = shutdown.wait_for(|stop| *stop).await; } => break,
+                 completion = self.connection_pool.join_next(), if !self.connection_pool.is_empty() => {
+                     if let Err(err) = completion.unwrap()
+                         && let Ok(reason) = err.try_into_panic()
+@@ -308,10 +342,11 @@
+                         .retain(|connection| !connection.abort_handle.is_finished());
+                 }
+                 request = self.request_rx.recv() => {
+-                    let flow = if let Some(request) = request {
+-                        self.process_request(request).await
+-                    } else {
+-                        ControlFlow::Break(())
++                    let Some(request) = request else { break; };
++                    let flow = tokio::select! {
++                        biased;
++                        _ = async { let _ = shutdown.wait_for(|stop| *stop).await; } => break,
++                        flow = self.process_request(request) => flow,
+                     };
+                     match flow {
+                         ControlFlow::Continue(_) => continue,
+@@ -320,9 +355,22 @@
+                 }
+             }
+         }
+-
+-        self.connections.clear(); // drop all channels to cause the `run_sender` loops to stop
+-        self.connection_pool.join_all().await;
++        }).catch_unwind().await;
++        let mut panic_reason = outcome.err();
++        self.request_rx.close();
++        self.connections.clear();
++        self.connection_pool.abort_all();
++        while let Some(completion) = self.connection_pool.join_next().await {
++            if let Err(error) = completion
++                && let Ok(reason) = error.try_into_panic()
++                && panic_reason.is_none()
++            {
++                panic_reason = Some(reason);
++            }
++        }
++        if let Some(reason) = panic_reason {
++            panic::resume_unwind(reason);
++        }
+     }
+ 
+     async fn process_request(&mut self, request: Request) -> ControlFlow<()> {
+@@ -378,7 +426,6 @@
+                 });
+                 ControlFlow::Continue(())
+             }
+-            Request::Quit => ControlFlow::Break(()),
+         }
+     }
+ 
+@@ -398,6 +445,7 @@
+             sender,
+             rpc_rx,
+             self.updates_tx.clone(),
++            self.update_loss.clone(),
+             dc_option.id == self.session.home_dc_id()?,
+         ));
+         self.connections.push(ConnectionInfo {
+@@ -525,6 +573,7 @@
+     mut sender: Sender<Box<dyn transport::Transport + Send>, grammers_mtproto::mtp::Encrypted>,
+     mut rpc_rx: mpsc::UnboundedReceiver<Rpc>,
+     updates: mpsc::Sender<UpdatesLike>,
++    update_loss: watch::Sender<bool>,
+     home_sender: bool,
+ ) -> Result<(), ReadError> {
+     let mut dropped: usize = 0;
+@@ -539,9 +588,9 @@
+                         continue;
+                     }
+                     for new_updates in all_new_updates {
+-                        if let Err(e) = updates.try_send(new_updates) {
++                        if let Err(e) = forward_update(&updates, &update_loss, new_updates) {
+                             match e {
+-                                mpsc::error::TrySendError::Full(_) => {
++                                ForwardError::Full => {
+                                     dropped += 1;
+                                     if last_update_limit_warn.elapsed() >= UPDATES_DROPPED_LOG_COOLDOWN {
+                                         warn!(
+@@ -554,7 +603,7 @@
+                                         last_update_limit_warn = Instant::now();
+                                     }
+                                 }
+-                                mpsc::error::TrySendError::Closed(_) => {
++                                ForwardError::Closed => {
+                                     debug!("updates channel closed, stopping update forwarding");
+                                     updates_closed = true;
+                                     break;
+@@ -565,7 +614,7 @@
+                 },
+                 Err(err) => {
+                     if home_sender {
+-                        let _ = updates.try_send(UpdatesLike::ConnectionClosed);
++                        let _ = forward_update(&updates, &update_loss, UpdatesLike::ConnectionClosed);
+                     }
+                     break Err(err)
+                 },
+@@ -608,7 +657,34 @@
+             Self::Disconnect { dc_id } => {
+                 f.debug_struct("Disconnect").field("dc_id", dc_id).finish()
+             }
+-            Self::Quit => write!(f, "Quit"),
+-        }
+-    }
+-}
++        }
++    }
++}
++
++#[derive(Debug)]
++enum ForwardError {
++    Full,
++    Closed,
++}
++
++fn forward_update(
++    updates: &mpsc::Sender<UpdatesLike>,
++    loss: &watch::Sender<bool>,
++    update: UpdatesLike,
++) -> Result<(), ForwardError> {
++    let error = match updates.try_send(update) {
++        Ok(()) => return Ok(()),
++        Err(mpsc::error::TrySendError::Full(_)) => ForwardError::Full,
++        Err(mpsc::error::TrySendError::Closed(_)) => ForwardError::Closed,
++    };
++    loss.send_if_modified(|lost| {
++        let changed = !*lost;
++        *lost = true;
++        changed
++    });
++    Err(error)
++}
++
++#[cfg(test)]
++#[path = "tg_safety_tests.rs"]
++mod tg_safety_tests;
