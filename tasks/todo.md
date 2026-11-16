@@ -7,7 +7,7 @@ See tasks/goal.md. The active goal includes every unchecked module below.
 - [x] R1: typed get_me/get_updates/get_webhook_info and preservation of nested unknown event fields. Verified: 3 update tests, all 26 unit/integration tests, 2 doctests and Clippy pass.
 - [x] R2: Router<State>, typed contexts, exact commands/mentions and context-preserving replies. Verified: 4 routing tests, Clippy and client-only build pass; complete regression suite passed.
 - [x] R3: one process-local poller, bounded per-chat batches, safe offset barrier, cancellation and handler failures. Verified: 11 polling tests, all 42 unit/integration tests, 2 doctests, client-only tests, fmt/Clippy/rustdoc and audit pass. Unknown event scopes serialize their batch; durable recovery is still J2.
-- [ ] R4: authenticated webhook ingestion and transport adapter, limits, overload and shutdown. Depends J2 for durable mode. Verify: localhost webhook/recovery tests.
+- [ ] R4: authenticated webhook ingestion and transport adapter, limits, overload and shutdown. Shared WebhookIngress, constant-time secret validation, byte/request admission, deadlines and Axum router are implemented; 8 targeted tests and focused Clippy pass, fresh boundary review found no substantive defect. Managed server, ordinary Bot memory runtime and durable feed adapter remain open in SPEC-webhook.md order. Verify: localhost authentication/body/order/overload/shutdown/recovery tests for both modes.
 
 ## Protocol and client
 

@@ -33,6 +33,8 @@ mod text;
 mod typed_api;
 mod types;
 mod updates;
+#[cfg(feature = "webhook")]
+pub mod webhook;
 mod wire;
 
 #[path = "generated/mod.rs"]

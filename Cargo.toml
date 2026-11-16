@@ -15,22 +15,29 @@ default = ["bot"]
 bot = ["tokio-util/rt", "tokio/signal"]
 tracing = ["dep:tracing"]
 metrics = ["dep:metrics"]
+webhook = ["bot", "dep:axum", "dep:futures-util", "dep:http-body-util", "dep:hyper", "dep:hyper-util", "dep:sha2", "dep:subtle"]
 test-kit = ["dep:http", "dep:http-body-util", "dep:futures-util"]
 
 [dependencies]
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"], optional = true }
 fastrand = "2.5"
 futures-util = { version = "0.3", default-features = false, features = ["std"], optional = true }
 http = { version = "1", optional = true }
 http-body-util = { version = "0.1", optional = true }
+hyper = { version = "1", features = ["server", "http1"], optional = true }
+hyper-util = { version = "0.1", features = ["tokio", "service"], optional = true }
 metrics = { version = "0.24", optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "multipart", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = { version = "0.11", default-features = false, optional = true }
+subtle = { version = "2.6", default-features = false, optional = true }
 tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tempfile = "3"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "json", "registry", "std"] }
 wiremock = "0.6"
