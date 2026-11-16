@@ -8,7 +8,8 @@ mod runtime;
 mod types;
 
 pub use runtime::{
-    ExecutionResult, Executor, ExecutorOptions, FailureReceipt, MessageReceipt, OperationReceipt,
+    BotInfo, ChatInfo, ExecutionResult, Executor, ExecutorOptions, FailureReceipt, MessageReceipt,
+    OperationReceipt, ReadEvent, ReadEventScope, ReadPage,
 };
 
 pub use policy::{

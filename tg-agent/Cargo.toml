@@ -42,3 +42,7 @@ required-features = ["webhook"]
 [[example]]
 name = "authorized_send"
 required-features = ["executor"]
+
+[[example]]
+name = "authorized_read"
+required-features = ["executor"]

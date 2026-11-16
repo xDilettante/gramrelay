@@ -1,6 +1,7 @@
 use super::types::{
     Action, ActionCall, ChatId, ExecutorError, ExecutorErrorKind, Request, Result, valid_id,
 };
+use crate::journal::authorization::OperationScope;
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -202,7 +203,7 @@ impl Grant {
         }
         Ok(())
     }
-    fn check(&self, request: &Request, bot_id: i64, now_ms: i64) -> Result<()> {
+    fn check_basic(&self, request: &Request, bot_id: i64, now_ms: i64) -> Result<()> {
         if now_ms < 0 {
             return Err(invalid_policy());
         }
@@ -212,6 +213,10 @@ impl Grant {
         {
             return Err(denied());
         }
+        Ok(())
+    }
+    fn check(&self, request: &Request, bot_id: i64, now_ms: i64) -> Result<()> {
+        self.check_basic(request, bot_id, now_ms)?;
         let (chat, file) = match request.call() {
             ActionCall::GetChat(args) => (Some(args.chat_id), None),
             ActionCall::SendMessage(args) => (Some(args.chat_id), None),
@@ -224,6 +229,39 @@ impl Grant {
         };
         if chat.is_some_and(|v| !self.permits_chat(v))
             || file.is_some_and(|v| !self.permits_file(v))
+        {
+            return Err(denied());
+        }
+        Ok(())
+    }
+    fn check_request(
+        &self,
+        request: &Request,
+        bot_id: i64,
+        now_ms: i64,
+        scope: Option<&OperationScope>,
+    ) -> Result<()> {
+        let Some(scope) = scope else {
+            return self.check(request, bot_id, now_ms);
+        };
+        self.check_basic(request, bot_id, now_ms)?;
+        if !matches!(
+            request.action(),
+            Action::GetOperation | Action::AnswerCallbackQuery
+        ) {
+            return Err(invalid_policy());
+        }
+        if scope.bot_id != bot_id
+            || !self.actions.contains(&scope.action)
+            || (request.action() == Action::AnswerCallbackQuery
+                && scope.action != Action::AnswerCallbackQuery)
+            || scope
+                .chat
+                .map_or(!self.unscoped_updates, |v| !self.permits_chat(v))
+            || scope
+                .file
+                .as_ref()
+                .is_some_and(|v| !self.permits_file(&v.handle))
         {
             return Err(denied());
         }
@@ -307,12 +345,23 @@ impl PolicyStore {
         now_ms: i64,
         approval: Option<&Approval>,
     ) -> Result<(DryRun, Grant)> {
+        self.authorized_with_scope(principal, request, bot_id, now_ms, approval, None)
+    }
+    pub(super) fn authorized_with_scope(
+        &self,
+        principal: &Principal,
+        request: &Request,
+        bot_id: i64,
+        now_ms: i64,
+        approval: Option<&Approval>,
+        scope: Option<&OperationScope>,
+    ) -> Result<(DryRun, Grant)> {
         let state = self.inner.read().map_err(|_| invalid_policy())?;
         let entry = state
             .grants
             .get(&(principal.clone(), request.profile().to_owned()))
             .ok_or_else(denied)?;
-        entry.grant.check(request, bot_id, now_ms)?;
+        entry.grant.check_request(request, bot_id, now_ms, scope)?;
         if entry.grant.approvals.contains(&request.action()) {
             let matches = approval.is_some_and(|value| {
                 value
@@ -349,12 +398,43 @@ impl PolicyStore {
         now_ms: i64,
         expires_at_ms: i64,
     ) -> Result<Approval> {
+        self.approve_with_scope(principal, request, bot_id, now_ms, expires_at_ms, None)
+    }
+    pub(super) fn check_lookup(
+        &self,
+        principal: &Principal,
+        request: &Request,
+        bot_id: i64,
+        now_ms: i64,
+    ) -> Result<()> {
+        if !matches!(
+            request.action(),
+            Action::GetOperation | Action::AnswerCallbackQuery | Action::ReadUpdates
+        ) {
+            return Err(invalid_policy());
+        }
         let state = self.inner.read().map_err(|_| invalid_policy())?;
         let entry = state
             .grants
             .get(&(principal.clone(), request.profile().to_owned()))
             .ok_or_else(denied)?;
-        entry.grant.check(request, bot_id, now_ms)?;
+        entry.grant.check_basic(request, bot_id, now_ms)
+    }
+    pub(super) fn approve_with_scope(
+        &self,
+        principal: &Principal,
+        request: &Request,
+        bot_id: i64,
+        now_ms: i64,
+        expires_at_ms: i64,
+        scope: Option<&OperationScope>,
+    ) -> Result<Approval> {
+        let state = self.inner.read().map_err(|_| invalid_policy())?;
+        let entry = state
+            .grants
+            .get(&(principal.clone(), request.profile().to_owned()))
+            .ok_or_else(denied)?;
+        entry.grant.check_request(request, bot_id, now_ms, scope)?;
         if expires_at_ms <= now_ms || entry.grant.expires_at_ms.is_some_and(|v| expires_at_ms > v) {
             return Err(invalid_policy());
         }

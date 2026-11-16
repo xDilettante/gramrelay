@@ -19,12 +19,15 @@ use tokio::{
     sync::{OnceCell, Semaphore},
     time::{Instant, timeout, timeout_at},
 };
+mod read;
+pub use read::{BotInfo, ChatInfo, ReadEvent, ReadEventScope, ReadPage};
 
 #[derive(Debug, Clone)]
 pub struct ExecutorOptions {
     max_in_flight: usize,
     request_budget: Duration,
     receipt_margin: Duration,
+    max_read_bytes: usize,
 }
 impl Default for ExecutorOptions {
     fn default() -> Self {
@@ -32,6 +35,7 @@ impl Default for ExecutorOptions {
             max_in_flight: 16,
             request_budget: Duration::from_secs(30),
             receipt_margin: Duration::from_secs(5),
+            max_read_bytes: 1024 * 1024,
         }
     }
 }
@@ -48,11 +52,17 @@ impl ExecutorOptions {
         self.receipt_margin = value;
         self
     }
+    pub fn max_read_bytes(mut self, value: usize) -> Self {
+        self.max_read_bytes = value;
+        self
+    }
     fn validate(&self) -> Result<()> {
         if self.max_in_flight == 0
             || self.max_in_flight > 1024
             || self.request_budget.is_zero()
             || self.receipt_margin.is_zero()
+            || self.max_read_bytes == 0
+            || self.max_read_bytes > 64 * 1024 * 1024
             || self
                 .request_budget
                 .checked_add(self.receipt_margin)
@@ -68,7 +78,8 @@ struct Profile {
     bot: Bot,
     journal: Journal,
     bot_id: i64,
-    identity: OnceCell<()>,
+    identity: OnceCell<BotInfo>,
+    feed: UpdateFeed,
 }
 /// Profiles and authenticated authority are host configuration, never tool args.
 #[derive(Clone)]
@@ -172,11 +183,41 @@ impl OperationReceipt {
 #[derive(Serialize)]
 pub struct ExecutionResult {
     schema_version: u32,
-    operation: OperationReceipt,
+    #[serde(flatten)]
+    value: ExecutionValue,
+}
+#[derive(Serialize)]
+#[serde(untagged)]
+enum ExecutionValue {
+    Operation { operation: OperationReceipt },
+    Bot { bot: BotInfo },
+    Chat { chat: ChatInfo },
+    Updates { updates: ReadPage },
 }
 impl ExecutionResult {
     pub fn operation(&self) -> Option<&OperationReceipt> {
-        Some(&self.operation)
+        match &self.value {
+            ExecutionValue::Operation { operation } => Some(operation),
+            _ => None,
+        }
+    }
+    pub fn bot(&self) -> Option<&BotInfo> {
+        match &self.value {
+            ExecutionValue::Bot { bot } => Some(bot),
+            _ => None,
+        }
+    }
+    pub fn chat(&self) -> Option<&ChatInfo> {
+        match &self.value {
+            ExecutionValue::Chat { chat } => Some(chat),
+            _ => None,
+        }
+    }
+    pub fn updates(&self) -> Option<&ReadPage> {
+        match &self.value {
+            ExecutionValue::Updates { updates } => Some(updates),
+            _ => None,
+        }
     }
 }
 impl Executor {
@@ -219,12 +260,12 @@ impl Executor {
                 journal: journal.clone(),
                 bot_id,
                 identity: OnceCell::new(),
+                feed: feed.clone(),
             }),
         );
         Ok(())
     }
-    /// Experimental A1 write slice. Only send_message is executable so far;
-    /// other typed actions fail locally until their scope/receipt integration lands.
+    /// Shared authorized execution. Reference/file write integration is incremental.
     pub async fn execute(
         &self,
         principal: &Principal,
@@ -246,21 +287,18 @@ impl Executor {
         request: &Request,
         approval: Option<&Approval>,
     ) -> Result<ExecutionResult> {
-        let ActionCall::SendMessage(args) = request.call() else {
-            return Err(ExecutorError::new(ExecutorErrorKind::UnsupportedAction));
-        };
+        supported(request)?;
         let _slot = self
             .slots
             .clone()
             .try_acquire_owned()
             .map_err(|_| ExecutorError::new(ExecutorErrorKind::Capacity))?;
-        let profile = self
-            .profiles
-            .read()
-            .map_err(|_| ExecutorError::new(ExecutorErrorKind::InvalidPolicy))?
-            .get(request.profile())
-            .cloned()
-            .ok_or_else(|| ExecutorError::new(ExecutorErrorKind::Denied))?;
+        let profile = self.profile_for(request)?;
+        let ActionCall::SendMessage(args) = request.call() else {
+            return self
+                .execute_read(&profile, principal, request, approval)
+                .await;
+        };
         self.policy
             .authorized(principal, request, profile.bot_id, now()?, approval)?;
         let invocation = Authorization {
@@ -269,6 +307,7 @@ impl Executor {
             request: request.clone(),
             approval: approval.cloned(),
             bot_id: profile.bot_id,
+            scope: None,
         };
         let admission = invocation.clone();
         profile
@@ -308,22 +347,7 @@ impl Executor {
                     .map_err(|error| error.with_outcome(EffectOutcome::Unknown));
             }
         };
-        let identity = profile
-            .identity
-            .get_or_try_init(|| async {
-                self.policy
-                    .dry_run(principal, request, profile.bot_id, now()?, approval)?;
-                let identity =
-                    timeout(self.options.request_budget, profile.bot.verified_identity())
-                        .await
-                        .map_err(|_| ExecutorError::new(ExecutorErrorKind::Identity))?
-                        .map_err(|_| ExecutorError::new(ExecutorErrorKind::Identity))?;
-                if i64::from(identity.id) != profile.bot_id {
-                    return Err(ExecutorError::new(ExecutorErrorKind::Identity));
-                }
-                Ok(())
-            })
-            .await;
+        let identity = self.verified(&profile, &admission).await;
         if let Err(error) = identity {
             let _ = profile.journal.release_prepared(prepared).await;
             return Err(error);
@@ -413,6 +437,14 @@ impl Executor {
             .await
             .map_err(|error| error.with_outcome(EffectOutcome::Unknown))
     }
+    fn profile_for(&self, request: &Request) -> Result<Arc<Profile>> {
+        self.profiles
+            .read()
+            .map_err(|_| ExecutorError::new(ExecutorErrorKind::InvalidPolicy))?
+            .get(request.profile())
+            .cloned()
+            .ok_or_else(|| ExecutorError::new(ExecutorErrorKind::Denied))
+    }
     async fn cached(
         &self,
         profile: &Profile,
@@ -446,18 +478,22 @@ struct Authorization {
     request: Request,
     approval: Option<Approval>,
     bot_id: i64,
+    scope: Option<OperationScope>,
 }
 impl Authorization {
+    fn checked(&self, time: i64) -> Result<(DryRun, Grant)> {
+        self.policy.authorized_with_scope(
+            &self.principal,
+            &self.request,
+            self.bot_id,
+            time,
+            self.approval.as_ref(),
+            self.scope.as_ref(),
+        )
+    }
     fn budget_at(&self, time: i64) -> journal::Result<BudgetContext> {
         let (_, grant) = self
-            .policy
-            .authorized(
-                &self.principal,
-                &self.request,
-                self.bot_id,
-                time,
-                self.approval.as_ref(),
-            )
+            .checked(time)
             .map_err(|_| JournalError::new(JournalErrorKind::Denied))?;
         Ok(budget_context(&self.principal, &self.request, &grant))
     }
@@ -480,6 +516,7 @@ fn storage_error(error: JournalError) -> ExecutorError {
         JournalErrorKind::Conflict => ExecutorErrorKind::Conflict,
         JournalErrorKind::QuotaExceeded => ExecutorErrorKind::QuotaExceeded,
         JournalErrorKind::Capacity => ExecutorErrorKind::Capacity,
+        JournalErrorKind::CursorExpired => ExecutorErrorKind::CursorExpired,
         _ => ExecutorErrorKind::Storage,
     })
 }
@@ -501,15 +538,31 @@ fn project(operation: Operation, scope: &OperationScope) -> Result<ExecutionResu
     }
     Ok(ExecutionResult {
         schema_version: 1,
-        operation: OperationReceipt {
-            operation_id: operation.operation_id().into(),
-            action: scope.action,
-            state: operation.state(),
-            result_availability: operation.result_availability(),
-            message,
-            failure: operation.failure().map(FailureReceipt::project),
+        value: ExecutionValue::Operation {
+            operation: OperationReceipt {
+                operation_id: operation.operation_id().into(),
+                action: scope.action,
+                state: operation.state(),
+                result_availability: operation.result_availability(),
+                message,
+                failure: operation.failure().map(FailureReceipt::project),
+            },
         },
     })
+}
+fn supported(request: &Request) -> Result<()> {
+    if matches!(
+        request.action(),
+        Action::GetMe
+            | Action::GetChat
+            | Action::ReadUpdates
+            | Action::GetOperation
+            | Action::SendMessage
+    ) {
+        Ok(())
+    } else {
+        Err(ExecutorError::new(ExecutorErrorKind::UnsupportedAction))
+    }
 }
 macro_rules! redacted_debug {
     ($($name:ident),+ $(,)?) => { $(impl fmt::Debug for $name { fn fmt(&self,f:&mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(concat!(stringify!($name),"([REDACTED])")) } })+ };

@@ -56,6 +56,12 @@ pub struct UpdateCursor {
     pub(super) profile: String,
     pub(super) sequence: i64,
 }
+impl UpdateCursor {
+    #[cfg(feature = "executor")]
+    pub(crate) fn matches_profile(&self, profile: &str) -> bool {
+        self.profile == profile
+    }
+}
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CursorWire {
@@ -204,8 +210,13 @@ impl AppendReceipt {
 pub struct StoredUpdate {
     pub(super) cursor: UpdateCursor,
     pub(super) update: tg::Update,
+    pub(super) received_at_ms: i64,
 }
 impl StoredUpdate {
+    /// Original journal receipt time; rereading never refreshes ephemeral references.
+    pub fn received_at_ms(&self) -> i64 {
+        self.received_at_ms
+    }
     pub fn cursor(&self) -> &UpdateCursor {
         &self.cursor
     }
@@ -289,6 +300,10 @@ impl fmt::Debug for ConsumerBatch {
     }
 }
 impl UpdatePage {
+    /// Consume the page without cloning the retained update payloads.
+    pub fn into_events(self) -> Vec<StoredUpdate> {
+        self.events
+    }
     pub fn events(&self) -> &[StoredUpdate] {
         &self.events
     }

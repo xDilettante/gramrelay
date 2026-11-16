@@ -20,6 +20,10 @@ pub enum ExecutorErrorKind {
     Identity,
     UnsupportedAction,
     Uncertain,
+    InvalidResponse,
+    NotFound,
+    Remote,
+    CursorExpired,
 }
 #[derive(Debug)]
 pub struct ExecutorError {
@@ -57,6 +61,10 @@ impl ExecutorError {
             ExecutorErrorKind::Identity => "executor_identity",
             ExecutorErrorKind::UnsupportedAction => "executor_unsupported_action",
             ExecutorErrorKind::Uncertain => "executor_uncertain",
+            ExecutorErrorKind::InvalidResponse => "executor_invalid_response",
+            ExecutorErrorKind::NotFound => "executor_not_found",
+            ExecutorErrorKind::Remote => "executor_remote",
+            ExecutorErrorKind::CursorExpired => "executor_cursor_expired",
         }
     }
 }

@@ -53,6 +53,26 @@ pub(super) struct Charge {
     pub cost_units: u64,
 }
 impl Journal {
+    /// Immutable metadata lookup, including ownership. Unlike get_scoped this
+    /// never refreshes state or materializes a cached result (dry-run/approval).
+    pub(crate) async fn operation_scope(
+        &self,
+        profile: &str,
+        principal: &str,
+        id: &str,
+    ) -> Result<Option<OperationScope>> {
+        for value in [profile, principal, id] {
+            types::valid_id(value)?;
+        }
+        let (profile, principal, id) = (profile.to_owned(), principal.to_owned(), id.to_owned());
+        self.run(move |connection,_,_| {
+            let action: Option<String> = connection.query_row("SELECT action FROM operations WHERE profile=?1 AND operation_id=?2 AND principal=?3",params![profile,id,principal],|row|row.get(0)).optional().map_err(|_|storage())?;
+            let Some(action) = action else { return Ok(None); };
+            let scope = load_scope(connection,&profile,&id)?.ok_or_else(||JournalError::new(JournalErrorKind::Denied))?;
+            if scope.action.name() != action { return Err(storage()); }
+            Ok(Some(scope))
+        }).await
+    }
     pub(crate) async fn release_prepared(&self, prepared: Prepared) -> Result<()> {
         self.run_fenced(move |connection, _, worker| {
             let lease = prepared.0;

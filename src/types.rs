@@ -87,6 +87,10 @@ impl From<&str> for CallbackQueryId {
     }
 }
 impl CallbackQueryId {
+    /// Explicit access for typed adapters; an identifier is not an access grant.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }

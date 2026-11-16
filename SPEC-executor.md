@@ -35,6 +35,28 @@ Revocation affects new admissions and cached/read-result disclosure. Work alread
 
 read_updates scans at most one bounded journal page (up to 100, within its byte budget) and returns at most the requested authorized events. Advance only over actually considered rows, so reaching an output limit never skips later unread authorized events. Existing versioned feed cursors remain positions, not grants; every call rechecks scope, including unknown/unscoped events. Scoped actors may observe feed position/activity metadata but never forbidden event contents. The call never starts getUpdates/polling and never claims arbitrary Telegram history.
 
+The authorized read envelope exposes primary update/chat/message/thread/callback
+identifiers separately, using canonical strings. Full Telegram content is a
+lossless telegram_json string, marked untrusted; Rust callers also have a typed
+Update accessor. This avoids implicit JSON/JavaScript rounding of nested/future
+wire identifiers while preserving every unknown field. Scope comes from a
+reviewed primary event, not forwarded/nested IDs or the journal's ordering hint.
+Unknown top-level fields, guest/widget/account/inline events require explicit
+unscoped permission, even when an ordering hint happens to name an allowed chat.
+Unscoped permission is additional to any recognizable ordinary primary chat
+scope; it never overrides a forbidden/invalid ordinary chat inside an extended
+event. Ambiguous callbacks carrying both message and inline targets require
+unscoped access and do not issue callback action metadata.
+Bound bytes before materializing payloads; an over-budget first event fails
+explicitly rather than returning a cursor that skips it or loops forever.
+
+Executor::dry_run and Executor::approve resolve get_operation scope through
+owner-checked immutable metadata only, without refreshing operation state,
+spending quota, performing RPC or exposing a cached body. get_operation requires
+both its own action grant and the original action/resource scope. Original write
+confirmation requirements do not require re-confirming an old side effect just
+to inspect its receipt; confirmation on get_operation itself still applies.
+
 Callbacks are ephemeral references bound to trusted observed input and caller/profile/scope, not self-attested chat_id arguments. Registration uses the original event receipt time; rereading cannot refresh an old callback indefinitely. The canonical (principal, profile, callback_query_id) reference is reused when the same observed event is reread; aliases cannot create independent admission rights. One callback reference cannot be rebound to a different operation after an admitted attempt; NotSent can retry the same key, while Unknown cannot be bypassed with a new key. References and their metadata are bounded/expired explicitly. Current get_operation access can inspect an authorized retained receipt independently of whether an old callback can still be answered.
 
 ## Durable execution and quota contract
@@ -64,13 +86,16 @@ Include handle and immutable content metadata in the canonical operation fingerp
 
 Commands: cargo test --locked --workspace --all-targets --all-features; cargo test --locked --workspace --doc --all-features; cargo fmt --all -- --check; cargo clippy --locked --workspace --all-targets --all-features -- -D warnings; cargo audit. Run schema/migration and isolated feature checks appropriate to each increment. A1 completion requires all actions and abuse/recovery invariants, not just a passing send-message slice. A2/A3 publish the same typed schemas/semantics through CLI and official rmcp.
 
-Current implementation: increments 1 and 2 are integrated. execute supports
-send_message; the other seven typed actions explicitly return UnsupportedAction
-until increments 3/4. Policy-only dry-run remains local and reference lookup
-remains ContextRequired. Schema v4 freezes authorization.sql; later durable file
+Current implementation: increments 1 and 2 plus the four reads of increment 3
+are integrated. execute supports get_me/get_chat/read_updates/get_operation and
+send_message; callback/edit/document writes explicitly return UnsupportedAction
+until their remaining integration. Policy-only dry-run remains local; executor
+dry-run/approval resolves immutable owner-checked operation scopes and cursor
+position metadata without state refresh, RPC or quota. Schema v4 freezes authorization.sql; later durable file
 registration metadata will require a subsequent reviewed migration, not an edit
 of v4. The current ledger capacity is configurable (4096 by default). Default
 executor concurrency/RPC/receipt budgets are 16/30 seconds/5 seconds. Tests cover
-ten policy, eight admission/storage, eleven end-to-end send/recovery and five
-migration cases. The offline authorized_send example makes one identity read and
-one send for two invocations. Full A1 and the architecture goal remain open.
+ten policy, eight admission/storage, eleven end-to-end send/recovery, seventeen
+read/boundary and five migration cases. Offline authorized_send makes one identity
+read and one send for two invocations; authorized_read performs no RPC at all.
+Full A1 and the architecture goal remain open.

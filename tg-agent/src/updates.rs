@@ -25,6 +25,26 @@ impl fmt::Debug for UpdateFeed {
 }
 impl UpdateFeed {
     #[cfg(feature = "executor")]
+    pub(crate) async fn check_cursor_position(&self, cursor: &UpdateCursor) -> Result<()> {
+        if cursor.profile != self.profile {
+            return Err(JournalError::new(JournalErrorKind::Denied));
+        }
+        let (profile, sequence) = (self.profile.clone(), cursor.sequence);
+        self.journal
+            .run(move |connection, _, _| {
+                let transaction = connection.transaction().map_err(|_| storage())?;
+                let (last, floor) = feed_bounds(&transaction, &profile, now()?)?;
+                if sequence < floor {
+                    return Err(JournalError::new(JournalErrorKind::CursorExpired));
+                }
+                if sequence > last {
+                    return Err(JournalError::new(JournalErrorKind::Validation));
+                }
+                transaction.commit().map_err(|_| storage())
+            })
+            .await
+    }
+    #[cfg(feature = "executor")]
     pub(crate) fn executor_binding(&self) -> (&Journal, &str, i64) {
         (&self.journal, &self.profile, self.bot_id)
     }
@@ -182,7 +202,16 @@ impl UpdateFeed {
             .await
     }
     pub async fn read(&self, cursor: Option<&UpdateCursor>, limit: usize) -> Result<UpdatePage> {
-        if !(1..=100).contains(&limit) {
+        self.read_with_budget(cursor, limit, self.options.max_batch_bytes)
+            .await
+    }
+    pub(crate) async fn read_with_budget(
+        &self,
+        cursor: Option<&UpdateCursor>,
+        limit: usize,
+        byte_budget: usize,
+    ) -> Result<UpdatePage> {
+        if !(1..=100).contains(&limit) || byte_budget == 0 {
             return Err(JournalError::new(JournalErrorKind::Validation));
         }
         if cursor.is_some_and(|cursor| cursor.profile != self.profile) {
@@ -195,7 +224,14 @@ impl UpdateFeed {
                 let transaction = connection
                     .transaction_with_behavior(TransactionBehavior::Immediate)
                     .map_err(|_| storage())?;
-                let page = read_page(&transaction, &feed, cursor.as_ref(), limit, now()?)?;
+                let page = read_page_bounded(
+                    &transaction,
+                    &feed,
+                    cursor.as_ref(),
+                    limit,
+                    now()?,
+                    byte_budget,
+                )?;
                 transaction.commit().map_err(|_| storage())?;
                 Ok(page)
             })
@@ -226,6 +262,24 @@ fn read_page(
     limit: usize,
     time: i64,
 ) -> Result<UpdatePage> {
+    read_page_bounded(
+        connection,
+        feed,
+        cursor,
+        limit,
+        time,
+        feed.options.max_batch_bytes,
+    )
+}
+fn read_page_bounded(
+    connection: &Connection,
+    feed: &UpdateFeed,
+    cursor: Option<&UpdateCursor>,
+    limit: usize,
+    time: i64,
+    byte_budget: usize,
+) -> Result<UpdatePage> {
+    let byte_budget = byte_budget.min(feed.options.max_batch_bytes);
     let (last, floor) = feed_bounds(connection, &feed.profile, time)?;
     let start = cursor.map_or(floor, |cursor| cursor.sequence);
     if start < floor {
@@ -237,20 +291,33 @@ fn read_page(
     let mut events = Vec::new();
     let mut total = 0usize;
     let mut end = start;
-    let mut statement=connection.prepare("SELECT sequence,payload,payload_hash FROM updates WHERE profile=?1 AND sequence>?2 ORDER BY sequence LIMIT ?3").map_err(|_|storage())?;
+    let mut statement=connection.prepare("SELECT sequence,length(payload),CASE WHEN length(payload)<=?4 THEN payload ELSE NULL END,payload_hash,received_at_ms FROM updates WHERE profile=?1 AND sequence>?2 ORDER BY sequence LIMIT ?3").map_err(|_|storage())?;
     let mut rows = statement
-        .query(params![feed.profile, start, limit as i64])
+        .query(params![
+            feed.profile,
+            start,
+            limit as i64,
+            byte_budget as i64
+        ])
         .map_err(|_| storage())?;
     while let Some(row) = rows.next().map_err(|_| storage())? {
         let sequence: i64 = row.get(0).map_err(|_| storage())?;
-        let payload: Vec<u8> = row.get(1).map_err(|_| storage())?;
-        if payload.len() > feed.options.max_event_bytes {
+        let length =
+            usize::try_from(row.get::<_, i64>(1).map_err(|_| storage())?).map_err(|_| storage())?;
+        if length > feed.options.max_event_bytes {
             return Err(storage());
         }
-        if payload.len() > feed.options.max_batch_bytes - total {
+        if length > byte_budget - total {
+            if events.is_empty() {
+                return Err(JournalError::new(JournalErrorKind::Capacity));
+            }
             break;
         }
-        let hash: Vec<u8> = row.get(2).map_err(|_| storage())?;
+        let payload: Vec<u8> = row.get(2).map_err(|_| storage())?;
+        if payload.len() != length {
+            return Err(storage());
+        }
+        let hash: Vec<u8> = row.get(3).map_err(|_| storage())?;
         if hash.as_slice() != Sha256::digest(&payload).as_slice() {
             return Err(storage());
         }
@@ -263,6 +330,7 @@ fn read_page(
                 sequence,
             },
             update,
+            received_at_ms: row.get(4).map_err(|_| storage())?,
         });
     }
     Ok(UpdatePage {
