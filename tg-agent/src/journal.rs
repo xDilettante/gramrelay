@@ -247,7 +247,7 @@ fn initialize(connection: &mut Connection) -> Result<()> {
         transaction
             .pragma_update(None, "application_id", APPLICATION)
             .map_err(|_| storage())?;
-    } else if application != APPLICATION || !(1..=2).contains(&version) {
+    } else if application != APPLICATION || !(1..=3).contains(&version) {
         return Err(JournalError::new(JournalErrorKind::UnsupportedSchema));
     }
     if version < 2 {
@@ -259,11 +259,27 @@ fn initialize(connection: &mut Connection) -> Result<()> {
             .pragma_update(None, "user_version", 2)
             .map_err(|_| storage())?;
     }
+    if version < 3 {
+        verify_schema(
+            &transaction,
+            &[
+                include_str!("journal/schema.sql"),
+                include_str!("updates/schema.sql"),
+            ],
+        )?;
+        transaction
+            .execute_batch(include_str!("updates/consumers.sql"))
+            .map_err(|_| storage())?;
+        transaction
+            .pragma_update(None, "user_version", 3)
+            .map_err(|_| storage())?;
+    }
     verify_schema(
         &transaction,
         &[
             include_str!("journal/schema.sql"),
             include_str!("updates/schema.sql"),
+            include_str!("updates/consumers.sql"),
         ],
     )?;
     transaction.commit().map_err(|_| storage())?;

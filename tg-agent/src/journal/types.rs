@@ -63,6 +63,7 @@ pub struct JournalOptions {
     pub(crate) max_update_entries: usize,
     pub(crate) max_update_bytes: usize,
     pub(crate) max_update_feeds: usize,
+    pub(crate) max_update_consumers: usize,
 }
 impl Default for JournalOptions {
     fn default() -> Self {
@@ -76,10 +77,15 @@ impl Default for JournalOptions {
             max_update_entries: 100_000,
             max_update_bytes: 64 * 1024 * 1024,
             max_update_feeds: 64,
+            max_update_consumers: 256,
         }
     }
 }
 impl JournalOptions {
+    pub fn max_update_consumers(mut self, value: usize) -> Self {
+        self.max_update_consumers = value;
+        self
+    }
     pub fn max_update_entries(mut self, value: usize) -> Self {
         self.max_update_entries = value;
         self
@@ -131,6 +137,8 @@ impl JournalOptions {
             || self.max_update_bytes == 0
             || self.max_update_feeds == 0
             || self.max_update_feeds > 1024
+            || self.max_update_consumers == 0
+            || self.max_update_consumers > 1_000_000
             || update_bound.is_none_or(|value| value > i64::MAX as u128)
         {
             return Err(JournalError::new(JournalErrorKind::Validation));

@@ -228,6 +228,66 @@ pub struct UpdatePage {
     pub(super) next_cursor: UpdateCursor,
     pub(super) has_more: bool,
 }
+
+#[derive(Clone)]
+pub struct ConsumerLease {
+    pub(super) profile: String,
+    pub(super) bot_id: i64,
+    pub(super) consumer_id: String,
+    pub(super) revision: i64,
+    pub(super) issuer: String,
+    pub(super) until_ms: i64,
+}
+impl ConsumerLease {
+    pub fn expires_at_ms(&self) -> i64 {
+        self.until_ms
+    }
+}
+impl fmt::Debug for ConsumerLease {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConsumerLease").finish_non_exhaustive()
+    }
+}
+#[derive(Clone)]
+pub struct ConsumerAck {
+    pub(super) lease: ConsumerLease,
+    pub(super) start: i64,
+    pub(super) end: i64,
+}
+impl fmt::Debug for ConsumerAck {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConsumerAck").finish_non_exhaustive()
+    }
+}
+pub struct ConsumerBatch {
+    pub(super) page: UpdatePage,
+    pub(super) acknowledgement: ConsumerAck,
+}
+impl ConsumerBatch {
+    pub fn events(&self) -> &[StoredUpdate] {
+        self.page.events()
+    }
+    pub fn has_more(&self) -> bool {
+        self.page.has_more()
+    }
+    pub fn into_parts(self) -> (Vec<tg::Update>, ConsumerAck) {
+        (
+            self.page
+                .events
+                .into_iter()
+                .map(StoredUpdate::into_update)
+                .collect(),
+            self.acknowledgement,
+        )
+    }
+}
+impl fmt::Debug for ConsumerBatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConsumerBatch")
+            .field("count", &self.page.events.len())
+            .finish_non_exhaustive()
+    }
+}
 impl UpdatePage {
     pub fn events(&self) -> &[StoredUpdate] {
         &self.events

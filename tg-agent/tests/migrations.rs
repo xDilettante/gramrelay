@@ -42,7 +42,7 @@ async fn migration_preserves_receipts_hashes_versions_and_another_workers_flight
         .unwrap()
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     let request = OperationRequest::new("bot", "alice", "done", "send_message", &payload).unwrap();
     assert!(
         matches!(journal.prepare(request).await.unwrap(),Preparation::Existing(record) if record.state() == OperationState::Succeeded && record.revision() == 7 && record.result().unwrap()["message_id"] == 42)
@@ -98,4 +98,50 @@ async fn an_unreviewed_old_schema_is_not_partially_migrated() {
             .unwrap(),
         0
     );
+}
+
+#[tokio::test]
+async fn version_two_migrates_without_rewinding_update_or_poll_positions() {
+    use tg_agent::updates::{SourceMode, UpdateFeed, UpdateOptions};
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("v2.sqlite");
+    let connection = version_one(&path);
+    connection
+        .execute_batch(include_str!("../src/updates/schema.sql"))
+        .unwrap();
+    connection.pragma_update(None, "user_version", 2).unwrap();
+    let payload=serde_json::to_vec(&json!({"update_id":10,"message":{"message_id":1,"date":1,"chat":{"id":1,"type":"private"},"text":"retained"}})).unwrap();
+    let hash = Sha256::digest(&payload);
+    let time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    connection.execute("INSERT INTO update_feeds(profile,bot_id,retention_ms,max_event_bytes,max_batch_bytes,last_sequence,last_received_at_ms,entry_count,byte_count,source_mode,source_revision,poll_offset,poll_revision,poll_updated_at_ms) VALUES('bot',1,604800000,1048576,1048576,1,?1,1,?2,'polling',2,11,8,?1)",params![time,payload.len() as i64]).unwrap();
+    connection.execute("INSERT INTO updates(profile,sequence,update_id,payload,payload_hash,chat_id,received_at_ms,expires_at_ms) VALUES('bot',1,10,?1,?2,1,?3,?4)",params![payload,hash.as_slice(),time,i64::MAX]).unwrap();
+    drop(connection);
+    let journal = Journal::open(&path, JournalOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        Connection::open(&path)
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+    let feed = UpdateFeed::open(journal.clone(), "bot", 1, UpdateOptions::default())
+        .await
+        .unwrap();
+    let lease = feed.claim_source(SourceMode::Polling).await.unwrap();
+    assert_eq!(
+        feed.poll_checkpoint(&lease).await.unwrap().offset(),
+        Some(11)
+    );
+    assert_eq!(
+        feed.read(None, 100).await.unwrap().events()[0]
+            .update()
+            .update_id,
+        10
+    );
+    journal.close().await.unwrap();
 }

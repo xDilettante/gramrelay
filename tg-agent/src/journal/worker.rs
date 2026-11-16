@@ -53,6 +53,7 @@ impl Database {
                         "UPDATE operations SET worker=NULL,lease_until_ms=NULL,revision=revision+1,updated_at_ms=?1 WHERE state='prepared' AND worker=?2",
                         params![time,worker]).map_err(|_|storage())?;
                         transaction.execute("UPDATE update_feeds SET source_worker=NULL,source_until_ms=NULL,source_revision=source_revision+1 WHERE source_worker=?1",[&worker]).map_err(|_|storage())?;
+                        transaction.execute("UPDATE update_consumers SET worker=NULL,lease_until_ms=NULL,revision=revision+1 WHERE worker=?1",[&worker]).map_err(|_|storage())?;
                         transaction.commit().map_err(|_|storage())
                     })();
                     let closed = connection.close().map_err(|_|storage());

@@ -1,4 +1,5 @@
 //! Durable incoming updates. Storage capabilities do not grant permission to read Telegram data.
+mod consumer;
 mod poll;
 mod types;
 use crate::journal::{
@@ -163,33 +164,89 @@ impl UpdateFeed {
         }
         let feed = self.clone();
         let cursor = cursor.cloned();
-        self.journal.run(move |connection,_,_|{
-            let transaction=connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_|storage())?;
-            let (last,stored_floor):(i64,i64)=transaction.query_row("SELECT last_sequence,floor_sequence FROM update_feeds WHERE profile=?1",[&feed.profile],|row|Ok((row.get(0)?,row.get(1)?))).map_err(|_|storage())?;
-            let expired:i64=transaction.query_row("SELECT COALESCE(MAX(sequence),0) FROM updates WHERE profile=?1 AND expires_at_ms<=?2",params![feed.profile,now()?],|row|row.get(0)).map_err(|_|storage())?;
-            let floor=stored_floor.max(expired);let start=cursor.as_ref().map_or(floor,|cursor|cursor.sequence);
-            if start<floor{return Err(JournalError::new(JournalErrorKind::CursorExpired));}
-            if start>last{return Err(JournalError::new(JournalErrorKind::Validation));}
-            let mut events=Vec::new();let mut total=0usize;let mut end=start;
-            {
-                let mut statement=transaction.prepare("SELECT sequence,payload,payload_hash FROM updates WHERE profile=?1 AND sequence>?2 ORDER BY sequence LIMIT ?3").map_err(|_|storage())?;
-                let mut rows=statement.query(params![feed.profile,start,limit as i64]).map_err(|_|storage())?;
-                while let Some(row)=rows.next().map_err(|_|storage())?{
-                    let sequence:i64=row.get(0).map_err(|_|storage())?;let payload:Vec<u8>=row.get(1).map_err(|_|storage())?;
-                    if payload.len()>feed.options.max_event_bytes{return Err(storage());}
-                    if payload.len()>feed.options.max_batch_bytes-total{break;}
-                    let hash:Vec<u8>=row.get(2).map_err(|_|storage())?;
-                    if hash.as_slice()!=Sha256::digest(&payload).as_slice(){return Err(storage());}
-                    let update:tg::Update=serde_json::from_slice(&payload).map_err(|_|storage())?;
-                    total+=payload.len();end=sequence;
-                    events.push(StoredUpdate{cursor:UpdateCursor{profile:feed.profile.clone(),sequence},update});
-                }
-            }
-            let has_more=end<last;
-            transaction.commit().map_err(|_|storage())?;
-            Ok(UpdatePage{events,next_cursor:UpdateCursor{profile:feed.profile,sequence:end},has_more})
-        }).await
+        self.journal
+            .run(move |connection, _, _| {
+                let transaction = connection
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .map_err(|_| storage())?;
+                let page = read_page(&transaction, &feed, cursor.as_ref(), limit, now()?)?;
+                transaction.commit().map_err(|_| storage())?;
+                Ok(page)
+            })
+            .await
     }
+}
+fn feed_bounds(connection: &Connection, profile: &str, time: i64) -> Result<(i64, i64)> {
+    let (last, floor): (i64, i64) = connection
+        .query_row(
+            "SELECT last_sequence,floor_sequence FROM update_feeds WHERE profile=?1",
+            [profile],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| storage())?;
+    let expired: i64 = connection
+        .query_row(
+            "SELECT COALESCE(MAX(sequence),0) FROM updates WHERE profile=?1 AND expires_at_ms<=?2",
+            params![profile, time],
+            |row| row.get(0),
+        )
+        .map_err(|_| storage())?;
+    Ok((last, floor.max(expired)))
+}
+fn read_page(
+    connection: &Connection,
+    feed: &UpdateFeed,
+    cursor: Option<&UpdateCursor>,
+    limit: usize,
+    time: i64,
+) -> Result<UpdatePage> {
+    let (last, floor) = feed_bounds(connection, &feed.profile, time)?;
+    let start = cursor.map_or(floor, |cursor| cursor.sequence);
+    if start < floor {
+        return Err(JournalError::new(JournalErrorKind::CursorExpired));
+    }
+    if start > last {
+        return Err(JournalError::new(JournalErrorKind::Validation));
+    }
+    let mut events = Vec::new();
+    let mut total = 0usize;
+    let mut end = start;
+    let mut statement=connection.prepare("SELECT sequence,payload,payload_hash FROM updates WHERE profile=?1 AND sequence>?2 ORDER BY sequence LIMIT ?3").map_err(|_|storage())?;
+    let mut rows = statement
+        .query(params![feed.profile, start, limit as i64])
+        .map_err(|_| storage())?;
+    while let Some(row) = rows.next().map_err(|_| storage())? {
+        let sequence: i64 = row.get(0).map_err(|_| storage())?;
+        let payload: Vec<u8> = row.get(1).map_err(|_| storage())?;
+        if payload.len() > feed.options.max_event_bytes {
+            return Err(storage());
+        }
+        if payload.len() > feed.options.max_batch_bytes - total {
+            break;
+        }
+        let hash: Vec<u8> = row.get(2).map_err(|_| storage())?;
+        if hash.as_slice() != Sha256::digest(&payload).as_slice() {
+            return Err(storage());
+        }
+        let update: tg::Update = serde_json::from_slice(&payload).map_err(|_| storage())?;
+        total += payload.len();
+        end = sequence;
+        events.push(StoredUpdate {
+            cursor: UpdateCursor {
+                profile: feed.profile.clone(),
+                sequence,
+            },
+            update,
+        });
+    }
+    Ok(UpdatePage {
+        events,
+        next_cursor: UpdateCursor {
+            profile: feed.profile.clone(),
+            sequence: end,
+        },
+        has_more: end < last,
+    })
 }
 struct EncodedUpdate {
     id: i64,

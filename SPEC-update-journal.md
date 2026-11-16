@@ -1,6 +1,8 @@
 # Durable updates and consumers (J2)
 
-The tg-agent update journal shares the existing bounded database worker, WAL/FULL settings and private storage contract. Migrate schema v1 to v2 transactionally without changing operation rows, hashes, fences or tombstones. Verify the reviewed old schema before migration and the complete new schema before committing. Unsupported/foreign versions remain rejected.
+The tg-agent update journal shares the existing bounded database worker, WAL/FULL settings and private storage contract. Migrate reviewed schema v1/v2 to v3 transactionally without changing operation rows, hashes, fences, tombstones, updates or poll checkpoints. Verify the reviewed old schema before migration and the complete new schema before committing. Unsupported/foreign versions remain rejected.
+
+JournalOptions.max_update_consumers bounds the total number of durable consumer IDs (256 by default, at most 1,000,000). Released consumers retain their positions and count toward this quota. A new consumer starts at the current retention floor; an existing consumer never silently skips a gap. Lease and acknowledgement tokens bind the issuing database instance as well as the feed, consumer and generation. They are private in-process proofs, not serializable grants.
 
 A feed permanently binds one host profile to one numeric bot identity; aliases for the same bot in one database and rebinding a profile are rejected. The host verifies identity before starting a managed network collector. Feed policy is immutable across openings: retention (7 days by default), per-event bytes (1 MiB), batch/read bytes (1 MiB). Journal-wide defaults bound 64 feeds, 100,000 retained updates and 64 MiB of payloads. Limit overflow/configuration errors fail before acceptance. Capacity never evicts unexpired events.
 
