@@ -16,6 +16,7 @@ pub enum JournalErrorKind {
     UnsupportedSchema,
     Closed,
     CursorExpired,
+    QuotaExceeded,
 }
 /// Safe storage diagnostics. They do not determine whether a prior Telegram action succeeded.
 #[derive(Debug)]
@@ -41,6 +42,7 @@ impl JournalError {
             JournalErrorKind::UnsupportedSchema => "journal_schema",
             JournalErrorKind::Closed => "journal_closed",
             JournalErrorKind::CursorExpired => "updates_cursor_expired",
+            JournalErrorKind::QuotaExceeded => "journal_quota_exceeded",
         }
     }
 }
@@ -64,6 +66,7 @@ pub struct JournalOptions {
     pub(crate) max_update_bytes: usize,
     pub(crate) max_update_feeds: usize,
     pub(crate) max_update_consumers: usize,
+    pub(crate) max_budget_ledgers: usize,
 }
 impl Default for JournalOptions {
     fn default() -> Self {
@@ -78,10 +81,15 @@ impl Default for JournalOptions {
             max_update_bytes: 64 * 1024 * 1024,
             max_update_feeds: 64,
             max_update_consumers: 256,
+            max_budget_ledgers: 4096,
         }
     }
 }
 impl JournalOptions {
+    pub fn max_budget_ledgers(mut self, value: usize) -> Self {
+        self.max_budget_ledgers = value;
+        self
+    }
     pub fn max_update_consumers(mut self, value: usize) -> Self {
         self.max_update_consumers = value;
         self
@@ -139,6 +147,8 @@ impl JournalOptions {
             || self.max_update_feeds > 1024
             || self.max_update_consumers == 0
             || self.max_update_consumers > 1_000_000
+            || self.max_budget_ledgers == 0
+            || self.max_budget_ledgers > 1_000_000
             || update_bound.is_none_or(|value| value > i64::MAX as u128)
         {
             return Err(JournalError::new(JournalErrorKind::Validation));
@@ -325,6 +335,12 @@ pub struct AttemptFailure {
     pub(super) migrate_to_chat_id: Option<i64>,
 }
 impl AttemptFailure {
+    pub fn http_status(&self) -> Option<u16> {
+        self.http_status
+    }
+    pub fn api_error_code(&self) -> Option<i64> {
+        self.api_error_code
+    }
     pub fn kind(&self) -> &str {
         &self.kind
     }
@@ -345,6 +361,29 @@ pub struct Completion {
     pub(super) failure: Option<AttemptFailure>,
 }
 impl Completion {
+    #[cfg(feature = "executor")]
+    pub(crate) fn executor_not_started() -> Self {
+        Self::executor_failure(OperationState::Prepared, "not_sent")
+    }
+    #[cfg(feature = "executor")]
+    pub(crate) fn executor_uncertain() -> Self {
+        Self::executor_failure(OperationState::Unknown, "unknown")
+    }
+    #[cfg(feature = "executor")]
+    fn executor_failure(state: OperationState, outcome: &str) -> Self {
+        Self {
+            state,
+            result: None,
+            failure: Some(AttemptFailure {
+                kind: "executor".into(),
+                outcome: outcome.into(),
+                http_status: None,
+                api_error_code: None,
+                retry_after_secs: None,
+                migrate_to_chat_id: None,
+            }),
+        }
+    }
     pub fn succeeded(result: Value) -> Self {
         Self {
             state: OperationState::Succeeded,
@@ -440,7 +479,13 @@ pub(super) struct Lease {
 #[derive(Clone)]
 pub struct Prepared(pub(super) Lease);
 #[derive(Clone)]
-pub struct InFlight(pub(super) Lease);
+pub struct InFlight(pub(super) Lease, pub(super) i64);
+impl InFlight {
+    /// Persisted deadline of this attempt, including the operation lifetime cap.
+    pub fn lease_until_ms(&self) -> i64 {
+        self.1
+    }
+}
 #[derive(Debug)]
 pub enum Preparation {
     Ready(Prepared),

@@ -63,3 +63,14 @@ Include handle and immutable content metadata in the canonical operation fingerp
 4. files/send_document: registered immutable snapshots, durable metadata, strict handles, restoration/expiry, memory caps and scope/hash/TOCTOU abuse cases. Complete all eight actions, safe versioned output types, offline examples and focused adversarial review.
 
 Commands: cargo test --locked --workspace --all-targets --all-features; cargo test --locked --workspace --doc --all-features; cargo fmt --all -- --check; cargo clippy --locked --workspace --all-targets --all-features -- -D warnings; cargo audit. Run schema/migration and isolated feature checks appropriate to each increment. A1 completion requires all actions and abuse/recovery invariants, not just a passing send-message slice. A2/A3 publish the same typed schemas/semantics through CLI and official rmcp.
+
+Current implementation: increments 1 and 2 are integrated. execute supports
+send_message; the other seven typed actions explicitly return UnsupportedAction
+until increments 3/4. Policy-only dry-run remains local and reference lookup
+remains ContextRequired. Schema v4 freezes authorization.sql; later durable file
+registration metadata will require a subsequent reviewed migration, not an edit
+of v4. The current ledger capacity is configurable (4096 by default). Default
+executor concurrency/RPC/receipt budgets are 16/30 seconds/5 seconds. Tests cover
+ten policy, eight admission/storage, eleven end-to-end send/recovery and five
+migration cases. The offline authorized_send example makes one identity read and
+one send for two invocations. Full A1 and the architecture goal remain open.

@@ -6,7 +6,7 @@ publish = false
 description = "Durable and authorized Telegram actions for agents"
 
 [features]
-executor = []
+executor = ["tokio/time"]
 bot = ["tg/bot", "tokio/macros", "tokio/time"]
 webhook = ["bot", "tg/webhook", "tokio/net"]
 tracing = ["tg/tracing"]
@@ -38,3 +38,7 @@ required-features = ["bot"]
 [[example]]
 name = "durable_webhook"
 required-features = ["webhook"]
+
+[[example]]
+name = "authorized_send"
+required-features = ["executor"]

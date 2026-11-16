@@ -24,6 +24,10 @@ impl fmt::Debug for UpdateFeed {
     }
 }
 impl UpdateFeed {
+    #[cfg(feature = "executor")]
+    pub(crate) fn executor_binding(&self) -> (&Journal, &str, i64) {
+        (&self.journal, &self.profile, self.bot_id)
+    }
     #[cfg(feature = "bot")]
     pub(crate) fn bot_id(&self) -> i64 {
         self.bot_id

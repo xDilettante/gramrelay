@@ -93,7 +93,7 @@ impl Budget {
     pub fn limit_values(&self) -> BudgetLimits {
         self.limits
     }
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         let limits = self.limits;
         if self.window < Duration::from_secs(1)
             || self.window > Duration::from_secs(365 * 24 * 3600)
@@ -246,6 +246,7 @@ pub struct PolicyStore {
     inner: Arc<RwLock<State>>,
 }
 /// Host capability, not JSON data. Valid only for one store/revision/exact request.
+#[derive(Clone)]
 pub struct Approval {
     issuer: Weak<RwLock<State>>,
     principal: Principal,
@@ -295,6 +296,17 @@ impl PolicyStore {
         now_ms: i64,
         approval: Option<&Approval>,
     ) -> Result<DryRun> {
+        self.authorized(principal, request, bot_id, now_ms, approval)
+            .map(|(dry, _)| dry)
+    }
+    pub(crate) fn authorized(
+        &self,
+        principal: &Principal,
+        request: &Request,
+        bot_id: i64,
+        now_ms: i64,
+        approval: Option<&Approval>,
+    ) -> Result<(DryRun, Grant)> {
         let state = self.inner.read().map_err(|_| invalid_policy())?;
         let entry = state
             .grants
@@ -317,12 +329,15 @@ impl PolicyStore {
                 return Err(ExecutorError::new(ExecutorErrorKind::ApprovalRequired));
             }
         }
-        Ok(DryRun {
-            schema_version: 1,
-            action: request.action(),
-            is_write: request.action().is_write(),
-            grant_revision: entry.revision,
-        })
+        Ok((
+            DryRun {
+                schema_version: 1,
+                action: request.action(),
+                is_write: request.action().is_write(),
+                grant_revision: entry.revision,
+            },
+            entry.grant.clone(),
+        ))
     }
     /// Explicit host confirmation. Approval includes operation_id, so the same
     /// intent under a fresh operation key needs fresh confirmation.

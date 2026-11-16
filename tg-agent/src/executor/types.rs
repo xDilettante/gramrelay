@@ -14,17 +14,34 @@ pub enum ExecutorErrorKind {
     ApprovalRequired,
     ContextRequired,
     Capacity,
+    Conflict,
+    QuotaExceeded,
+    Storage,
+    Identity,
+    UnsupportedAction,
+    Uncertain,
 }
 #[derive(Debug)]
 pub struct ExecutorError {
     kind: ExecutorErrorKind,
+    outcome: Option<tg::EffectOutcome>,
 }
 impl ExecutorError {
     pub(super) fn new(kind: ExecutorErrorKind) -> Self {
-        Self { kind }
+        Self {
+            kind,
+            outcome: None,
+        }
     }
     pub fn kind(&self) -> ExecutorErrorKind {
         self.kind
+    }
+    pub fn outcome(&self) -> Option<tg::EffectOutcome> {
+        self.outcome
+    }
+    pub(super) fn with_outcome(mut self, outcome: tg::EffectOutcome) -> Self {
+        self.outcome = Some(outcome);
+        self
     }
     pub fn code(&self) -> &'static str {
         match self.kind {
@@ -34,6 +51,12 @@ impl ExecutorError {
             ExecutorErrorKind::ApprovalRequired => "executor_approval_required",
             ExecutorErrorKind::ContextRequired => "executor_context_required",
             ExecutorErrorKind::Capacity => "executor_capacity",
+            ExecutorErrorKind::Conflict => "executor_conflict",
+            ExecutorErrorKind::QuotaExceeded => "executor_quota_exceeded",
+            ExecutorErrorKind::Storage => "executor_storage",
+            ExecutorErrorKind::Identity => "executor_identity",
+            ExecutorErrorKind::UnsupportedAction => "executor_unsupported_action",
+            ExecutorErrorKind::Uncertain => "executor_uncertain",
         }
     }
 }

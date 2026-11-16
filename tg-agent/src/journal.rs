@@ -1,4 +1,9 @@
 //! Persistent reservations and receipts. This module never performs a Telegram call.
+#[cfg(feature = "executor")]
+pub(crate) mod authorization;
+#[cfg(all(test, feature = "executor"))]
+#[path = "journal/authorization_tests.rs"]
+mod authorization_tests;
 pub(crate) mod types;
 mod worker;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
@@ -59,6 +64,14 @@ impl Journal {
     }
 
     pub async fn prepare(&self, request: OperationRequest) -> Result<Preparation> {
+        self.prepare_checked(request, |_, _, _| Ok(())).await
+    }
+
+    pub(crate) async fn prepare_checked(
+        &self,
+        request: OperationRequest,
+        bind: impl FnOnce(&Connection, &OperationRequest, bool) -> Result<()> + Send + 'static,
+    ) -> Result<Preparation> {
         self.run(move |connection, options, worker| {
             let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_| storage())?;
             let time = now()?;
@@ -69,11 +82,13 @@ impl Journal {
                 if stored.request.action != request.action || stored.request.hash != request.hash { return Err(JournalError::new(JournalErrorKind::Conflict)); }
                 refresh(&transaction, &mut stored, time)?;
                 if stored.operation.expired || stored.operation.state != OperationState::Prepared || stored.lease_until.is_some_and(|expires| expires > time) {
+                    bind(&transaction, &request, false)?;
                     transaction.commit().map_err(|_| storage())?;
                     return Ok(Preparation::Existing(stored.operation));
                 }
                 revision = stored.operation.revision.checked_add(1).ok_or_else(storage)?;
                 transaction.execute("UPDATE operations SET worker=?1,lease_until_ms=?2,revision=?3,updated_at_ms=?4 WHERE profile=?5 AND operation_id=?6", params![worker, lease_until.min(stored.operation.expires_at_ms), revision, time, request.profile, request.id]).map_err(|_| storage())?;
+                bind(&transaction, &request, false)?;
             } else {
                 let exists: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE profile=?1 AND operation_id=?2)",params![request.profile,request.id],|row|row.get(0)).map_err(|_|storage())?;
                 if exists { return Err(JournalError::new(JournalErrorKind::Denied)); }
@@ -83,6 +98,7 @@ impl Journal {
                 let expires = deadline(time, options.retention)?;
                 revision = 1;
                 transaction.execute("INSERT INTO operations(profile,operation_id,principal,action,payload_hash,state,revision,worker,lease_until_ms,created_at_ms,updated_at_ms,expires_at_ms) VALUES (?1,?2,?3,?4,?5,'prepared',1,?6,?7,?8,?8,?9)", params![request.profile,request.id,request.principal,request.action,request.hash.as_slice(),worker,lease_until.min(expires),time,expires]).map_err(|_| storage())?;
+                bind(&transaction, &request, true)?;
             }
             transaction.commit().map_err(|_| storage())?;
             Ok(Preparation::Ready(Prepared(types::Lease { request, revision, issuer:worker.into() })))
@@ -91,40 +107,90 @@ impl Journal {
 
     /// Commit this transition before polling any future that can perform a Telegram action.
     pub async fn begin(&self, prepared: Prepared) -> Result<InFlight> {
+        self.begin_checked(prepared, |_, _, _, _| Ok(())).await
+    }
+
+    pub(crate) async fn begin_checked(
+        &self,
+        prepared: Prepared,
+        admit: impl FnOnce(&Connection, &JournalOptions, &OperationRequest, i64) -> Result<()>
+        + Send
+        + 'static,
+    ) -> Result<InFlight> {
         self.run(move |connection, options, worker| {
             let lease = prepared.0;
             if lease.issuer!=worker{return Err(JournalError::new(JournalErrorKind::LeaseLost));}
             let revision = lease.revision.checked_add(1).ok_or_else(storage)?;
             let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_| storage())?;
             let time = now()?;
-            let count = transaction.execute("UPDATE operations SET state='in_flight',revision=?1,lease_until_ms=min(?2,expires_at_ms),updated_at_ms=?3 WHERE profile=?4 AND operation_id=?5 AND principal=?6 AND worker=?7 AND revision=?8 AND state='prepared' AND lease_until_ms>?3 AND expires_at_ms>?3 AND expired=0", params![revision,deadline(time,options.lease)?,time,lease.request.profile,lease.request.id,lease.request.principal,worker,lease.revision]).map_err(|_| storage())?;
+            let count = transaction.execute("UPDATE operations SET state='in_flight',failure_json=NULL,revision=?1,lease_until_ms=min(?2,expires_at_ms),updated_at_ms=?3 WHERE profile=?4 AND operation_id=?5 AND principal=?6 AND worker=?7 AND revision=?8 AND state='prepared' AND lease_until_ms>?3 AND expires_at_ms>?3 AND expired=0", params![revision,deadline(time,options.lease)?,time,lease.request.profile,lease.request.id,lease.request.principal,worker,lease.revision]).map_err(|_| storage())?;
             if count != 1 { return Err(JournalError::new(JournalErrorKind::LeaseLost)); }
+            admit(&transaction, options, &lease.request, time)?;
+            let until = transaction.query_row("SELECT lease_until_ms FROM operations WHERE profile=?1 AND operation_id=?2", params![lease.request.profile,lease.request.id], |row| row.get(0)).map_err(|_| storage())?;
             transaction.commit().map_err(|_| storage())?;
-            Ok(InFlight(types::Lease { request: lease.request, revision,issuer:lease.issuer }))
+            Ok(InFlight(types::Lease { request: lease.request, revision,issuer:lease.issuer }, until))
         }).await
     }
 
     pub async fn complete(&self, flight: InFlight, completion: Completion) -> Result<Operation> {
-        self.run(move |connection, options, worker| {
+        self.complete_with_admission(flight, completion, false)
+            .await
+    }
+    #[cfg(feature = "executor")]
+    pub(crate) async fn complete_fenced(
+        &self,
+        flight: InFlight,
+        completion: Completion,
+    ) -> Result<Operation> {
+        self.complete_with_admission(flight, completion, true).await
+    }
+    async fn complete_with_admission(
+        &self,
+        flight: InFlight,
+        completion: Completion,
+        wait: bool,
+    ) -> Result<Operation> {
+        let action = move |connection: &mut Connection, options: &JournalOptions, worker: &str| {
             let lease = flight.0;
-            if lease.issuer!=worker{return Err(JournalError::new(JournalErrorKind::LeaseLost));}
-            let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_| storage())?;
+            if lease.issuer != worker {
+                return Err(JournalError::new(JournalErrorKind::LeaseLost));
+            }
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| storage())?;
             let (result, availability) = match completion.result {
-                Some(value) if options.retain_results => match types::encode(&value,options.max_result_bytes) {
-                    Ok(bytes) => (Some(String::from_utf8(bytes).map_err(|_| storage())?), ResultAvailability::Stored),
-                    Err(_) => (None,ResultAvailability::TooLarge),
-                },
-                Some(_) => (None,ResultAvailability::Disabled),
-                None => (None,ResultAvailability::NotApplicable),
+                Some(value) if options.retain_results => {
+                    match types::encode(&value, options.max_result_bytes) {
+                        Ok(bytes) => (
+                            Some(String::from_utf8(bytes).map_err(|_| storage())?),
+                            ResultAvailability::Stored,
+                        ),
+                        Err(_) => (None, ResultAvailability::TooLarge),
+                    }
+                }
+                Some(_) => (None, ResultAvailability::Disabled),
+                None => (None, ResultAvailability::NotApplicable),
             };
-            let failure = completion.failure.map(|value| serde_json::to_string(&value)).transpose().map_err(|_| storage())?;
+            let failure = completion
+                .failure
+                .map(|value| serde_json::to_string(&value))
+                .transpose()
+                .map_err(|_| storage())?;
             let count = transaction.execute("UPDATE operations SET state=?1,revision=revision+1,worker=NULL,lease_until_ms=NULL,updated_at_ms=?2,result_json=?3,result_availability=?4,failure_json=?5 WHERE profile=?6 AND operation_id=?7 AND principal=?8 AND worker=?9 AND revision=?10 AND state='in_flight'", params![completion.state.as_str(),now()?,result,availability.as_str(),failure,lease.request.profile,lease.request.id,lease.request.principal,worker,lease.revision]).map_err(|_| storage())?;
-            if count != 1 { return Err(JournalError::new(JournalErrorKind::LeaseLost)); }
-            let mut stored = load(&transaction,&lease.request.profile,&lease.request.id)?.ok_or_else(storage)?;
+            if count != 1 {
+                return Err(JournalError::new(JournalErrorKind::LeaseLost));
+            }
+            let mut stored = load(&transaction, &lease.request.profile, &lease.request.id)?
+                .ok_or_else(storage)?;
             refresh(&transaction, &mut stored, now()?)?;
             transaction.commit().map_err(|_| storage())?;
             Ok(stored.operation)
-        }).await
+        };
+        if wait {
+            self.run_fenced(action).await
+        } else {
+            self.run(action).await
+        }
     }
 
     /// The host must also check current grants before disclosing this snapshot.
@@ -255,7 +321,7 @@ fn initialize(connection: &mut Connection) -> Result<()> {
         transaction
             .pragma_update(None, "application_id", APPLICATION)
             .map_err(|_| storage())?;
-    } else if application != APPLICATION || !(1..=3).contains(&version) {
+    } else if application != APPLICATION || !(1..=4).contains(&version) {
         return Err(JournalError::new(JournalErrorKind::UnsupportedSchema));
     }
     if version < 2 {
@@ -282,12 +348,29 @@ fn initialize(connection: &mut Connection) -> Result<()> {
             .pragma_update(None, "user_version", 3)
             .map_err(|_| storage())?;
     }
+    if version < 4 {
+        verify_schema(
+            &transaction,
+            &[
+                include_str!("journal/schema.sql"),
+                include_str!("updates/schema.sql"),
+                include_str!("updates/consumers.sql"),
+            ],
+        )?;
+        transaction
+            .execute_batch(include_str!("journal/authorization.sql"))
+            .map_err(|_| storage())?;
+        transaction
+            .pragma_update(None, "user_version", 4)
+            .map_err(|_| storage())?;
+    }
     verify_schema(
         &transaction,
         &[
             include_str!("journal/schema.sql"),
             include_str!("updates/schema.sql"),
             include_str!("updates/consumers.sql"),
+            include_str!("journal/authorization.sql"),
         ],
     )?;
     transaction.commit().map_err(|_| storage())?;
@@ -324,7 +407,15 @@ fn verify_schema(connection: &Connection, schemas: &[&str]) -> Result<()> {
         .map(str::trim)
         .filter(|sql| !sql.is_empty())
     {
-        let name = expected.split_whitespace().nth(2).ok_or_else(storage)?;
+        let name_index = if expected.starts_with("CREATE UNIQUE INDEX ") {
+            3
+        } else {
+            2
+        };
+        let name = expected
+            .split_whitespace()
+            .nth(name_index)
+            .ok_or_else(storage)?;
         let actual: Option<String> = connection
             .query_row(
                 "SELECT sql FROM sqlite_schema WHERE name=?1",

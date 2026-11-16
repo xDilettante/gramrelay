@@ -4,7 +4,12 @@
 //! the executor must recheck the current grant when admitting and disclosing work.
 
 mod policy;
+mod runtime;
 mod types;
+
+pub use runtime::{
+    ExecutionResult, Executor, ExecutorOptions, FailureReceipt, MessageReceipt, OperationReceipt,
+};
 
 pub use policy::{
     Approval, Budget, BudgetLimits, ChatScope, DryRun, Grant, PolicyStore, Principal,

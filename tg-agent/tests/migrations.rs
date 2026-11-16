@@ -42,7 +42,7 @@ async fn migration_preserves_receipts_hashes_versions_and_another_workers_flight
         .unwrap()
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     let request = OperationRequest::new("bot", "alice", "done", "send_message", &payload).unwrap();
     assert!(
         matches!(journal.prepare(request).await.unwrap(),Preparation::Existing(record) if record.state() == OperationState::Succeeded && record.revision() == 7 && record.result().unwrap()["message_id"] == 42)
@@ -127,7 +127,7 @@ async fn version_two_migrates_without_rewinding_update_or_poll_positions() {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        3
+        4
     );
     let feed = UpdateFeed::open(journal.clone(), "bot", 1, UpdateOptions::default())
         .await
@@ -144,4 +144,93 @@ async fn version_two_migrates_without_rewinding_update_or_poll_positions() {
         10
     );
     journal.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn version_three_keeps_active_consumer_ownership_and_validates_the_new_unique_index() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("v3.sqlite");
+    let connection = version_one(&path);
+    connection
+        .execute_batch(include_str!("../src/updates/schema.sql"))
+        .unwrap();
+    connection
+        .execute_batch(include_str!("../src/updates/consumers.sql"))
+        .unwrap();
+    connection.pragma_update(None, "user_version", 3).unwrap();
+    connection.execute("INSERT INTO update_feeds(profile,bot_id,retention_ms,max_event_bytes,max_batch_bytes) VALUES('bot',123,604800000,1048576,1048576)",[]).unwrap();
+    connection.execute("INSERT INTO update_consumers(profile,consumer_id,position,worker,revision,lease_until_ms) VALUES('bot','retained',0,'other-worker',7,?1)",[i64::MAX]).unwrap();
+    drop(connection);
+    let journal = Journal::open(&path, JournalOptions::default())
+        .await
+        .unwrap();
+    journal.close().await.unwrap();
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        4
+    );
+    let retained: (String, i64, i64) = connection
+        .query_row(
+            "SELECT worker,revision,lease_until_ms FROM update_consumers",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(retained, ("other-worker".into(), 7, i64::MAX));
+    connection
+        .execute("DROP INDEX executor_callback_admission", [])
+        .unwrap();
+    drop(connection);
+    assert_eq!(
+        Journal::open(&path, JournalOptions::default())
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::UnsupportedSchema
+    );
+}
+
+#[tokio::test]
+async fn malformed_version_three_is_not_partially_upgraded_to_executor_storage() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("invalid-v3.sqlite");
+    let connection = version_one(&path);
+    connection
+        .execute_batch(include_str!("../src/updates/schema.sql"))
+        .unwrap();
+    connection
+        .execute_batch(include_str!("../src/updates/consumers.sql"))
+        .unwrap();
+    connection.pragma_update(None, "user_version", 3).unwrap();
+    connection
+        .execute("DROP INDEX update_consumers_owner", [])
+        .unwrap();
+    drop(connection);
+    assert_eq!(
+        Journal::open(&path, JournalOptions::default())
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::UnsupportedSchema
+    );
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE name='executor_budgets'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
 }
