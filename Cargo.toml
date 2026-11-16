@@ -8,17 +8,22 @@ description = "A predictable Telegram Bot API client for humans and agents"
 [features]
 default = ["bot"]
 bot = ["tokio-util/rt", "tokio/signal"]
+tracing = ["dep:tracing"]
+metrics = ["dep:metrics"]
 
 [dependencies]
 fastrand = "2.5"
+metrics = { version = "0.24", optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "multipart", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["io"] }
+tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "json", "registry", "std"] }
 wiremock = "0.6"
 
 [lints.rust]

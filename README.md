@@ -234,6 +234,12 @@ python tools/schema.py check
 
 Для обновления схемы разработчик отдельно сохраняет официальную страницу в target/schema-cache/api.html и запускает python tools/schema.py import --source target/schema-cache/api.html. Изменение версии или количества определений требует явного пересмотра schema/expected.json. Файл schema/overrides.json содержит проверенные исключения; ненужные исключения и неизвестные типы вызывают ошибку.
 
+## Диагностика
+
+Опции tracing и metrics подключаются отдельно и выключены по умолчанию. Приложение устанавливает собственный subscriber/recorder; библиотека не меняет глобальную конфигурацию. Target tg создаёт span tg.request с локальным attempt_id и событие request_finished с method, result, outcome, error_kind и duration_seconds. Span связан с текущим span приложения. Токены, URL, ID чатов, тексты и файлы не включаются.
+
+Метрики tg.request.attempts, tg.request.duration_seconds и tg.request.active позволяют считать ошибки/отмены, строить перцентили и наблюдать активные попытки. Метки ограничены именами методов и фиксированными категориями; attempt_id не используется как метка. Каждая повторная попытка учитывается отдельно. Отмена после отправки имеет outcome=unknown; перегрузка — not_sent. Локальная валидация до общего пути исполнения не создаёт попытку. Exporter и histogram buckets выбирает приложение.
+
 ## Примеры и проверка
 
 Из корня проекта:
@@ -259,4 +265,4 @@ cargo run --example polling
 
 Проверки выполнялись на Windows x86_64, Rust 1.98.0: 106 unit/integration-тестов и 3 doctest, а также 21 тест инструментов схемы. Структурные fixtures охватывают все 425 типов и 193 метода, включая обязательные поля, запрет неизвестных параметров запроса и chat scope каждого известного события. MSRV и работа на Linux/macOS пока не подтверждены. Проверяются JSON/multipart, callback, файлы, локальные отказы, 429, 5xx, неизвестные ответы, тайм-ауты, ограничения нагрузки, redirects, секреты в диагностике, маршрутизация, polling, порядок событий и остановка. Живые вызовы Telegram при разработке не выполнялись.
 
-Следующие этапы: tracing/metrics, публичный test-kit, постоянный журнал и webhook endpoint, CLI/MCP, затем отдельный MTProto-клиент. Полная цель остаётся активной. Источники контрактов: [docs/SOURCES.md](docs/SOURCES.md). План: [tasks/todo.md](tasks/todo.md).
+Следующие этапы: публичный test-kit, постоянный журнал и webhook endpoint, CLI/MCP, затем отдельный MTProto-клиент. Полная цель остаётся активной. Источники контрактов: [docs/SOURCES.md](docs/SOURCES.md). План: [tasks/todo.md](tasks/todo.md).

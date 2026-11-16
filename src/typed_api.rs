@@ -109,6 +109,7 @@ impl<'a, M: Method> IntoFuture for Call<'a, M> {
                 .transpose()?;
             self.bot
                 .perform_with_timeout(
+                    M::NAME,
                     async {
                         let params = serde_json::to_value(&self.params)
                             .map_err(|_| Error::local(ErrorKind::Validation, "parameters"))?;

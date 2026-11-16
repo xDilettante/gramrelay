@@ -5,13 +5,17 @@ use std::future::IntoFuture;
 impl Bot {
     /// Read the bot's identity. Does not change webhook or polling configuration.
     pub async fn get_me(&self) -> Result<User> {
-        self.perform(async { Ok(self.post("getMe")?.json(&serde_json::json!({}))) })
-            .await
+        self.perform("getMe", async {
+            Ok(self.post("getMe")?.json(&serde_json::json!({})))
+        })
+        .await
     }
 
     pub async fn get_webhook_info(&self) -> Result<WebhookInfo> {
-        self.perform(async { Ok(self.post("getWebhookInfo")?.json(&serde_json::json!({}))) })
-            .await
+        self.perform("getWebhookInfo", async {
+            Ok(self.post("getWebhookInfo")?.json(&serde_json::json!({})))
+        })
+        .await
     }
 
     /// Fetch updates manually. The caller owns offset acknowledgement and poller coordination.
@@ -79,7 +83,9 @@ impl<'a> IntoFuture for GetUpdates<'a> {
                 return Err(Error::local(ErrorKind::Validation, "limit"));
             }
             self.bot
-                .perform(async { Ok(self.bot.post("getUpdates")?.json(&self.params)) })
+                .perform("getUpdates", async {
+                    Ok(self.bot.post("getUpdates")?.json(&self.params))
+                })
                 .await
         })
     }

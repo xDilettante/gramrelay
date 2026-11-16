@@ -108,6 +108,7 @@ pub(crate) async fn run_json<M: Method>(
         };
         let result = bot
             .perform_with_timeout(
+                M::NAME,
                 async {
                     if !params.attachment_references().is_empty() {
                         return Err(Error::local(ErrorKind::Validation, "attachments"));

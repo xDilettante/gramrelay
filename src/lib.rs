@@ -23,6 +23,7 @@ mod requests;
 mod retry;
 #[cfg(feature = "bot")]
 mod routing;
+mod telemetry;
 mod text;
 mod typed_api;
 mod types;

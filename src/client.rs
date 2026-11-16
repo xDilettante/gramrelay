@@ -155,18 +155,20 @@ impl Bot {
 
     pub(crate) async fn perform<T: DeserializeOwned>(
         &self,
+        method: &'static str,
         prepare: impl Future<Output = Result<RequestBuilder>>,
     ) -> Result<T> {
-        self.perform_with_timeout(prepare, None).await
+        self.perform_with_timeout(method, prepare, None).await
     }
 
     pub(crate) async fn perform_with_timeout<T: DeserializeOwned>(
         &self,
+        method: &'static str,
         prepare: impl Future<Output = Result<RequestBuilder>>,
         timeout: Option<Duration>,
     ) -> Result<T> {
         let limit = self.inner.max_response_bytes;
-        self.exchange(prepare, timeout, move |response| {
+        self.exchange(method, prepare, timeout, move |response| {
             decode_response(response, limit)
         })
         .await
@@ -174,42 +176,50 @@ impl Bot {
 
     pub(crate) async fn exchange<T, F: Future<Output = Result<T>>>(
         &self,
+        method: &'static str,
         prepare: impl Future<Output = Result<RequestBuilder>>,
         timeout: Option<Duration>,
         consume: impl FnOnce(reqwest::Response) -> F,
     ) -> Result<T> {
-        let _permit = self
-            .inner
-            .in_flight
-            .try_acquire()
-            .map_err(|_| Error::local(ErrorKind::Capacity, "max_in_flight"))?;
-        let mut dispatched = false;
-        let work = async {
-            let request = prepare
-                .await?
-                .build()
-                .map_err(|_| Error::local(ErrorKind::Validation, "request"))?;
-            dispatched = true;
-            let response = self
+        let mut attempt = crate::telemetry::Attempt::new(method);
+        let result = async {
+            let _permit = self
                 .inner
-                .http
-                .execute(request)
-                .await
-                .map_err(transport_error)?;
-            consume(response).await
-        };
-        let timeout = timeout.map_or(self.inner.timeout, |limit| limit.min(self.inner.timeout));
-        match tokio::time::timeout(timeout, work).await {
-            Ok(result) => result,
-            Err(_) => Err(Error::new(
-                ErrorKind::Timeout,
-                if dispatched {
-                    EffectOutcome::Unknown
-                } else {
-                    EffectOutcome::NotSent
-                },
-            )),
+                .in_flight
+                .try_acquire()
+                .map_err(|_| Error::local(ErrorKind::Capacity, "max_in_flight"))?;
+            let mut dispatched = false;
+            let work = async {
+                let request = prepare
+                    .await?
+                    .build()
+                    .map_err(|_| Error::local(ErrorKind::Validation, "request"))?;
+                dispatched = true;
+                attempt.dispatched();
+                let response = self
+                    .inner
+                    .http
+                    .execute(request)
+                    .await
+                    .map_err(transport_error)?;
+                consume(response).await
+            };
+            let timeout = timeout.map_or(self.inner.timeout, |limit| limit.min(self.inner.timeout));
+            match tokio::time::timeout(timeout, work).await {
+                Ok(result) => result,
+                Err(_) => Err(Error::new(
+                    ErrorKind::Timeout,
+                    if dispatched {
+                        EffectOutcome::Unknown
+                    } else {
+                        EffectOutcome::NotSent
+                    },
+                )),
+            }
         }
+        .await;
+        attempt.finish(&result);
+        result
     }
 }
 
@@ -423,7 +433,7 @@ mod tests {
             .build()
             .unwrap();
         let error = bot
-            .perform::<bool>(std::future::pending())
+            .perform::<bool>("getMe", std::future::pending())
             .await
             .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Timeout);

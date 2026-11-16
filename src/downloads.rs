@@ -44,6 +44,7 @@ impl Download<'_> {
         let limit = self.limit;
         self.bot
             .exchange(
+                "download",
                 async {
                     if limit == 0 {
                         return Err(Error::local(ErrorKind::Validation, "download_size"));

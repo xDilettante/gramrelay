@@ -113,6 +113,7 @@ impl<'a> IntoFuture for SendMessage<'a> {
             }
             self.bot
                 .perform_with_timeout(
+                    "sendMessage",
                     async { Ok(self.bot.post("sendMessage")?.json(&self.params)) },
                     timeout,
                 )
@@ -167,7 +168,7 @@ impl<'a> IntoFuture for AnswerCallbackQuery<'a> {
                 validate_text(text, "text", 0, 200)?;
             }
             self.bot
-                .perform::<crate::api::True>(async {
+                .perform::<crate::api::True>("answerCallbackQuery", async {
                     Ok(self.bot.post("answerCallbackQuery")?.json(&self.params))
                 })
                 .await
@@ -284,6 +285,7 @@ impl<'a> IntoFuture for SendDocument<'a> {
             }
             self.bot
                 .perform_with_timeout(
+                    "sendDocument",
                     async move {
                         let delivery = serde_json::to_value(&self.delivery)
                             .map_err(|_| Error::local(ErrorKind::Validation, "delivery"))?;
