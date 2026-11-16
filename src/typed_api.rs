@@ -98,7 +98,12 @@ impl<'a, M: Method> IntoFuture for Call<'a, M> {
                     let params = serde_json::to_value(&self.params)
                         .map_err(|_| Error::local(ErrorKind::Validation, "parameters"))?;
                     let references = self.params.attachment_references();
-                    validate_bindings(&params, &references, &self.attachments)?;
+                    validate_bindings(
+                        &params,
+                        &references,
+                        &self.attachments,
+                        self.bot.attachment_limit(),
+                    )?;
                     if self.attachments.is_empty() {
                         return Ok(self.bot.post(M::NAME)?.json(&params));
                     }
@@ -130,8 +135,9 @@ fn validate_bindings(
     params: &serde_json::Value,
     references: &BTreeSet<String>,
     files: &[(String, InputFile)],
+    limit: usize,
 ) -> crate::Result<()> {
-    if files.len() > 32 {
+    if files.len() > limit {
         return Err(Error::local(ErrorKind::Capacity, "attachments"));
     }
     let mut names = BTreeSet::new();

@@ -25,6 +25,7 @@ struct Inner {
     max_response_bytes: usize,
     max_upload_bytes: u64,
     max_download_bytes: u64,
+    max_attachments: usize,
     in_flight: Semaphore,
 }
 
@@ -37,6 +38,7 @@ pub struct BotBuilder {
     max_response_bytes: usize,
     max_upload_bytes: u64,
     max_download_bytes: u64,
+    max_attachments: usize,
     max_in_flight: usize,
 }
 
@@ -68,6 +70,7 @@ impl Bot {
             max_response_bytes: 1024 * 1024,
             max_upload_bytes: 50_000_000,
             max_download_bytes: 20_000_000,
+            max_attachments: 50,
             max_in_flight: 32,
         }
     }
@@ -106,6 +109,9 @@ impl Bot {
     }
     pub(crate) fn download_limit(&self) -> u64 {
         self.inner.max_download_bytes
+    }
+    pub(crate) fn attachment_limit(&self) -> usize {
+        self.inner.max_attachments
     }
 
     pub(crate) fn file_get(&self, path: &str) -> Result<RequestBuilder> {
@@ -234,6 +240,10 @@ impl BotBuilder {
         self.max_download_bytes = limit;
         self
     }
+    pub fn max_attachments(mut self, limit: usize) -> Self {
+        self.max_attachments = limit;
+        self
+    }
     /// Requests exceeding the limit fail immediately; no unbounded wait queue is created.
     pub fn max_in_flight(mut self, limit: usize) -> Self {
         self.max_in_flight = limit;
@@ -258,6 +268,7 @@ impl BotBuilder {
         if self.max_response_bytes == 0
             || self.max_upload_bytes == 0
             || self.max_download_bytes == 0
+            || self.max_attachments == 0
             || self.max_in_flight == 0
             || self.max_in_flight > Semaphore::MAX_PERMITS
         {
@@ -304,6 +315,7 @@ impl BotBuilder {
                 max_response_bytes: self.max_response_bytes,
                 max_upload_bytes: self.max_upload_bytes,
                 max_download_bytes: self.max_download_bytes,
+                max_attachments: self.max_attachments,
                 in_flight: Semaphore::new(self.max_in_flight),
             }),
         })

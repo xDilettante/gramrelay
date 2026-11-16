@@ -214,7 +214,13 @@ async fn files_open_on_await_and_local_failures_do_not_expose_paths() {
 #[tokio::test]
 async fn too_many_bindings_are_rejected_before_opening_any_files() {
     let server = MockServer::start().await;
-    let bot = bot(&server, 100);
+    let bot = Bot::builder(TOKEN)
+        .api_url(server.uri())
+        .allow_http_loopback(true)
+        .max_upload_bytes(100)
+        .max_attachments(32)
+        .build()
+        .unwrap();
     let mut call = bot.api().send_photo("attach://p".into());
     for index in 0..33 {
         call = call.attach(format!("file{index}"), InputFile::path("missing-file"));
@@ -223,4 +229,35 @@ async fn too_many_bindings_are_rejected_before_opening_any_files() {
     assert_eq!(error.kind(), ErrorKind::Capacity);
     assert_eq!(error.outcome(), EffectOutcome::NotSent);
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn the_default_cap_supports_fifty_rich_message_media_attachments() {
+    use tg::api::types::{InputRichBlock, InputRichBlockPhoto, InputRichMessage};
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"ok":true,"result":{"message_id":1,"date":1,"chat":{"id":1,"type":"private"}}}),
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let blocks: Vec<InputRichBlock> = (0..50)
+        .map(|index| {
+            InputRichBlockPhoto::new(InputMediaPhoto::new(format!("attach://image{index}"))).into()
+        })
+        .collect();
+    let rich = InputRichMessage::new().blocks(blocks);
+    let bot = bot(&server, 100);
+    let mut call = bot
+        .api()
+        .send_rich_message(rich)
+        .chat_id(ChatId::from(1).into());
+    for index in 0..50 {
+        call = call.attach(
+            format!("image{index}"),
+            InputFile::bytes(format!("{index}.bin"), vec![1]),
+        );
+    }
+    call.await.unwrap();
 }
