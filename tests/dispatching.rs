@@ -118,3 +118,63 @@ async fn invalid_batches_are_rejected_before_any_handler_and_timeouts_are_bounde
         ErrorKind::Timeout
     );
 }
+
+#[tokio::test]
+async fn cancellation_joins_running_handlers_without_admitting_pending_groups() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tg::CancellationToken;
+    struct Active(Arc<AtomicUsize>);
+    impl Drop for Active {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+    let bot = Bot::new("9998810:SYNTHETIC").unwrap();
+    let active = Arc::new(AtomicUsize::new(0));
+    let started = Arc::new(tokio::sync::Semaphore::new(0));
+    let router = Arc::new(
+        Router::with_state((active.clone(), started.clone())).on_update(|ctx| async move {
+            assert_ne!(
+                ctx.update.update_id, 3,
+                "pending groups must not be admitted after cancellation"
+            );
+            ctx.state().0.fetch_add(1, Ordering::SeqCst);
+            let _active = Active(ctx.state().0.clone());
+            ctx.state().1.add_permits(1);
+            std::future::pending().await
+        }),
+    );
+    let stop = CancellationToken::new();
+    let signal = stop.clone();
+    let task = tokio::spawn(async move {
+        bot.dispatch_batch_until(
+            router,
+            vec![event(1, 1), event(2, 2), event(3, 3)],
+            &DispatchOptions::default().max_concurrency(2),
+            signal,
+        )
+        .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), started.acquire_many(2))
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    stop.cancel();
+    let error = task.await.unwrap().unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Timeout);
+    assert_eq!(active.load(Ordering::SeqCst), 0);
+    let bot = Bot::new("9998811:SYNTHETIC").unwrap();
+    let stop = CancellationToken::new();
+    stop.cancel();
+    let error = bot
+        .dispatch_batch_until(
+            Arc::new(Router::new()),
+            vec![event(1, 1)],
+            &DispatchOptions::default(),
+            stop,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.outcome(), tg::EffectOutcome::NotSent);
+}

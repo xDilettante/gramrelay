@@ -1,4 +1,6 @@
-use crate::{Bot, ChatId, EffectOutcome, Error, ErrorKind, Result, Router, Update, User};
+use crate::{
+    Bot, CancellationToken, ChatId, EffectOutcome, Error, ErrorKind, Result, Router, Update, User,
+};
 use std::{
     collections::VecDeque,
     sync::Arc,
@@ -63,6 +65,19 @@ impl Bot {
         updates: Vec<Update>,
         options: &DispatchOptions,
     ) -> Result<()> {
+        self.dispatch_batch_until(router, updates, options, CancellationToken::new())
+            .await
+    }
+
+    /// Cancellation aborts and joins all admitted handler tasks before returning.
+    /// External effects already started by a handler may remain unknown.
+    pub async fn dispatch_batch_until<S: Send + Sync + 'static>(
+        &self,
+        router: Arc<Router<S>>,
+        updates: Vec<Update>,
+        options: &DispatchOptions,
+        stop: CancellationToken,
+    ) -> Result<()> {
         options.validate()?;
         router.validate()?;
         if updates.len() > 100
@@ -72,7 +87,10 @@ impl Bot {
         {
             return Err(Error::local(ErrorKind::Validation, "update_batch"));
         }
-        process_batch(self, router, updates, options).await
+        if stop.is_cancelled() {
+            return Err(Error::local(ErrorKind::Timeout, "dispatch_cancelled"));
+        }
+        process_batch(self, router, updates, options, stop).await
     }
 }
 
@@ -91,6 +109,7 @@ async fn process_batch<S: Send + Sync + 'static>(
     router: Arc<Router<S>>,
     updates: Vec<Update>,
     options: &DispatchOptions,
+    stop: CancellationToken,
 ) -> Result<()> {
     // Unknown scopes must not race a possibly related chat. This includes inline callbacks.
     let unscoped = updates.iter().any(|update| key(update) == Key::Global);
@@ -121,7 +140,19 @@ async fn process_batch<S: Send + Sync + 'static>(
         }
     }
     let mut failure = None;
-    while let Some(joined) = running.join_next().await {
+    loop {
+        let joined = tokio::select! {
+            biased;
+            _=stop.cancelled()=>{
+                running.abort_all();
+                while running.join_next().await.is_some() {}
+                return Err(Error::new(ErrorKind::Timeout,EffectOutcome::Unknown));
+            }
+            joined=running.join_next()=>joined,
+        };
+        let Some(joined) = joined else {
+            break;
+        };
         let result = joined.unwrap_or_else(|_| Err(Error::handler("handler_panic")));
         if let Err(error) = result
             && failure.is_none()
