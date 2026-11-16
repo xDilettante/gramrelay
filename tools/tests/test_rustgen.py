@@ -1,8 +1,9 @@
 import copy
+import hashlib
 import unittest
-from tools.schema import SchemaError, import_html
+from tools.schema import SchemaError, import_html, canonical
 from tools.tests.test_schema import FIXTURE
-from tools.rustgen import Model, generate_types, generate_type_fixtures
+from tools.rustgen import Model, generate_types, generate_type_fixtures, generate_methods, generate_method_fixtures
 
 
 class RustGeneratorTests(unittest.TestCase):
@@ -47,3 +48,21 @@ class RustGeneratorTests(unittest.TestCase):
         for name in schema['types']:
             self.assertEqual(fixtures.count(f'check::<{name}>('), 1)
         self.assertEqual(fixtures, generate_type_fixtures(schema))
+        fixtures = generate_method_fixtures(schema)
+        self.assertEqual(fixtures.count('    check::<'), len(schema['methods']))
+        self.assertEqual(fixtures, generate_method_fixtures(schema))
+
+    def test_method_policy_requires_exact_coverage_and_schema_identity(self):
+        schema = import_html(FIXTURE, {})
+        policy = {'schema_sha256': hashlib.sha256(canonical(schema).encode()).hexdigest(),
+                  'effects': {name: 'Write' for name in schema['methods']}}
+        source = generate_methods(schema, policy)
+        for name in schema['methods']:
+            self.assertIn(f'const NAME: &\'static str = "{name}";', source)
+        self.assertEqual(source, generate_methods(schema, policy))
+        policy['effects'].pop('sendMessage')
+        with self.assertRaisesRegex(SchemaError, 'exactly'):
+            generate_methods(schema, policy)
+        policy['schema_sha256'] = '0' * 64
+        with self.assertRaisesRegex(SchemaError, 'different schema'):
+            generate_methods(schema, policy)

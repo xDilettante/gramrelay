@@ -4577,6 +4577,46 @@ impl Contact {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum CopyMessageReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for CopyMessageReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for CopyMessageReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for CopyMessageReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for CopyMessageReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for CopyMessageReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
 /// Telegram [`CopyTextButton`](https://core.telegram.org/bots/api#copytextbutton).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -4753,6 +4793,151 @@ impl Document {
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 #[non_exhaustive]
+pub enum EditMessageCaptionResult {
+    Message(Box<Message>),
+    True(crate::api::True),
+}
+impl<'de> Deserialize<'de> for EditMessageCaptionResult {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.is_boolean() {
+            return serde_json::from_value(value).map(Self::True).map_err(D::Error::custom);
+        }
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["message_id", "date", "chat"], allowed: &["message_id", "message_thread_id", "direct_messages_topic", "from", "sender_chat", "sender_boost_count", "sender_business_bot", "sender_tag", "receiver_user", "ephemeral_message_id", "date", "guest_query_id", "business_connection_id", "chat", "forward_origin", "is_topic_message", "is_automatic_forward", "reply_to_message", "external_reply", "quote", "reply_to_story", "reply_to_checklist_task_id", "reply_to_poll_option_id", "via_bot", "guest_bot_caller_user", "guest_bot_caller_chat", "edit_date", "has_protected_content", "is_from_offline", "is_paid_post", "media_group_id", "author_signature", "paid_star_count", "text", "entities", "link_preview_options", "suggested_post_info", "effect_id", "rich_message", "animation", "audio", "document", "live_photo", "paid_media", "photo", "sticker", "story", "video", "video_note", "voice", "widget", "caption", "caption_entities", "show_caption_above_media", "has_media_spoiler", "checklist", "contact", "dice", "game", "poll", "venue", "location", "new_chat_members", "left_chat_member", "chat_owner_left", "chat_owner_changed", "new_chat_title", "new_chat_photo", "delete_chat_photo", "group_chat_created", "supergroup_chat_created", "channel_chat_created", "message_auto_delete_timer_changed", "migrate_to_chat_id", "migrate_from_chat_id", "pinned_message", "invoice", "successful_payment", "refunded_payment", "users_shared", "chat_shared", "gift", "unique_gift", "gift_upgrade_sent", "connected_website", "write_access_allowed", "passport_data", "proximity_alert_triggered", "boost_added", "chat_background_set", "checklist_tasks_done", "checklist_tasks_added", "community_chat_added", "community_chat_joined", "community_chat_removed", "direct_message_price_changed", "forum_topic_created", "forum_topic_edited", "forum_topic_closed", "forum_topic_reopened", "general_forum_topic_hidden", "general_forum_topic_unhidden", "giveaway_created", "giveaway", "giveaway_winners", "giveaway_completed", "managed_bot_created", "paid_message_price_changed", "paid_messages_waived", "poll_option_added", "poll_option_deleted", "suggested_post_approved", "suggested_post_approval_failed", "suggested_post_declined", "suggested_post_paid", "suggested_post_refunded", "ton_wallet_transfer", "video_chat_scheduled", "video_chat_started", "video_chat_ended", "video_chat_participants_invited", "web_app_data", "reply_markup"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::Message).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<Message> for EditMessageCaptionResult {
+    fn from(value: Message) -> Self { Self::Message(Box::new(value)) }
+}
+impl From<crate::api::True> for EditMessageCaptionResult {
+    fn from(value: crate::api::True) -> Self { Self::True(value) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum EditMessageLiveLocationResult {
+    Message(Box<Message>),
+    True(crate::api::True),
+}
+impl<'de> Deserialize<'de> for EditMessageLiveLocationResult {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.is_boolean() {
+            return serde_json::from_value(value).map(Self::True).map_err(D::Error::custom);
+        }
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["message_id", "date", "chat"], allowed: &["message_id", "message_thread_id", "direct_messages_topic", "from", "sender_chat", "sender_boost_count", "sender_business_bot", "sender_tag", "receiver_user", "ephemeral_message_id", "date", "guest_query_id", "business_connection_id", "chat", "forward_origin", "is_topic_message", "is_automatic_forward", "reply_to_message", "external_reply", "quote", "reply_to_story", "reply_to_checklist_task_id", "reply_to_poll_option_id", "via_bot", "guest_bot_caller_user", "guest_bot_caller_chat", "edit_date", "has_protected_content", "is_from_offline", "is_paid_post", "media_group_id", "author_signature", "paid_star_count", "text", "entities", "link_preview_options", "suggested_post_info", "effect_id", "rich_message", "animation", "audio", "document", "live_photo", "paid_media", "photo", "sticker", "story", "video", "video_note", "voice", "widget", "caption", "caption_entities", "show_caption_above_media", "has_media_spoiler", "checklist", "contact", "dice", "game", "poll", "venue", "location", "new_chat_members", "left_chat_member", "chat_owner_left", "chat_owner_changed", "new_chat_title", "new_chat_photo", "delete_chat_photo", "group_chat_created", "supergroup_chat_created", "channel_chat_created", "message_auto_delete_timer_changed", "migrate_to_chat_id", "migrate_from_chat_id", "pinned_message", "invoice", "successful_payment", "refunded_payment", "users_shared", "chat_shared", "gift", "unique_gift", "gift_upgrade_sent", "connected_website", "write_access_allowed", "passport_data", "proximity_alert_triggered", "boost_added", "chat_background_set", "checklist_tasks_done", "checklist_tasks_added", "community_chat_added", "community_chat_joined", "community_chat_removed", "direct_message_price_changed", "forum_topic_created", "forum_topic_edited", "forum_topic_closed", "forum_topic_reopened", "general_forum_topic_hidden", "general_forum_topic_unhidden", "giveaway_created", "giveaway", "giveaway_winners", "giveaway_completed", "managed_bot_created", "paid_message_price_changed", "paid_messages_waived", "poll_option_added", "poll_option_deleted", "suggested_post_approved", "suggested_post_approval_failed", "suggested_post_declined", "suggested_post_paid", "suggested_post_refunded", "ton_wallet_transfer", "video_chat_scheduled", "video_chat_started", "video_chat_ended", "video_chat_participants_invited", "web_app_data", "reply_markup"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::Message).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<Message> for EditMessageLiveLocationResult {
+    fn from(value: Message) -> Self { Self::Message(Box::new(value)) }
+}
+impl From<crate::api::True> for EditMessageLiveLocationResult {
+    fn from(value: crate::api::True) -> Self { Self::True(value) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum EditMessageMediaResult {
+    Message(Box<Message>),
+    True(crate::api::True),
+}
+impl<'de> Deserialize<'de> for EditMessageMediaResult {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.is_boolean() {
+            return serde_json::from_value(value).map(Self::True).map_err(D::Error::custom);
+        }
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["message_id", "date", "chat"], allowed: &["message_id", "message_thread_id", "direct_messages_topic", "from", "sender_chat", "sender_boost_count", "sender_business_bot", "sender_tag", "receiver_user", "ephemeral_message_id", "date", "guest_query_id", "business_connection_id", "chat", "forward_origin", "is_topic_message", "is_automatic_forward", "reply_to_message", "external_reply", "quote", "reply_to_story", "reply_to_checklist_task_id", "reply_to_poll_option_id", "via_bot", "guest_bot_caller_user", "guest_bot_caller_chat", "edit_date", "has_protected_content", "is_from_offline", "is_paid_post", "media_group_id", "author_signature", "paid_star_count", "text", "entities", "link_preview_options", "suggested_post_info", "effect_id", "rich_message", "animation", "audio", "document", "live_photo", "paid_media", "photo", "sticker", "story", "video", "video_note", "voice", "widget", "caption", "caption_entities", "show_caption_above_media", "has_media_spoiler", "checklist", "contact", "dice", "game", "poll", "venue", "location", "new_chat_members", "left_chat_member", "chat_owner_left", "chat_owner_changed", "new_chat_title", "new_chat_photo", "delete_chat_photo", "group_chat_created", "supergroup_chat_created", "channel_chat_created", "message_auto_delete_timer_changed", "migrate_to_chat_id", "migrate_from_chat_id", "pinned_message", "invoice", "successful_payment", "refunded_payment", "users_shared", "chat_shared", "gift", "unique_gift", "gift_upgrade_sent", "connected_website", "write_access_allowed", "passport_data", "proximity_alert_triggered", "boost_added", "chat_background_set", "checklist_tasks_done", "checklist_tasks_added", "community_chat_added", "community_chat_joined", "community_chat_removed", "direct_message_price_changed", "forum_topic_created", "forum_topic_edited", "forum_topic_closed", "forum_topic_reopened", "general_forum_topic_hidden", "general_forum_topic_unhidden", "giveaway_created", "giveaway", "giveaway_winners", "giveaway_completed", "managed_bot_created", "paid_message_price_changed", "paid_messages_waived", "poll_option_added", "poll_option_deleted", "suggested_post_approved", "suggested_post_approval_failed", "suggested_post_declined", "suggested_post_paid", "suggested_post_refunded", "ton_wallet_transfer", "video_chat_scheduled", "video_chat_started", "video_chat_ended", "video_chat_participants_invited", "web_app_data", "reply_markup"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::Message).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<Message> for EditMessageMediaResult {
+    fn from(value: Message) -> Self { Self::Message(Box::new(value)) }
+}
+impl From<crate::api::True> for EditMessageMediaResult {
+    fn from(value: crate::api::True) -> Self { Self::True(value) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum EditMessageReplyMarkupResult {
+    Message(Box<Message>),
+    True(crate::api::True),
+}
+impl<'de> Deserialize<'de> for EditMessageReplyMarkupResult {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.is_boolean() {
+            return serde_json::from_value(value).map(Self::True).map_err(D::Error::custom);
+        }
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["message_id", "date", "chat"], allowed: &["message_id", "message_thread_id", "direct_messages_topic", "from", "sender_chat", "sender_boost_count", "sender_business_bot", "sender_tag", "receiver_user", "ephemeral_message_id", "date", "guest_query_id", "business_connection_id", "chat", "forward_origin", "is_topic_message", "is_automatic_forward", "reply_to_message", "external_reply", "quote", "reply_to_story", "reply_to_checklist_task_id", "reply_to_poll_option_id", "via_bot", "guest_bot_caller_user", "guest_bot_caller_chat", "edit_date", "has_protected_content", "is_from_offline", "is_paid_post", "media_group_id", "author_signature", "paid_star_count", "text", "entities", "link_preview_options", "suggested_post_info", "effect_id", "rich_message", "animation", "audio", "document", "live_photo", "paid_media", "photo", "sticker", "story", "video", "video_note", "voice", "widget", "caption", "caption_entities", "show_caption_above_media", "has_media_spoiler", "checklist", "contact", "dice", "game", "poll", "venue", "location", "new_chat_members", "left_chat_member", "chat_owner_left", "chat_owner_changed", "new_chat_title", "new_chat_photo", "delete_chat_photo", "group_chat_created", "supergroup_chat_created", "channel_chat_created", "message_auto_delete_timer_changed", "migrate_to_chat_id", "migrate_from_chat_id", "pinned_message", "invoice", "successful_payment", "refunded_payment", "users_shared", "chat_shared", "gift", "unique_gift", "gift_upgrade_sent", "connected_website", "write_access_allowed", "passport_data", "proximity_alert_triggered", "boost_added", "chat_background_set", "checklist_tasks_done", "checklist_tasks_added", "community_chat_added", "community_chat_joined", "community_chat_removed", "direct_message_price_changed", "forum_topic_created", "forum_topic_edited", "forum_topic_closed", "forum_topic_reopened", "general_forum_topic_hidden", "general_forum_topic_unhidden", "giveaway_created", "giveaway", "giveaway_winners", "giveaway_completed", "managed_bot_created", "paid_message_price_changed", "paid_messages_waived", "poll_option_added", "poll_option_deleted", "suggested_post_approved", "suggested_post_approval_failed", "suggested_post_declined", "suggested_post_paid", "suggested_post_refunded", "ton_wallet_transfer", "video_chat_scheduled", "video_chat_started", "video_chat_ended", "video_chat_participants_invited", "web_app_data", "reply_markup"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::Message).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<Message> for EditMessageReplyMarkupResult {
+    fn from(value: Message) -> Self { Self::Message(Box::new(value)) }
+}
+impl From<crate::api::True> for EditMessageReplyMarkupResult {
+    fn from(value: crate::api::True) -> Self { Self::True(value) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum EditMessageTextResult {
+    Message(Box<Message>),
+    True(crate::api::True),
+}
+impl<'de> Deserialize<'de> for EditMessageTextResult {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.is_boolean() {
+            return serde_json::from_value(value).map(Self::True).map_err(D::Error::custom);
+        }
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["message_id", "date", "chat"], allowed: &["message_id", "message_thread_id", "direct_messages_topic", "from", "sender_chat", "sender_boost_count", "sender_business_bot", "sender_tag", "receiver_user", "ephemeral_message_id", "date", "guest_query_id", "business_connection_id", "chat", "forward_origin", "is_topic_message", "is_automatic_forward", "reply_to_message", "external_reply", "quote", "reply_to_story", "reply_to_checklist_task_id", "reply_to_poll_option_id", "via_bot", "guest_bot_caller_user", "guest_bot_caller_chat", "edit_date", "has_protected_content", "is_from_offline", "is_paid_post", "media_group_id", "author_signature", "paid_star_count", "text", "entities", "link_preview_options", "suggested_post_info", "effect_id", "rich_message", "animation", "audio", "document", "live_photo", "paid_media", "photo", "sticker", "story", "video", "video_note", "voice", "widget", "caption", "caption_entities", "show_caption_above_media", "has_media_spoiler", "checklist", "contact", "dice", "game", "poll", "venue", "location", "new_chat_members", "left_chat_member", "chat_owner_left", "chat_owner_changed", "new_chat_title", "new_chat_photo", "delete_chat_photo", "group_chat_created", "supergroup_chat_created", "channel_chat_created", "message_auto_delete_timer_changed", "migrate_to_chat_id", "migrate_from_chat_id", "pinned_message", "invoice", "successful_payment", "refunded_payment", "users_shared", "chat_shared", "gift", "unique_gift", "gift_upgrade_sent", "connected_website", "write_access_allowed", "passport_data", "proximity_alert_triggered", "boost_added", "chat_background_set", "checklist_tasks_done", "checklist_tasks_added", "community_chat_added", "community_chat_joined", "community_chat_removed", "direct_message_price_changed", "forum_topic_created", "forum_topic_edited", "forum_topic_closed", "forum_topic_reopened", "general_forum_topic_hidden", "general_forum_topic_unhidden", "giveaway_created", "giveaway", "giveaway_winners", "giveaway_completed", "managed_bot_created", "paid_message_price_changed", "paid_messages_waived", "poll_option_added", "poll_option_deleted", "suggested_post_approved", "suggested_post_approval_failed", "suggested_post_declined", "suggested_post_paid", "suggested_post_refunded", "ton_wallet_transfer", "video_chat_scheduled", "video_chat_started", "video_chat_ended", "video_chat_participants_invited", "web_app_data", "reply_markup"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::Message).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<Message> for EditMessageTextResult {
+    fn from(value: Message) -> Self { Self::Message(Box::new(value)) }
+}
+impl From<crate::api::True> for EditMessageTextResult {
+    fn from(value: crate::api::True) -> Self { Self::True(value) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
 pub enum EmojiType {
     EmojiTypeEmoji(Box<EmojiTypeEmoji>),
     EmojiTypeCustomEmoji(Box<EmojiTypeCustomEmoji>),
@@ -4830,13 +5015,13 @@ impl EmojiTypeEmoji {
 pub struct EncryptedCredentials {
     pub data: String,
     pub hash: String,
-    pub secret: String,
+    pub secret: crate::api::SecretString,
     #[serde(flatten)]
     unknown_fields: crate::wire::UnknownFields,
 }
 impl EncryptedCredentials {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(data: String, hash: String, secret: String) -> Self {
+    pub fn new(data: String, hash: String, secret: crate::api::SecretString) -> Self {
         Self {
             data,
             hash,
@@ -4936,7 +5121,7 @@ pub struct EphemeralMessageParameters {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receiver_user_id: Option<crate::UserId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub callback_query_id: Option<String>,
+    pub callback_query_id: Option<crate::CallbackQueryId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replace_callback_query_message: Option<bool>,
     #[serde(flatten)]
@@ -4959,7 +5144,7 @@ impl EphemeralMessageParameters {
         self.receiver_user_id = Some(value);
         self
     }
-    pub fn callback_query_id(mut self, value: String) -> Self {
+    pub fn callback_query_id(mut self, value: crate::CallbackQueryId) -> Self {
         self.callback_query_id = Some(value);
         self
     }
@@ -8079,7 +8264,7 @@ pub struct InputInvoiceMessageContent {
     pub description: String,
     pub payload: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_token: Option<String>,
+    pub provider_token: Option<crate::api::SecretString>,
     pub currency: String,
     pub prices: Vec<LabeledPrice>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -8143,7 +8328,7 @@ impl InputInvoiceMessageContent {
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
     }
-    pub fn provider_token(mut self, value: String) -> Self {
+    pub fn provider_token(mut self, value: crate::api::SecretString) -> Self {
         self.provider_token = Some(value);
         self
     }
@@ -16789,6 +16974,807 @@ impl RichTextUrl {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendAnimationReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendAnimationReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendAnimationReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendAnimationReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendAnimationReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendAnimationReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendAudioReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendAudioReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendAudioReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendAudioReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendAudioReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendAudioReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendContactReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendContactReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendContactReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendContactReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendContactReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendContactReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendDiceReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendDiceReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendDiceReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendDiceReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendDiceReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendDiceReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendDocumentReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendDocumentReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendDocumentReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendDocumentReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendDocumentReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendDocumentReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendLivePhotoReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendLivePhotoReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendLivePhotoReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendLivePhotoReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendLivePhotoReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendLivePhotoReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendLocationReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendLocationReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendLocationReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendLocationReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendLocationReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendLocationReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendMediaGroupMediaItem {
+    InputMediaAudio(Box<InputMediaAudio>),
+    InputMediaDocument(Box<InputMediaDocument>),
+    InputMediaLivePhoto(Box<InputMediaLivePhoto>),
+    InputMediaPhoto(Box<InputMediaPhoto>),
+    InputMediaVideo(Box<InputMediaVideo>),
+    Unknown(crate::api::UnknownVariant),
+}
+impl<'de> Deserialize<'de> for SendMediaGroupMediaItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value.get("type").and_then(serde_json::Value::as_str) {
+            Some("audio") => serde_json::from_value(value).map(Self::InputMediaAudio).map_err(D::Error::custom),
+            Some("document") => serde_json::from_value(value).map(Self::InputMediaDocument).map_err(D::Error::custom),
+            Some("live_photo") => serde_json::from_value(value).map(Self::InputMediaLivePhoto).map_err(D::Error::custom),
+            Some("photo") => serde_json::from_value(value).map(Self::InputMediaPhoto).map_err(D::Error::custom),
+            Some("video") => serde_json::from_value(value).map(Self::InputMediaVideo).map_err(D::Error::custom),
+            Some(_) => Ok(Self::Unknown(crate::api::UnknownVariant::new(value))),
+            None => Err(D::Error::custom("missing or invalid SendMediaGroupMediaItem discriminator")),
+        }
+    }
+}
+impl From<InputMediaAudio> for SendMediaGroupMediaItem {
+    fn from(value: InputMediaAudio) -> Self { Self::InputMediaAudio(Box::new(value)) }
+}
+impl From<InputMediaDocument> for SendMediaGroupMediaItem {
+    fn from(value: InputMediaDocument) -> Self { Self::InputMediaDocument(Box::new(value)) }
+}
+impl From<InputMediaLivePhoto> for SendMediaGroupMediaItem {
+    fn from(value: InputMediaLivePhoto) -> Self { Self::InputMediaLivePhoto(Box::new(value)) }
+}
+impl From<InputMediaPhoto> for SendMediaGroupMediaItem {
+    fn from(value: InputMediaPhoto) -> Self { Self::InputMediaPhoto(Box::new(value)) }
+}
+impl From<InputMediaVideo> for SendMediaGroupMediaItem {
+    fn from(value: InputMediaVideo) -> Self { Self::InputMediaVideo(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendMessageReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendMessageReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendMessageReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendMessageReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendMessageReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendMessageReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendPaidMediaReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendPaidMediaReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendPaidMediaReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendPaidMediaReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendPaidMediaReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendPaidMediaReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendPhotoReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendPhotoReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendPhotoReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendPhotoReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendPhotoReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendPhotoReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendPollReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendPollReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendPollReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendPollReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendPollReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendPollReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendRichMessageReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendRichMessageReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendRichMessageReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendRichMessageReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendRichMessageReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendRichMessageReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendSharedWidgetReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendSharedWidgetReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendSharedWidgetReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendSharedWidgetReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendSharedWidgetReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendSharedWidgetReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendStickerReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendStickerReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendStickerReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendStickerReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendStickerReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendStickerReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendVenueReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendVenueReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendVenueReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendVenueReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendVenueReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendVenueReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendVideoNoteReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendVideoNoteReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendVideoNoteReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendVideoNoteReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendVideoNoteReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendVideoNoteReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendVideoReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendVideoReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendVideoReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendVideoReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendVideoReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendVideoReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendVoiceReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendVoiceReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendVoiceReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendVoiceReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendVoiceReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendVoiceReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SendWidgetReplyMarkup {
+    InlineKeyboardMarkup(Box<InlineKeyboardMarkup>),
+    ReplyKeyboardMarkup(Box<ReplyKeyboardMarkup>),
+    ReplyKeyboardRemove(Box<ReplyKeyboardRemove>),
+    ForceReply(Box<ForceReply>),
+}
+impl<'de> Deserialize<'de> for SendWidgetReplyMarkup {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["inline_keyboard"], allowed: &["inline_keyboard", "force_reply"] },
+            crate::wire::ObjectShape { required: &["keyboard"], allowed: &["keyboard", "is_persistent", "resize_keyboard", "one_time_keyboard", "input_field_placeholder", "selective", "force_reply"] },
+            crate::wire::ObjectShape { required: &["remove_keyboard"], allowed: &["remove_keyboard", "selective"] },
+            crate::wire::ObjectShape { required: &["force_reply"], allowed: &["force_reply", "input_field_placeholder", "selective"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::InlineKeyboardMarkup).map_err(D::Error::custom),
+            1 => serde_json::from_value(value).map(Self::ReplyKeyboardMarkup).map_err(D::Error::custom),
+            2 => serde_json::from_value(value).map(Self::ReplyKeyboardRemove).map_err(D::Error::custom),
+            3 => serde_json::from_value(value).map(Self::ForceReply).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<InlineKeyboardMarkup> for SendWidgetReplyMarkup {
+    fn from(value: InlineKeyboardMarkup) -> Self { Self::InlineKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardMarkup> for SendWidgetReplyMarkup {
+    fn from(value: ReplyKeyboardMarkup) -> Self { Self::ReplyKeyboardMarkup(Box::new(value)) }
+}
+impl From<ReplyKeyboardRemove> for SendWidgetReplyMarkup {
+    fn from(value: ReplyKeyboardRemove) -> Self { Self::ReplyKeyboardRemove(Box::new(value)) }
+}
+impl From<ForceReply> for SendWidgetReplyMarkup {
+    fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+
 /// Telegram [`SentGuestMessage`](https://core.telegram.org/bots/api#sentguestmessage).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -16837,6 +17823,35 @@ impl SentWebAppMessage {
 }
 impl Default for SentWebAppMessage {
     fn default() -> Self { Self::new() }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SetGameScoreResult {
+    Message(Box<Message>),
+    True(crate::api::True),
+}
+impl<'de> Deserialize<'de> for SetGameScoreResult {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.is_boolean() {
+            return serde_json::from_value(value).map(Self::True).map_err(D::Error::custom);
+        }
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["message_id", "date", "chat"], allowed: &["message_id", "message_thread_id", "direct_messages_topic", "from", "sender_chat", "sender_boost_count", "sender_business_bot", "sender_tag", "receiver_user", "ephemeral_message_id", "date", "guest_query_id", "business_connection_id", "chat", "forward_origin", "is_topic_message", "is_automatic_forward", "reply_to_message", "external_reply", "quote", "reply_to_story", "reply_to_checklist_task_id", "reply_to_poll_option_id", "via_bot", "guest_bot_caller_user", "guest_bot_caller_chat", "edit_date", "has_protected_content", "is_from_offline", "is_paid_post", "media_group_id", "author_signature", "paid_star_count", "text", "entities", "link_preview_options", "suggested_post_info", "effect_id", "rich_message", "animation", "audio", "document", "live_photo", "paid_media", "photo", "sticker", "story", "video", "video_note", "voice", "widget", "caption", "caption_entities", "show_caption_above_media", "has_media_spoiler", "checklist", "contact", "dice", "game", "poll", "venue", "location", "new_chat_members", "left_chat_member", "chat_owner_left", "chat_owner_changed", "new_chat_title", "new_chat_photo", "delete_chat_photo", "group_chat_created", "supergroup_chat_created", "channel_chat_created", "message_auto_delete_timer_changed", "migrate_to_chat_id", "migrate_from_chat_id", "pinned_message", "invoice", "successful_payment", "refunded_payment", "users_shared", "chat_shared", "gift", "unique_gift", "gift_upgrade_sent", "connected_website", "write_access_allowed", "passport_data", "proximity_alert_triggered", "boost_added", "chat_background_set", "checklist_tasks_done", "checklist_tasks_added", "community_chat_added", "community_chat_joined", "community_chat_removed", "direct_message_price_changed", "forum_topic_created", "forum_topic_edited", "forum_topic_closed", "forum_topic_reopened", "general_forum_topic_hidden", "general_forum_topic_unhidden", "giveaway_created", "giveaway", "giveaway_winners", "giveaway_completed", "managed_bot_created", "paid_message_price_changed", "paid_messages_waived", "poll_option_added", "poll_option_deleted", "suggested_post_approved", "suggested_post_approval_failed", "suggested_post_declined", "suggested_post_paid", "suggested_post_refunded", "ton_wallet_transfer", "video_chat_scheduled", "video_chat_started", "video_chat_ended", "video_chat_participants_invited", "web_app_data", "reply_markup"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::Message).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<Message> for SetGameScoreResult {
+    fn from(value: Message) -> Self { Self::Message(Box::new(value)) }
+}
+impl From<crate::api::True> for SetGameScoreResult {
+    fn from(value: crate::api::True) -> Self { Self::True(value) }
 }
 
 /// Telegram [`SharedUser`](https://core.telegram.org/bots/api#shareduser).
@@ -17218,6 +18233,35 @@ impl StickerSet {
         self.thumbnail = Some(Box::new(value));
         self
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum StopMessageLiveLocationResult {
+    Message(Box<Message>),
+    True(crate::api::True),
+}
+impl<'de> Deserialize<'de> for StopMessageLiveLocationResult {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.is_boolean() {
+            return serde_json::from_value(value).map(Self::True).map_err(D::Error::custom);
+        }
+        let shapes = &[
+            crate::wire::ObjectShape { required: &["message_id", "date", "chat"], allowed: &["message_id", "message_thread_id", "direct_messages_topic", "from", "sender_chat", "sender_boost_count", "sender_business_bot", "sender_tag", "receiver_user", "ephemeral_message_id", "date", "guest_query_id", "business_connection_id", "chat", "forward_origin", "is_topic_message", "is_automatic_forward", "reply_to_message", "external_reply", "quote", "reply_to_story", "reply_to_checklist_task_id", "reply_to_poll_option_id", "via_bot", "guest_bot_caller_user", "guest_bot_caller_chat", "edit_date", "has_protected_content", "is_from_offline", "is_paid_post", "media_group_id", "author_signature", "paid_star_count", "text", "entities", "link_preview_options", "suggested_post_info", "effect_id", "rich_message", "animation", "audio", "document", "live_photo", "paid_media", "photo", "sticker", "story", "video", "video_note", "voice", "widget", "caption", "caption_entities", "show_caption_above_media", "has_media_spoiler", "checklist", "contact", "dice", "game", "poll", "venue", "location", "new_chat_members", "left_chat_member", "chat_owner_left", "chat_owner_changed", "new_chat_title", "new_chat_photo", "delete_chat_photo", "group_chat_created", "supergroup_chat_created", "channel_chat_created", "message_auto_delete_timer_changed", "migrate_to_chat_id", "migrate_from_chat_id", "pinned_message", "invoice", "successful_payment", "refunded_payment", "users_shared", "chat_shared", "gift", "unique_gift", "gift_upgrade_sent", "connected_website", "write_access_allowed", "passport_data", "proximity_alert_triggered", "boost_added", "chat_background_set", "checklist_tasks_done", "checklist_tasks_added", "community_chat_added", "community_chat_joined", "community_chat_removed", "direct_message_price_changed", "forum_topic_created", "forum_topic_edited", "forum_topic_closed", "forum_topic_reopened", "general_forum_topic_hidden", "general_forum_topic_unhidden", "giveaway_created", "giveaway", "giveaway_winners", "giveaway_completed", "managed_bot_created", "paid_message_price_changed", "paid_messages_waived", "poll_option_added", "poll_option_deleted", "suggested_post_approved", "suggested_post_approval_failed", "suggested_post_declined", "suggested_post_paid", "suggested_post_refunded", "ton_wallet_transfer", "video_chat_scheduled", "video_chat_started", "video_chat_ended", "video_chat_participants_invited", "web_app_data", "reply_markup"] },
+        ];
+        match crate::wire::select_shape(&value, shapes).map_err(D::Error::custom)? {
+            0 => serde_json::from_value(value).map(Self::Message).map_err(D::Error::custom),
+            _ => unreachable!("shape index is bounded by generated variants"),
+        }
+    }
+}
+impl From<Message> for StopMessageLiveLocationResult {
+    fn from(value: Message) -> Self { Self::Message(Box::new(value)) }
+}
+impl From<crate::api::True> for StopMessageLiveLocationResult {
+    fn from(value: crate::api::True) -> Self { Self::True(value) }
 }
 
 /// Telegram [`Story`](https://core.telegram.org/bots/api#story).

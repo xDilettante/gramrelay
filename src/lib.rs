@@ -19,6 +19,7 @@ mod polling;
 mod requests;
 #[cfg(feature = "bot")]
 mod routing;
+mod typed_api;
 mod types;
 mod updates;
 mod wire;

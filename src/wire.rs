@@ -4,6 +4,35 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use serde_json::Value;
 use std::{collections::BTreeMap, fmt};
 
+/// A credential value. Debug is redacted; serialization requires deliberate use.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SecretString(String);
+
+impl SecretString {
+    pub fn expose_secret(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for SecretString {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for SecretString {
+    fn from(value: &str) -> Self {
+        Self(value.into())
+    }
+}
+
+impl fmt::Debug for SecretString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SecretString([REDACTED])")
+    }
+}
+
 /// Telegram's literal `True`, rather than an arbitrary boolean.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct True;

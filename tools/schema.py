@@ -405,11 +405,14 @@ def main():
         raise SchemaError("overrides changed; re-import the pinned source")
     generated = generate_catalog(schema)
     try:
-        from .rustgen import generate_types, generate_type_fixtures
+        from .rustgen import generate_types, generate_type_fixtures, generate_methods, generate_method_fixtures
     except ImportError:
-        from rustgen import generate_types, generate_type_fixtures
+        from rustgen import generate_types, generate_type_fixtures, generate_methods, generate_method_fixtures
     outputs = {catalog_path: generated, ROOT / "src/generated/types.rs": generate_types(schema)}
     outputs[ROOT / "src/generated/fixtures.rs"] = generate_type_fixtures(schema)
+    policy = json.loads((ROOT / "schema/method-policy.json").read_text(encoding="utf-8"))
+    outputs[ROOT / "src/generated/methods.rs"] = generate_methods(schema, policy)
+    outputs[ROOT / "src/generated/method_fixtures.rs"] = generate_method_fixtures(schema)
     if args.command == "check":
         if schema_path.read_text(encoding="utf-8") != canonical(schema):
             raise SchemaError("canonical schema formatting drifted")

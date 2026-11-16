@@ -12,6 +12,8 @@ Tagged unions decode known tags strictly and preserve new string tags in an opaq
 
 All generated methods use one sealed typed request path and the existing bounded, redacted transport. Wire methods support all pinned parameters; convenience helpers remain available. Effect/replay metadata requires explicit review, with conservative defaults never granting agent permissions. Files, retries and agent authorization are separate gates, not implicit consequences of generation.
 
+`schema/method-policy.json` lists the effect for every method and binds it to the exact canonical schema hash; missing/stale/unknown entries fail generation. Only explicitly reviewed Read methods have ReadOnly replay advice; all other categories have Never advice. There is no automatic retry, including for reads. Credential-returning methods and credential fields use SecretString with redacted Debug and explicit exposure. Generated parameter objects reject unknown arguments. Generic multipart attachment support is tracked with C1; the wire InputFile string represents a file ID, URL or attachment reference.
+
 Verify strict known/unknown union behavior, required/literal fields, nested recursion, Unicode, ID separation, reproducibility, complete method/type coverage and representative exact JSON requests against localhost mocks. No live Telegram calls are needed.
 
 ## Inputs and authority
