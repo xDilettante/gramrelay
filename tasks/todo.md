@@ -19,7 +19,7 @@ See tasks/goal.md. The active goal includes every unchecked module below.
 
 ## Durable state and agent tools
 
-- [ ] J1: SQLite operation journal, atomic claims, payload/owner validation and Unknown recovery. Initial tg-agent workspace package, canonical fingerprints, persistent reservations/receipts and worker/version fencing pass 5 tests and workspace regressions; recovery, retention and actual process-crash gates remain open. See SPEC-journal.md.
+- [x] J1: SQLite operation journal with canonical fingerprints, atomic claims and owner/version fencing. Verified: 22 journal tests, including real child-process termination at 4 boundaries, competing processes, lock-wait expiry, TTL/tombstones/capacity, safe receipts, cancellation and database-thread Drop/close. 141 all-feature workspace tests, 140 default tests, 3 doctests, Clippy, client-only builds, audit and offline journal example pass. Recovery never reissues Unknown; result expiry never frees a key. See SPEC-journal.md. Authorized execution remains A1.
 - [ ] J2: durable update ingestion, acknowledgements, retention and executor ownership. Verify: crash/replay/TTL tests.
 - [ ] A1: shared authorized executor with grants, bot/chat scopes, quotas and file handles. Depends J1/P2. Verify: policy bypass and cached-result access tests.
 - [ ] A2: CLI JSON with versioned input/output schemas. Depends A1. Verify: executable-level offline tests.

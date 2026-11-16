@@ -34,6 +34,11 @@ The implementation uses reqwest 0.13.5, Tokio 1.54.1, tokio-util 0.7.20 and wire
 - Optional metrics facade, counters/histograms and application-owned recorder: https://docs.rs/metrics/0.24.6/metrics/
 - Test-kit response conversion shares reqwest decoding: https://docs.rs/reqwest/0.13.5/reqwest/struct.Response.html#impl-From%3CResponse%3CT%3E%3E-for-Response
 - Test-kit request frame consumption: https://docs.rs/http-body-util/0.1.3/http_body_util/trait.BodyExt.html#method.frame
-- Cancellable synthetic chunk streams: https://docs.rs/futures-util/0.3.32/futures_util/stream/fn.unfold.html
+- Cancellable synthetic chunk streams: https://docs.rs/futures-util/0.3.34/futures_util/stream/fn.unfold.html
+- SQLite transactions and writer serialization: https://sqlite.org/lang_transaction.html
+- WAL/synchronous/secure_delete behavior: https://sqlite.org/pragma.html
+- SQLite wrapper (pinned 0.43.0, bundled): https://docs.rs/rusqlite/0.43.0/rusqlite/struct.Connection.html and https://docs.rs/rusqlite/0.43.0/rusqlite/enum.TransactionBehavior.html
+- OS-random worker identities: https://docs.rs/getrandom/0.4.3/getrandom/fn.fill.html
+- Canonical payload fingerprints using RustCrypto SHA-256: https://docs.rs/sha2/0.11.1/sha2/
 
 Unknown effect handling is our conservative contract, not a Telegram idempotency guarantee. It intentionally treats connection and decode failures after dispatch as ambiguous.

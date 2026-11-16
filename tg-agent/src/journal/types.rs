@@ -14,6 +14,7 @@ pub enum JournalErrorKind {
     LeaseLost,
     Expired,
     UnsupportedSchema,
+    Closed,
 }
 /// Safe storage diagnostics. They do not determine whether a prior Telegram action succeeded.
 #[derive(Debug)]
@@ -37,6 +38,7 @@ impl JournalError {
             JournalErrorKind::LeaseLost => "journal_lease_lost",
             JournalErrorKind::Expired => "journal_expired",
             JournalErrorKind::UnsupportedSchema => "journal_schema",
+            JournalErrorKind::Closed => "journal_closed",
         }
     }
 }
@@ -95,11 +97,13 @@ impl JournalOptions {
         self
     }
     pub(super) fn validate(&self) -> Result<()> {
+        let bound = (self.max_result_bytes as u128 + 1024).checked_mul(self.max_operations as u128);
         if self.max_operations == 0
             || self.max_operations > i64::MAX as usize
             || self.max_pending == 0
-            || self.max_pending > tokio::sync::Semaphore::MAX_PERMITS
+            || self.max_pending > 1024
             || self.max_result_bytes == 0
+            || bound.is_none_or(|value| value > i64::MAX as u128)
         {
             return Err(JournalError::new(JournalErrorKind::Validation));
         }
@@ -271,6 +275,10 @@ pub struct AttemptFailure {
     pub(super) outcome: String,
     pub(super) http_status: Option<u16>,
     pub(super) api_error_code: Option<i64>,
+    #[serde(default)]
+    pub(super) retry_after_secs: Option<u64>,
+    #[serde(default)]
+    pub(super) migrate_to_chat_id: Option<i64>,
 }
 impl AttemptFailure {
     pub fn kind(&self) -> &str {
@@ -278,6 +286,12 @@ impl AttemptFailure {
     }
     pub fn outcome(&self) -> &str {
         &self.outcome
+    }
+    pub fn retry_after(&self) -> Option<Duration> {
+        self.retry_after_secs.map(Duration::from_secs)
+    }
+    pub fn migrate_to_chat_id(&self) -> Option<tg::ChatId> {
+        self.migrate_to_chat_id.map(tg::ChatId::from)
     }
 }
 /// A known result or a classified library failure, without remote descriptions.
@@ -304,10 +318,26 @@ impl Completion {
             state,
             result: None,
             failure: Some(AttemptFailure {
-                kind: format!("{:?}", error.kind()),
+                kind: match error.kind() {
+                    tg::ErrorKind::Configuration => "configuration",
+                    tg::ErrorKind::Validation => "validation",
+                    tg::ErrorKind::Capacity => "capacity",
+                    tg::ErrorKind::Io => "io",
+                    tg::ErrorKind::Timeout => "timeout",
+                    tg::ErrorKind::Transport => "transport",
+                    tg::ErrorKind::Http => "http",
+                    tg::ErrorKind::Telegram => "telegram",
+                    tg::ErrorKind::Decode => "decode",
+                    tg::ErrorKind::ResponseTooLarge => "response_too_large",
+                    tg::ErrorKind::Handler => "handler",
+                    _ => "other",
+                }
+                .into(),
                 outcome: outcome.into(),
                 http_status: error.http_status(),
                 api_error_code: error.api_error_code(),
+                retry_after_secs: error.retry_after().map(|duration| duration.as_secs()),
+                migrate_to_chat_id: error.migrate_to_chat_id().map(i64::from),
             }),
         }
     }
