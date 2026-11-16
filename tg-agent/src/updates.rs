@@ -105,7 +105,7 @@ impl UpdateFeed {
     pub async fn release_source(&self, lease: SourceLease) -> Result<()> {
         self.check_scope(&lease)?;
         let name = self.profile.clone();
-        self.journal.run(move |connection,_,worker|{
+        self.journal.run_fenced(move |connection,_,worker|{
             if lease.issuer!=worker{return Err(lost());}
             let count=connection.execute("UPDATE update_feeds SET source_worker=NULL,source_until_ms=NULL,source_revision=source_revision+1 WHERE profile=?1 AND source_worker=?2 AND source_revision=?3",params![name,worker,lease.revision]).map_err(|_|storage())?;
             if count!=1{return Err(lost());}Ok(())

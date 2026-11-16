@@ -44,6 +44,14 @@ impl Journal {
         self.inner.call(action).await
     }
 
+    /// Confirmation/release wait fairly for a bounded queue slot instead of returning Capacity.
+    pub(crate) async fn run_fenced<T: Send + 'static>(
+        &self,
+        action: impl FnOnce(&mut Connection, &JournalOptions, &str) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        self.inner.call_fenced(action).await
+    }
+
     /// Stop admission on every clone, drain database jobs and await connection close.
     /// The host must drain external Telegram actions before closing their journal.
     pub async fn close(&self) -> Result<()> {
@@ -637,5 +645,127 @@ mod tests {
             closed_on, database_thread,
             "closing SQLite must not perform checkpoint I/O on the async runtime"
         );
+    }
+    #[tokio::test]
+    async fn ack_and_release_wait_behind_a_cancelled_admitted_job() {
+        use crate::updates::{SourceMode, UpdateFeed, UpdateOptions};
+        let directory = tempfile::tempdir().unwrap();
+        let journal = Journal::open(
+            directory.path().join("updates.sqlite"),
+            JournalOptions::default().max_pending(1),
+        )
+        .await
+        .unwrap();
+        let feed = UpdateFeed::open(journal.clone(), "bot", 1, UpdateOptions::default())
+            .await
+            .unwrap();
+        let source = feed.claim_source(SourceMode::Polling).await.unwrap();
+        let checkpoint = feed.poll_checkpoint(&source).await.unwrap();
+        feed.append_poll(
+            &source,
+            &checkpoint,
+            vec![serde_json::from_value(serde_json::json!({"update_id":1})).unwrap()],
+        )
+        .await
+        .unwrap();
+        let consumer = feed.claim_consumer("router").await.unwrap();
+        let (_, ack) = feed
+            .read_consumer(&consumer, 100)
+            .await
+            .unwrap()
+            .into_parts();
+        for mode in [0, 1, 2] {
+            let (entered, waiting) = tokio::sync::oneshot::channel();
+            let (unblock, blocked) = std::sync::mpsc::channel();
+            let worker = journal.clone();
+            let task = tokio::spawn(async move {
+                worker
+                    .run(move |_, _, _| {
+                        let _ = entered.send(());
+                        blocked
+                            .recv_timeout(Duration::from_secs(3))
+                            .map_err(|_| crate::journal::storage())?;
+                        Ok(())
+                    })
+                    .await
+            });
+            waiting.await.unwrap();
+            task.abort();
+            let source = source.clone();
+            let consumer = consumer.clone();
+            let ack = ack.clone();
+            let release = async {
+                match mode {
+                    0 => feed.release_source(source).await,
+                    1 => feed.acknowledge_consumer(&consumer, ack).await.map(|_| ()),
+                    _ => feed.release_consumer(consumer).await,
+                }
+            };
+            tokio::pin!(release);
+            tokio::select! {biased; result=&mut release=>panic!("cleanup must wait for admitted work: {result:?}"), _=std::future::ready(())=>{} }
+            unblock.send(()).unwrap();
+            release.await.unwrap();
+            assert!(task.await.unwrap_err().is_cancelled());
+        }
+        feed.claim_source(SourceMode::Polling).await.unwrap();
+        let consumer = feed.claim_consumer("router").await.unwrap();
+        assert!(
+            feed.read_consumer(&consumer, 100)
+                .await
+                .unwrap()
+                .events()
+                .is_empty()
+        );
+        journal.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn close_wakes_confirmation_waiters_and_releases_ownership_after_draining() {
+        use crate::updates::{SourceMode, UpdateFeed, UpdateOptions};
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("updates.sqlite");
+        let journal = Journal::open(&path, JournalOptions::default().max_pending(1))
+            .await
+            .unwrap();
+        let feed = UpdateFeed::open(journal.clone(), "bot", 1, UpdateOptions::default())
+            .await
+            .unwrap();
+        let source = feed.claim_source(SourceMode::Polling).await.unwrap();
+        feed.claim_consumer("router").await.unwrap();
+        let (entered, waiting) = tokio::sync::oneshot::channel();
+        let (unblock, blocked) = std::sync::mpsc::channel();
+        let worker = journal.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .run(move |_, _, _| {
+                    let _ = entered.send(());
+                    blocked
+                        .recv_timeout(Duration::from_secs(3))
+                        .map_err(|_| storage())?;
+                    Ok(())
+                })
+                .await
+        });
+        waiting.await.unwrap();
+        task.abort();
+        let release = feed.release_source(source);
+        tokio::pin!(release);
+        tokio::select! {biased; result=&mut release=>panic!("must wait: {result:?}"), _=std::future::ready(())=>{} }
+        let closing = journal.close();
+        tokio::pin!(closing);
+        tokio::select! {biased; result=&mut closing=>panic!("must drain: {result:?}"), _=std::future::ready(())=>{} }
+        assert_eq!(release.await.unwrap_err().kind(), JournalErrorKind::Closed);
+        unblock.send(()).unwrap();
+        closing.await.unwrap();
+        assert!(task.await.unwrap_err().is_cancelled());
+        let reopened = Journal::open(&path, JournalOptions::default())
+            .await
+            .unwrap();
+        let feed = UpdateFeed::open(reopened.clone(), "bot", 1, UpdateOptions::default())
+            .await
+            .unwrap();
+        feed.claim_source(SourceMode::Polling).await.unwrap();
+        feed.claim_consumer("router").await.unwrap();
+        reopened.close().await.unwrap();
     }
 }

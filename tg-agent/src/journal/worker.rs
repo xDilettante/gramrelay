@@ -80,17 +80,43 @@ impl Database {
         &self,
         action: impl FnOnce(&mut Connection, &JournalOptions, &str) -> Result<T> + Send + 'static,
     ) -> Result<T> {
+        self.call_with_admission(action, false).await
+    }
+
+    pub(super) async fn call_fenced<T: Send + 'static>(
+        &self,
+        action: impl FnOnce(&mut Connection, &JournalOptions, &str) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        self.call_with_admission(action, true).await
+    }
+
+    async fn call_with_admission<T: Send + 'static>(
+        &self,
+        action: impl FnOnce(&mut Connection, &JournalOptions, &str) -> Result<T> + Send + 'static,
+        wait_for_slot: bool,
+    ) -> Result<T> {
+        // Confirmation/release wait fairly behind admitted work without the sender mutex.
+        // Normal commands still fail fast; close wakes all waiting cleanup callers.
+        let permit = if wait_for_slot {
+            self.pending
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|_| JournalError::new(JournalErrorKind::Closed))?
+        } else {
+            self.pending.clone().try_acquire_owned().map_err(|error| {
+                JournalError::new(match error {
+                    tokio::sync::TryAcquireError::Closed => JournalErrorKind::Closed,
+                    tokio::sync::TryAcquireError::NoPermits => JournalErrorKind::Capacity,
+                })
+            })?
+        };
         let (reply, waiting) = oneshot::channel();
         {
             let admission = self.sender.lock().map_err(|_| storage())?;
             let sender = admission
                 .as_ref()
                 .ok_or_else(|| JournalError::new(JournalErrorKind::Closed))?;
-            let permit = self
-                .pending
-                .clone()
-                .try_acquire_owned()
-                .map_err(|_| JournalError::new(JournalErrorKind::Capacity))?;
             let options = self.options.clone();
             let worker = self.worker_id.clone();
             sender
@@ -106,6 +132,7 @@ impl Database {
 
     pub(super) async fn close(&self) -> Result<()> {
         self.sender.lock().map_err(|_| storage())?.take();
+        self.pending.close();
         let mut stopped = self.stopped.clone();
         loop {
             let status = *stopped.borrow_and_update();

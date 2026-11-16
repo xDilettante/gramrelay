@@ -39,7 +39,7 @@ impl UpdateFeed {
     }
     pub async fn release_consumer(&self, lease: ConsumerLease) -> Result<()> {
         self.check_consumer(&lease)?;
-        self.journal.run(move |connection,_,worker|{
+        self.journal.run_fenced(move |connection,_,worker|{
             if lease.issuer!=worker{return Err(lost());}
             let count=connection.execute("UPDATE update_consumers SET worker=NULL,lease_until_ms=NULL,revision=revision+1 WHERE profile=?1 AND consumer_id=?2 AND worker=?3 AND revision=?4",params![lease.profile,lease.consumer_id,worker,lease.revision]).map_err(|_|storage())?;
             if count==1{Ok(())}else{Err(lost())}
@@ -101,7 +101,7 @@ impl UpdateFeed {
             return Err(lost());
         }
         let lease = lease.clone();
-        self.journal.run(move |connection,_,worker|{
+        self.journal.run_fenced(move |connection,_,worker|{
             let transaction=connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_|storage())?;
             let position=verify_consumer(&transaction,&lease,worker,now()?)?;
             if position!=ack.start{return Err(JournalError::new(JournalErrorKind::Conflict));}
