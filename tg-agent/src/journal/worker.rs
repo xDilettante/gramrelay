@@ -2,7 +2,7 @@ use super::{
     JournalError, JournalErrorKind, JournalOptions, Result, deadline, initialize, now, secure_file,
     storage,
 };
-use rusqlite::{Connection, OpenFlags, params};
+use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex, mpsc},
@@ -46,9 +46,15 @@ impl Database {
                     let _=ready.send(Ok(worker.clone()));
                     for job in receiver { job(&mut connection); }
                     // No sender remains: no caller can begin an unstarted reservation now.
-                    let released = now().and_then(|time| connection.execute(
+                    let released = (|| {
+                        let transaction=connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_|storage())?;
+                        let time=now()?;
+                        transaction.execute(
                         "UPDATE operations SET worker=NULL,lease_until_ms=NULL,revision=revision+1,updated_at_ms=?1 WHERE state='prepared' AND worker=?2",
-                        params![time,worker]).map(|_|()).map_err(|_|storage()));
+                        params![time,worker]).map_err(|_|storage())?;
+                        transaction.execute("UPDATE update_feeds SET source_worker=NULL,source_until_ms=NULL,source_revision=source_revision+1 WHERE source_worker=?1",[&worker]).map_err(|_|storage())?;
+                        transaction.commit().map_err(|_|storage())
+                    })();
                     let closed = connection.close().map_err(|_|storage());
                     let _=exited.send(Some(released.and(closed).map_err(|error|error.kind())));
                 },

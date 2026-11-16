@@ -6,6 +6,7 @@ publish = false
 description = "Durable and authorized Telegram actions for agents"
 
 [dependencies]
+base64 = "0.23"
 getrandom = "0.4"
 rusqlite = { version = "0.43", default-features = false, features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

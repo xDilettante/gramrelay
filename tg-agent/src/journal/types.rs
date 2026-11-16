@@ -15,6 +15,7 @@ pub enum JournalErrorKind {
     Expired,
     UnsupportedSchema,
     Closed,
+    CursorExpired,
 }
 /// Safe storage diagnostics. They do not determine whether a prior Telegram action succeeded.
 #[derive(Debug)]
@@ -22,7 +23,7 @@ pub struct JournalError {
     kind: JournalErrorKind,
 }
 impl JournalError {
-    pub(super) fn new(kind: JournalErrorKind) -> Self {
+    pub(crate) fn new(kind: JournalErrorKind) -> Self {
         Self { kind }
     }
     pub fn kind(&self) -> JournalErrorKind {
@@ -39,6 +40,7 @@ impl JournalError {
             JournalErrorKind::Expired => "journal_expired",
             JournalErrorKind::UnsupportedSchema => "journal_schema",
             JournalErrorKind::Closed => "journal_closed",
+            JournalErrorKind::CursorExpired => "updates_cursor_expired",
         }
     }
 }
@@ -58,6 +60,9 @@ pub struct JournalOptions {
     pub(super) retention: Duration,
     pub(super) max_result_bytes: usize,
     pub(super) retain_results: bool,
+    pub(crate) max_update_entries: usize,
+    pub(crate) max_update_bytes: usize,
+    pub(crate) max_update_feeds: usize,
 }
 impl Default for JournalOptions {
     fn default() -> Self {
@@ -68,10 +73,25 @@ impl Default for JournalOptions {
             retention: Duration::from_secs(7 * 24 * 3600),
             max_result_bytes: 65536,
             retain_results: true,
+            max_update_entries: 100_000,
+            max_update_bytes: 64 * 1024 * 1024,
+            max_update_feeds: 64,
         }
     }
 }
 impl JournalOptions {
+    pub fn max_update_entries(mut self, value: usize) -> Self {
+        self.max_update_entries = value;
+        self
+    }
+    pub fn max_update_bytes(mut self, value: usize) -> Self {
+        self.max_update_bytes = value;
+        self
+    }
+    pub fn max_update_feeds(mut self, value: usize) -> Self {
+        self.max_update_feeds = value;
+        self
+    }
     pub fn max_operations(mut self, value: usize) -> Self {
         self.max_operations = value;
         self
@@ -98,12 +118,20 @@ impl JournalOptions {
     }
     pub(super) fn validate(&self) -> Result<()> {
         let bound = (self.max_result_bytes as u128 + 1024).checked_mul(self.max_operations as u128);
+        let update_bound = (self.max_update_entries as u128)
+            .checked_mul(1024)
+            .and_then(|value| value.checked_add(self.max_update_bytes as u128));
         if self.max_operations == 0
             || self.max_operations > i64::MAX as usize
             || self.max_pending == 0
             || self.max_pending > 1024
             || self.max_result_bytes == 0
             || bound.is_none_or(|value| value > i64::MAX as u128)
+            || self.max_update_entries == 0
+            || self.max_update_bytes == 0
+            || self.max_update_feeds == 0
+            || self.max_update_feeds > 1024
+            || update_bound.is_none_or(|value| value > i64::MAX as u128)
         {
             return Err(JournalError::new(JournalErrorKind::Validation));
         }
@@ -112,13 +140,13 @@ impl JournalOptions {
         Ok(())
     }
 }
-pub(super) fn millis(value: Duration) -> Result<i64> {
+pub(crate) fn millis(value: Duration) -> Result<i64> {
     i64::try_from(value.as_millis())
         .ok()
         .filter(|value| *value > 0)
         .ok_or_else(|| JournalError::new(JournalErrorKind::Validation))
 }
-pub(super) fn valid_id(value: &str) -> Result<()> {
+pub(crate) fn valid_id(value: &str) -> Result<()> {
     if value.is_empty() || value.len() > 128 || value.chars().any(char::is_control) {
         Err(JournalError::new(JournalErrorKind::Validation))
     } else {
@@ -180,6 +208,9 @@ pub(super) fn encode(value: &Value, limit: usize) -> Result<Vec<u8>> {
             _ => {}
         }
     }
+    canonical_json(value, limit)
+}
+pub(crate) fn canonical_json(value: &impl Serialize, limit: usize) -> Result<Vec<u8>> {
     let mut output = Bounded {
         bytes: Vec::new(),
         limit,
@@ -189,7 +220,12 @@ pub(super) fn encode(value: &Value, limit: usize) -> Result<Vec<u8>> {
     let mut canonical: Value = serde_json::from_slice(&output.bytes)
         .map_err(|_| JournalError::new(JournalErrorKind::Validation))?;
     canonical.sort_all_objects();
-    serde_json::to_vec(&canonical).map_err(|_| JournalError::new(JournalErrorKind::Validation))
+    let bytes = serde_json::to_vec(&canonical)
+        .map_err(|_| JournalError::new(JournalErrorKind::Validation))?;
+    if bytes.len() > limit {
+        return Err(JournalError::new(JournalErrorKind::Validation));
+    }
+    Ok(bytes)
 }
 struct Bounded {
     bytes: Vec<u8>,

@@ -1,5 +1,5 @@
 //! Persistent reservations and receipts. This module never performs a Telegram call.
-mod types;
+pub(crate) mod types;
 mod worker;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use std::{
@@ -37,7 +37,7 @@ impl Journal {
         })
     }
 
-    async fn run<T: Send + 'static>(
+    pub(crate) async fn run<T: Send + 'static>(
         &self,
         action: impl FnOnce(&mut Connection, &JournalOptions, &str) -> Result<T> + Send + 'static,
     ) -> Result<T> {
@@ -173,17 +173,17 @@ impl Journal {
     }
 }
 
-fn storage() -> JournalError {
+pub(crate) fn storage() -> JournalError {
     JournalError::new(JournalErrorKind::Storage)
 }
-fn now() -> Result<i64> {
+pub(crate) fn now() -> Result<i64> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .ok()
         .and_then(|value| i64::try_from(value.as_millis()).ok())
         .ok_or_else(storage)
 }
-fn deadline(time: i64, duration: Duration) -> Result<i64> {
+pub(crate) fn deadline(time: i64, duration: Duration) -> Result<i64> {
     time.checked_add(types::millis(duration)?)
         .ok_or_else(|| JournalError::new(JournalErrorKind::Validation))
 }

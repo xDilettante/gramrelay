@@ -40,5 +40,8 @@ The implementation uses reqwest 0.13.5, Tokio 1.54.1, tokio-util 0.7.20 and wire
 - SQLite wrapper (pinned 0.43.0, bundled): https://docs.rs/rusqlite/0.43.0/rusqlite/struct.Connection.html and https://docs.rs/rusqlite/0.43.0/rusqlite/enum.TransactionBehavior.html
 - OS-random worker identities: https://docs.rs/getrandom/0.4.3/getrandom/fn.fill.html
 - Canonical payload fingerprints using RustCrypto SHA-256: https://docs.rs/sha2/0.11.1/sha2/
+- Telegram update identity, acknowledgement offsets and server retention: https://core.telegram.org/bots/api#update and https://core.telegram.org/bots/api#getupdates
+- Queue acknowledgement implementation checked for context: https://github.com/tdlib/telegram-bot-api/blob/master/telegram-bot-api/Client.cpp (do_get_updates). The public library contract remains conservative and does not rely on undocumented queue fallback behavior.
+- Opaque cursor encoding: base64 0.23.1, already pinned in Cargo.lock; URL_SAFE_NO_PAD and Engine verified against installed registry source. Primary project: https://github.com/marshallpierce/rust-base64
 
 Unknown effect handling is our conservative contract, not a Telegram idempotency guarantee. It intentionally treats connection and decode failures after dispatch as ambiguous.
