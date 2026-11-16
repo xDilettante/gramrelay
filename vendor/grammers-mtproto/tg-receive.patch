@@ -1,0 +1,639 @@
+--- upstream/Cargo.toml
++++ patched/Cargo.toml
+@@ -13,6 +13,7 @@
+ edition = "2024"
+ name = "grammers-mtproto"
+ version = "0.12.0"
++publish = false
+ authors = ["Lonami Exo <totufals@hotmail.com>"]
+ build = false
+ autolib = false
+@@ -36,13 +37,20 @@
+ repository = "https://codeberg.org/Lonami/grammers"
+ resolver = "2"
+ 
++[patch.crates-io]
++grammers-tl-types = { path = "../grammers-tl-types" }
++
+ [lib]
+ name = "grammers_mtproto"
+ path = "src/lib.rs"
+ 
++[features]
++upstream-repository-tests = []
++
+ [[test]]
+ name = "deps"
+ path = "tests/deps.rs"
++required-features = ["upstream-repository-tests"]
+ 
+ [dependencies.crc32fast]
+ version = "1.5.4"
+--- upstream/src/manual_tl.rs
++++ patched/src/manual_tl.rs
+@@ -8,10 +8,11 @@
+ 
+ //! This module contains additional, manual structures for some TL types.
+ 
+-use std::io::Write;
++use std::io::{Read, Write};
+ 
+ use flate2::Compression;
+-use flate2::write::{GzDecoder, GzEncoder};
++use flate2::bufread::MultiGzDecoder;
++use flate2::write::GzEncoder;
+ use grammers_crypto::MAX_PADDING_LEN;
+ use grammers_tl_types::{self as tl, Cursor, Deserializable, Identifiable, Serializable};
+ 
+@@ -86,9 +87,13 @@
+         let seq_no = i32::deserialize(buf)?;
+ 
+         let len = i32::deserialize(buf)?;
+-        assert!(len >= 0);
++        if len <= 0 {
++            return Err(tl::deserialize::Error::InvalidEncoding);
++        }
+         let len = len as usize;
+-        assert!(len < Message::MAX_BODY_SIZE);
++        if len >= Message::MAX_BODY_SIZE {
++            return Err(tl::deserialize::Error::InvalidEncoding);
++        }
+         let mut body = vec![0; len];
+         buf.read_exact(&mut body)?;
+ 
+@@ -108,13 +113,6 @@
+ pub struct RpcResult {
+     pub req_msg_id: i64,
+     pub result: Vec<u8>,
+-}
+-
+-impl RpcResult {
+-    /// Peek the constructor ID from the body.
+-    pub fn inner_constructor(&self) -> Result<u32, tl::deserialize::Error> {
+-        u32::from_bytes(&self.result)
+-    }
+ }
+ 
+ impl Identifiable for RpcResult {
+@@ -174,7 +172,9 @@
+         }
+ 
+         let len = i32::deserialize(buf)?;
+-        assert!(len >= 0);
++        if len < 0 {
++            return Err(tl::deserialize::Error::InvalidEncoding);
++        }
+         let len = len as usize;
+         let mut messages = Vec::with_capacity(len.min(Self::MAXIMUM_LENGTH));
+         for _ in 0..len {
+@@ -221,15 +221,25 @@
+         Self { packed_data }
+     }
+ 
+-    pub fn decompress(&self) -> Result<Vec<u8>, mtp::DeserializeError> {
+-        let writer = Vec::new();
+-        let mut decoder = GzDecoder::new(writer);
++    pub fn decompress_limited(&self, limit: usize) -> Result<Vec<u8>, mtp::DeserializeError> {
++        let read_limit = u64::try_from(limit)
++            .ok()
++            .and_then(|limit| limit.checked_add(1))
++            .ok_or(mtp::DeserializeError::LimitExceeded)?;
++        let mut decoder = MultiGzDecoder::new(self.packed_data.as_slice());
++        let mut result = Vec::new();
+         decoder
+-            .write_all(&self.packed_data[..])
++            .by_ref()
++            .take(read_limit)
++            .read_to_end(&mut result)
+             .map_err(|_| mtp::DeserializeError::DecompressionFailed)?;
+-        decoder
+-            .finish()
+-            .map_err(|_| mtp::DeserializeError::DecompressionFailed)
++        if result.len() > limit {
++            return Err(mtp::DeserializeError::LimitExceeded);
++        }
++        if !decoder.get_ref().is_empty() {
++            return Err(mtp::DeserializeError::TrailingData);
++        }
++        Ok(result)
+     }
+ }
+ 
+@@ -291,6 +301,9 @@
+         let _msg_id = &rpc_result[4..12];
+         let gzipped = &rpc_result[12..rpc_result.len()];
+         let gzip = GzipPacked::from_bytes(gzipped).unwrap();
+-        assert_eq!(gzip.decompress().unwrap().len(), 984);
+-    }
+-}
++        assert_eq!(
++            gzip.decompress_limited(16 * 1024 * 1024).unwrap().len(),
++            984
++        );
++    }
++}
+--- upstream/src/mtp/encrypted.rs
++++ patched/src/mtp/encrypted.rs
+@@ -18,6 +18,15 @@
+ };
+ use crate::utils::StackBuffer;
+ use crate::{DequeBuffer, MsgId, manual_tl};
++
++fn decode_exact<T: Deserializable>(bytes: &[u8]) -> Result<T, DeserializeError> {
++    let mut cursor = Cursor::from_slice(bytes);
++    let value = T::deserialize(&mut cursor)?;
++    if cursor.pos() != bytes.len() {
++        return Err(DeserializeError::TrailingData);
++    }
++    Ok(value)
++}
+ 
+ /// How many future salts to fetch or have stored at a given time.
+ ///
+@@ -102,6 +111,11 @@
+ 
+     /// How many messages are there in the buffer.
+     msg_count: usize,
++    rpc_response_limit: usize,
++    expansion_limit: usize,
++    nesting_limit: usize,
++    expansion_used: usize,
++    nesting: usize,
+ }
+ 
+ impl Builder {
+@@ -146,11 +160,57 @@
+             compression_threshold: self.compression_threshold,
+             deserialization: Vec::new(),
+             msg_count: 0,
++            rpc_response_limit: 8 * 1024 * 1024,
++            expansion_limit: 16 * 1024 * 1024,
++            nesting_limit: 32,
++            expansion_used: 0,
++            nesting: 0,
+         }
+     }
+ }
+ 
+ impl Encrypted {
++    /// Limits all incoming RPC/control bodies, cumulative gzip output per
++    /// transport payload and recursive envelope processing. A zero limit rejects
++    /// the corresponding input. Cryptographic processing is unchanged.
++    pub fn set_incoming_limits(
++        &mut self,
++        response_bytes: usize,
++        expanded_bytes: usize,
++        nesting: usize,
++    ) {
++        self.rpc_response_limit = response_bytes;
++        self.expansion_limit = expanded_bytes;
++        self.nesting_limit = nesting.min(128);
++    }
++
++    fn inflate(
++        &mut self,
++        packed: &manual_tl::GzipPacked,
++        limit: usize,
++    ) -> Result<Vec<u8>, DeserializeError> {
++        let remaining = self
++            .expansion_limit
++            .saturating_sub(self.expansion_used)
++            .min(limit);
++        if remaining == 0 {
++            return Err(DeserializeError::LimitExceeded);
++        }
++        let result = match packed.decompress_limited(remaining) {
++            Ok(result) => result,
++            Err(error) => {
++                // A failed decoder may already have produced up to the remaining
++                // allowance. Do not give the next result a fresh expansion budget.
++                self.expansion_used = self.expansion_limit;
++                return Err(error);
++            }
++        };
++        self.expansion_used = self
++            .expansion_used
++            .checked_add(result.len())
++            .ok_or(DeserializeError::LimitExceeded)?;
++        Ok(result)
++    }
+     /// Start building a new encrypted MTP.
+     pub fn build() -> Builder {
+         Builder {
+@@ -305,6 +365,56 @@
+     }
+ 
+     fn process_message(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
++        if self.nesting >= self.nesting_limit {
++            return Err(DeserializeError::LimitExceeded);
++        }
++        let constructor = message.constructor_id()?;
++        if !matches!(
++            constructor,
++            manual_tl::RpcResult::CONSTRUCTOR_ID
++                | manual_tl::MessageContainer::CONSTRUCTOR_ID
++                | manual_tl::MessageCopy::CONSTRUCTOR_ID
++                | manual_tl::GzipPacked::CONSTRUCTOR_ID
++        ) && message.body.len() > self.rpc_response_limit
++        {
++            return Err(DeserializeError::LimitExceeded);
++        }
++        // A container is accepted or rejected as a whole. Preserve receive-side
++        // state once at the outer boundary, including effects of valid children
++        // preceding an invalid child. Do not replenish the inflation budget.
++        let rollback = (self.nesting == 0).then(|| {
++            (
++                self.time_offset,
++                self.salts.clone(),
++                self.start_salt_time,
++                self.salt_request_msg_id,
++                self.sequence,
++                self.pending_ack.len(),
++                self.deserialization.len(),
++            )
++        });
++        self.nesting += 1;
++        let result = self.process_message_inner(message);
++        self.nesting -= 1;
++        if result.is_err()
++            && let Some((offset, salts, salt_time, salt_request, sequence, acks, results)) =
++                rollback
++        {
++            self.time_offset = offset;
++            self.salts = salts;
++            self.start_salt_time = salt_time;
++            self.salt_request_msg_id = salt_request;
++            self.sequence = sequence;
++            self.pending_ack.truncate(acks);
++            self.deserialization.truncate(results);
++        }
++        result
++    }
++
++    fn process_message_inner(
++        &mut self,
++        message: manual_tl::Message,
++    ) -> Result<(), DeserializeError> {
+         if message.requires_ack() {
+             self.pending_ack.push(message.msg_id);
+         }
+@@ -446,90 +556,58 @@
+     /// [RPC Error]: https://core.telegram.org/mtproto/service_messages#rpc-error
+     /// [Cancellation of an RPC Query]: https://core.telegram.org/mtproto/service_messages#cancellation-of-an-rpc-query
+     fn handle_rpc_result(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+-        let rpc_result = manual_tl::RpcResult::from_bytes(&message.body)?;
+-        let inner_constructor = rpc_result.inner_constructor();
+-        let manual_tl::RpcResult { req_msg_id, result } = rpc_result;
+-        let msg_id = MsgId(req_msg_id);
+-
+-        // Any error during a RPC result will be given to the user,
+-        // which means this method itself is doing its job `Ok`.
+-        let inner_constructor = match inner_constructor {
+-            Ok(x) => x,
+-            Err(e) => {
+-                self.deserialization
+-                    .push(Deserialization::Failure(DeserializationFailure {
+-                        msg_id,
+-                        error: e.into(),
+-                    }));
+-                return Ok(());
+-            }
+-        };
+-
+-        match inner_constructor {
+-            // RPC Error
+-            tl::types::RpcError::CONSTRUCTOR_ID => match tl::enums::RpcError::from_bytes(&result) {
+-                Ok(tl::enums::RpcError::Error(error)) => self
+-                    .deserialization
+-                    .push(Deserialization::RpcError(RpcResultError { msg_id, error })),
+-                Err(e) => {
++        let rpc_result = decode_exact::<manual_tl::RpcResult>(&message.body)?;
++        let msg_id = MsgId(rpc_result.req_msg_id);
++        if let Err(error) = self.process_rpc_body(msg_id, rpc_result.result) {
++            self.deserialization
++                .push(Deserialization::Failure(DeserializationFailure {
++                    msg_id,
++                    error,
++                }));
++        }
++        Ok(())
++    }
++
++    fn process_rpc_body(
++        &mut self,
++        msg_id: MsgId,
++        mut body: Vec<u8>,
++    ) -> Result<(), DeserializeError> {
++        let mut depth = self.nesting;
++        loop {
++            if depth >= self.nesting_limit {
++                return Err(DeserializeError::LimitExceeded);
++            }
++            let constructor = u32::from_bytes(&body)?;
++            if constructor == manual_tl::GzipPacked::CONSTRUCTOR_ID {
++                let packed = decode_exact::<manual_tl::GzipPacked>(&body)?;
++                body = self.inflate(&packed, self.rpc_response_limit)?;
++                depth += 1;
++                continue;
++            }
++            if body.len() > self.rpc_response_limit {
++                return Err(DeserializeError::LimitExceeded);
++            }
++            match constructor {
++                tl::types::RpcError::CONSTRUCTOR_ID => {
++                    let tl::enums::RpcError::Error(error) =
++                        decode_exact::<tl::enums::RpcError>(&body)?;
+                     self.deserialization
+-                        .push(Deserialization::Failure(DeserializationFailure {
+-                            msg_id,
+-                            error: e.into(),
+-                        }))
++                        .push(Deserialization::RpcError(RpcResultError { msg_id, error }));
+                 }
+-            },
+-
+-            // Cancellation of an RPC Query
+-            tl::types::RpcAnswerUnknown::CONSTRUCTOR_ID => {
+-                // The `msg_id` corresponds to the `rpc_drop_answer` request.
+-            }
+-            tl::types::RpcAnswerDroppedRunning::CONSTRUCTOR_ID => {
+-                // We will receive two `rpc_result`, one with the `msg_id` of
+-                // `rpc_drop_answer` request and other for the original RPC.
+-            }
+-            tl::types::RpcAnswerDropped::CONSTRUCTOR_ID => {
+-                // "the RPC response was removed from the server's outgoing
+-                // queue, and its msg_id, seq_no, and length in bytes are
+-                // transmitted to the client."
+-            }
+-
+-            // Response to an RPC query
+-            // Telegram shouldn't send compressed errors (the overhead
+-            // would probably outweight the benefits) so we don't check
+-            // that the decompressed payload is an error or answer drop.
+-            manual_tl::GzipPacked::CONSTRUCTOR_ID => {
+-                let body = match manual_tl::GzipPacked::from_bytes(&result) {
+-                    Ok(gzip) => match gzip.decompress() {
+-                        Ok(x) => {
+-                            self.store_own_updates(msg_id, &x);
+-                            Ok(x)
+-                        }
+-                        Err(e) => Err(e),
+-                    },
+-                    Err(e) => Err(DeserializeError::from(e)),
+-                };
+-
+-                match body {
+-                    Ok(body) => self
+-                        .deserialization
+-                        .push(Deserialization::RpcResult(RpcResult { msg_id, body })),
+-                    Err(e) => self.deserialization.push(Deserialization::Failure(
+-                        DeserializationFailure { msg_id, error: e },
+-                    )),
++                tl::types::RpcAnswerUnknown::CONSTRUCTOR_ID
++                | tl::types::RpcAnswerDroppedRunning::CONSTRUCTOR_ID
++                | tl::types::RpcAnswerDropped::CONSTRUCTOR_ID => {
++                    let _ = decode_exact::<tl::enums::RpcDropAnswer>(&body)?;
+                 }
+-            }
+-            _ => {
+-                self.store_own_updates(msg_id, &result);
+-                self.deserialization
+-                    .push(Deserialization::RpcResult(RpcResult {
+-                        msg_id,
+-                        body: result,
+-                    }));
+-            }
+-        }
+-
+-        Ok(())
++                _ => {
++                    self.store_own_updates(msg_id, &body);
++                    self.deserialization
++                        .push(Deserialization::RpcResult(RpcResult { msg_id, body }));
++                }
++            }
++            return Ok(());
++        }
+     }
+ 
+     /// Updates produced by `rpc_result` must be considered as any other updates, since they can
+@@ -588,7 +666,7 @@
+     /// [Acknowledgment of Receipt]: https://core.telegram.org/mtproto/service_messages_about_messages#acknowledgment-of-receipt
+     fn handle_ack(&self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+         // TODO notify about this somehow
+-        let _ack = tl::enums::MsgsAck::from_bytes(&message.body)?;
++        let _ack = decode_exact::<tl::enums::MsgsAck>(&message.body)?;
+         Ok(())
+     }
+ 
+@@ -662,7 +740,7 @@
+         &mut self,
+         message: manual_tl::Message,
+     ) -> Result<(), DeserializeError> {
+-        let bad_msg = tl::enums::BadMsgNotification::from_bytes(&message.body)?;
++        let bad_msg = decode_exact::<tl::enums::BadMsgNotification>(&message.body)?;
+ 
+         if self
+             .salt_request_msg_id
+@@ -732,7 +810,8 @@
+     /// ```
+     ///
+     /// [Request for Message Status Information]: https://core.telegram.org/mtproto/service_messages_about_messages#request-for-message-status-information
+-    fn handle_state_req(&self, _message: manual_tl::Message) -> Result<(), DeserializeError> {
++    fn handle_state_req(&self, message: manual_tl::Message) -> Result<(), DeserializeError> {
++        let _ = decode_exact::<tl::enums::MsgsStateReq>(&message.body)?;
+         // TODO implement
+         Ok(())
+     }
+@@ -773,7 +852,8 @@
+     /// valid, the message is to be wrapped in `msg_copy`).
+     ///
+     /// [Informational Message regarding Status of Messages]: https://core.telegram.org/mtproto/service_messages_about_messages#informational-message-regarding-status-of-messages
+-    fn handle_state_info(&mut self, _message: manual_tl::Message) -> Result<(), DeserializeError> {
++    fn handle_state_info(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
++        let _ = decode_exact::<tl::enums::MsgsStateInfo>(&message.body)?;
+         // TODO implement
+         Ok(())
+     }
+@@ -795,7 +875,8 @@
+     /// This message does not require an acknowledgment.
+     ///
+     /// [Voluntary Communication of Status of Messages]: https://core.telegram.org/mtproto/service_messages_about_messages#voluntary-communication-of-status-of-messages
+-    fn handle_msg_all(&mut self, _message: manual_tl::Message) -> Result<(), DeserializeError> {
++    fn handle_msg_all(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
++        let _ = decode_exact::<tl::enums::MsgsAllInfo>(&message.body)?;
+         // TODO implement
+         Ok(())
+     }
+@@ -829,7 +910,7 @@
+     ) -> Result<(), DeserializeError> {
+         // TODO https://github.com/telegramdesktop/tdesktop/blob/8f82880b938e06b7a2a27685ef9301edb12b4648/Telegram/SourceFiles/mtproto/connection.cpp#L1790-L1820
+         // TODO https://github.com/telegramdesktop/tdesktop/blob/8f82880b938e06b7a2a27685ef9301edb12b4648/Telegram/SourceFiles/mtproto/connection.cpp#L1822-L1845
+-        let msg_detailed = tl::enums::MsgDetailedInfo::from_bytes(&message.body)?;
++        let msg_detailed = decode_exact::<tl::enums::MsgDetailedInfo>(&message.body)?;
+         match msg_detailed {
+             tl::enums::MsgDetailedInfo::Info(x) => {
+                 self.pending_ack.push(x.answer_msg_id);
+@@ -869,7 +950,8 @@
+     ///
+     /// [Explicit Request to Re-Send Answers]: https://core.telegram.org/mtproto/service_messages_about_messages#explicit-request-to-re-send-answers
+     /// [Explicit Request to Re-Send Messages]: https://core.telegram.org/mtproto/service_messages_about_messages#explicit-request-to-re-send-messages
+-    fn handle_msg_resend(&self, _message: manual_tl::Message) -> Result<(), DeserializeError> {
++    fn handle_msg_resend(&self, message: manual_tl::Message) -> Result<(), DeserializeError> {
++        let _ = decode_exact::<tl::enums::MsgResendReq>(&message.body)?;
+         // TODO implement
+         // `msg_resend_ans_req` seems to never occur (it was even missing from `mtproto.tl`)
+         Ok(())
+@@ -899,7 +981,7 @@
+     /// [Request for several future salts]: https://core.telegram.org/mtproto/service_messages#request-for-several-future-salts
+     fn handle_future_salts(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+         let tl::enums::FutureSalts::Salts(salts) =
+-            tl::enums::FutureSalts::from_bytes(&message.body)?;
++            decode_exact::<tl::enums::FutureSalts>(&message.body)?;
+ 
+         if self
+             .salt_request_msg_id
+@@ -924,7 +1006,7 @@
+     }
+ 
+     fn handle_future_salt(&mut self, _message: manual_tl::Message) -> Result<(), DeserializeError> {
+-        panic!("no request should trigger a `future_salt` result")
++        Err(DeserializeError::UnsupportedControl)
+     }
+ 
+     /// **[Ping Messages (PING/PONG)]**
+@@ -959,7 +1041,7 @@
+     /// [Ping Messages (PING/PONG)]: https://core.telegram.org/mtproto/service_messages#ping-messages-ping-pong
+     /// [Deferred Connection Closure + PING]: https://core.telegram.org/mtproto/service_messages#deferred-connection-closure-ping
+     fn handle_pong(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+-        let tl::enums::Pong::Pong(pong) = tl::enums::Pong::from_bytes(&message.body)?;
++        let tl::enums::Pong::Pong(pong) = decode_exact::<tl::enums::Pong>(&message.body)?;
+ 
+         self.deserialization
+             .push(Deserialization::RpcResult(RpcResult {
+@@ -983,7 +1065,8 @@
+     /// ```
+     ///
+     /// [Request to Destroy Session]: https://core.telegram.org/mtproto/service_messages#request-to-destroy-session
+-    fn handle_destroy_session(&self, _message: manual_tl::Message) -> Result<(), DeserializeError> {
++    fn handle_destroy_session(&self, message: manual_tl::Message) -> Result<(), DeserializeError> {
++        let _ = decode_exact::<tl::enums::DestroySessionRes>(&message.body)?;
+         // TODO implement
+         Ok(())
+     }
+@@ -1025,7 +1108,7 @@
+         message: manual_tl::Message,
+     ) -> Result<(), DeserializeError> {
+         // TODO notify upper layers about the need to use getDifference
+-        let new_session = tl::enums::NewSession::from_bytes(&message.body)?;
++        let new_session = decode_exact::<tl::enums::NewSession>(&message.body)?;
+         match new_session {
+             tl::enums::NewSession::Created(x) => {
+                 self.salts.clear();
+@@ -1077,7 +1160,7 @@
+     /// [Containers]: https://core.telegram.org/mtproto/service_messages#containers
+     /// [Simple Container]: https://core.telegram.org/mtproto/service_messages#simple-container
+     fn handle_container(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+-        let container = manual_tl::MessageContainer::from_bytes(&message.body)?;
++        let container = decode_exact::<manual_tl::MessageContainer>(&message.body)?;
+         for inner_message in container.messages {
+             self.process_message(inner_message)?;
+         }
+@@ -1106,7 +1189,7 @@
+     ///
+     /// [Message Copies]: https://core.telegram.org/mtproto/service_messages#message-copies
+     fn handle_msg_copy(&self, _message: manual_tl::Message) -> Result<(), DeserializeError> {
+-        panic!("msg_copy should not be used")
++        Err(DeserializeError::UnsupportedControl)
+     }
+ 
+     /// **[Packed Object]**
+@@ -1126,12 +1209,10 @@
+     ///
+     /// [Packed Object]: https://core.telegram.org/mtproto/service_messages#packed-object
+     fn handle_gzip_packed(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+-        let container = manual_tl::GzipPacked::from_bytes(&message.body)?;
+-        self.process_message(manual_tl::Message {
+-            body: container.decompress()?,
+-            ..message
+-        })
+-        .map(|_| ())
++        let container = decode_exact::<manual_tl::GzipPacked>(&message.body)?;
++        let body = self.inflate(&container, self.expansion_limit)?;
++        self.process_message(manual_tl::Message { body, ..message })
++            .map(|_| ())
+     }
+ 
+     /// **[HTTP Wait/Long Poll]**
+@@ -1180,7 +1261,8 @@
+     /// to ping time.
+     ///
+     /// [HTTP Wait/Long Poll]: https://core.telegram.org/mtproto/service_messages#http-wait-long-poll
+-    fn handle_http_wait(&mut self, _message: manual_tl::Message) -> Result<(), DeserializeError> {
++    fn handle_http_wait(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
++        let _ = decode_exact::<tl::enums::HttpWait>(&message.body)?;
+         // TODO implement
+         Ok(())
+     }
+@@ -1315,6 +1397,10 @@
+     ) -> Result<Vec<Deserialization>, DeserializeError> {
+         crate::utils::check_message_buffer(payload)?;
+ 
++        self.expansion_used = 0;
++        self.nesting = 0;
++        self.deserialization.clear();
++
+         let plaintext = decrypt_data_v2(payload, &self.auth_key)?;
+ 
+         let mut buffer = Cursor::from_slice(plaintext);
+@@ -1333,6 +1419,10 @@
+         Ok(mem::take(&mut self.deserialization))
+     }
+ }
++
++#[cfg(test)]
++#[path = "tg_receive_tests.rs"]
++mod tg_receive_tests;
+ 
+ #[cfg(test)]
+ mod tests {
+--- upstream/src/mtp/mod.rs
++++ patched/src/mtp/mod.rs
+@@ -140,6 +140,18 @@
+     /// The server responded with compressed data which we failed to decompress.
+     DecompressionFailed,
+ 
++    /// Incoming encoded data, expansion or nesting exceeded its configured limit.
++    LimitExceeded,
++
++    /// A complete TL value was followed by unexpected bytes.
++    TrailingData,
++
++    /// A TL field used a noncanonical encoding.
++    InvalidEncoding,
++
++    /// The peer used an unsupported protocol control envelope.
++    UnsupportedControl,
++
+     /// While deserializing the response types one of them had a constructor
+     /// that did not match our expectations. The invalid ID is contained
+     /// within this variant.
+@@ -173,6 +185,10 @@
+                 "server responded with a payload that's too small to fit a valid message"
+             ),
+             Self::DecompressionFailed => write!(f, "failed to decompress server's data"),
++            Self::LimitExceeded => write!(f, "incoming payload limit exceeded"),
++            Self::TrailingData => write!(f, "unexpected trailing data"),
++            Self::InvalidEncoding => write!(f, "invalid TL encoding"),
++            Self::UnsupportedControl => write!(f, "unsupported protocol control envelope"),
+             Self::UnexpectedConstructor { id } => write!(f, "unexpected constructor: {id:08x}"),
+             Self::DecryptionError(ref error) => write!(f, "failed to decrypt message: {error}"),
+             Self::Transport(ref error) => {
+@@ -187,6 +203,7 @@
+         use tl::deserialize::Error as Err;
+ 
+         match error {
++            Err::InvalidEncoding => DeserializeError::InvalidEncoding,
+             Err::UnexpectedEof => DeserializeError::MessageBufferTooSmall,
+             Err::UnexpectedConstructor { id } => DeserializeError::UnexpectedConstructor { id },
+         }

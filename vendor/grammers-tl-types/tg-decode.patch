@@ -1,0 +1,74 @@
+--- upstream/Cargo.toml
++++ patched/Cargo.toml
+@@ -13,6 +13,7 @@
+ edition = "2024"
+ name = "grammers-tl-types"
+ version = "0.12.0"
++publish = false
+ authors = ["Lonami Exo <totufals@hotmail.com>"]
+ build = "build.rs"
+ include = [
+--- upstream/src/deserialize.rs
++++ patched/src/deserialize.rs
+@@ -15,6 +15,8 @@
+ /// Errors that can be produced by [`Cursor`].
+ #[derive(Clone, Debug, PartialEq)]
+ pub enum Error {
++    /// Noncanonical byte-string length or nonzero TL padding.
++    InvalidEncoding,
+     /// The end of the buffer was reached earlier than anticipated, which
+     /// implies there is not enough data to complete the deserialization.
+     UnexpectedEof,
+@@ -43,6 +45,7 @@
+ impl fmt::Display for Error {
+     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+         match *self {
++            Self::InvalidEncoding => write!(f, "invalid TL encoding"),
+             Self::UnexpectedEof => write!(f, "unexpected eof"),
+             Self::UnexpectedConstructor { id } => write!(f, "unexpected constructor: {id:08x}"),
+         }
+@@ -442,21 +445,35 @@
+             let len =
+                 (buffer[0] as usize) | ((buffer[1] as usize) << 8) | ((buffer[2] as usize) << 16);
+ 
++            if len < 254 {
++                return Err(Error::InvalidEncoding);
++            }
++
+             (len, len % 4)
+         } else {
++            if first_byte == 255 {
++                return Err(Error::InvalidEncoding);
++            }
+             let len = first_byte as usize;
+             (len, (len + 1) % 4)
+         };
+ 
+-        let mut result = vec![0u8; len];
+-        buf.read_exact(&mut result)?;
+-
+-        if padding > 0 {
+-            for _ in 0..(4 - padding) {
+-                buf.read_byte()?;
+-            }
+-        }
+-
++        let padding = (4 - padding) % 4;
++        let data_end = buf.pos.checked_add(len).ok_or(Error::UnexpectedEof)?;
++        let end = data_end.checked_add(padding).ok_or(Error::UnexpectedEof)?;
++        if end > buf.buf.len() {
++            return Err(Error::UnexpectedEof);
++        }
++        if buf.buf[data_end..end].iter().any(|byte| *byte != 0) {
++            return Err(Error::InvalidEncoding);
++        }
++        // Validate the entire available field before allocating its owned bytes.
++        let result = buf.buf[buf.pos..data_end].to_vec();
++        buf.pos = end;
+         Ok(result)
+     }
+ }
++
++#[cfg(test)]
++#[path = "tg_decode_tests.rs"]
++mod tg_decode_tests;

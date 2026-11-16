@@ -26,6 +26,49 @@ use crate::RpcError;
 use crate::errors::{InvocationError, ReadError};
 use crate::net::{NetStream, ServerAddr};
 
+pub(crate) fn decode_exact<T: Deserializable>(bytes: &[u8]) -> Result<T, mtp::DeserializeError> {
+    let mut cursor = tl::Cursor::from_slice(bytes);
+    let value = T::deserialize(&mut cursor)?;
+    if cursor.pos() != bytes.len() {
+        return Err(mtp::DeserializeError::TrailingData);
+    }
+    Ok(value)
+}
+
+fn decode_response<T: Deserializable>(
+    bytes: &[u8],
+    limit: usize,
+) -> Result<T, mtp::DeserializeError> {
+    if bytes.len() > limit {
+        return Err(mtp::DeserializeError::LimitExceeded);
+    }
+    decode_exact(bytes)
+}
+
+fn decode_updates_exact(bytes: &[u8]) -> Result<UpdatesLike, mtp::DeserializeError> {
+    match decode_exact::<tl::enums::Updates>(bytes) {
+        Ok(value) => Ok(UpdatesLike::Updates(value)),
+        Err(original) => {
+            if let Ok(tl::enums::messages::AffectedMessages::Messages(value)) =
+                decode_exact::<tl::enums::messages::AffectedMessages>(bytes)
+            {
+                return Ok(UpdatesLike::AffectedMessages(value));
+            }
+            if let Ok(tl::enums::messages::InvitedUsers::Users(value)) =
+                decode_exact::<tl::enums::messages::InvitedUsers>(bytes)
+            {
+                return Ok(UpdatesLike::InvitedUsers(value));
+            }
+            if let Ok(tl::enums::messages::ChatInviteJoinResult::Ok(value)) =
+                decode_exact::<tl::enums::messages::ChatInviteJoinResult>(bytes)
+            {
+                return Ok(UpdatesLike::ChatInviteJoinResult(value));
+            }
+            Err(original)
+        }
+    }
+}
+
 /// Every how often are pings sent?
 const PING_DELAY: Duration = Duration::from_secs(60);
 
@@ -66,6 +109,7 @@ pub struct Sender<T: Transport, M: mtp::Mtp> {
     state: connection::State<T, M>,
     requests: Vec<Request>,
     next_ping: Instant,
+    incoming_response_limit: usize,
 }
 
 struct Request {
@@ -108,6 +152,7 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
             state: connection::State::new(transport, mtp),
             requests: vec![],
             next_ping: Instant::now() + PING_DELAY,
+            incoming_response_limit: 8 * 1024 * 1024,
         })
     }
 
@@ -132,9 +177,13 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
 
         let (tx, rx) = oneshot::channel();
         self.enqueue_body(body, tx);
-        self.step_until_receive(rx)
-            .await
-            .and_then(|vec| R::Return::from_bytes(&vec).map_err(|err| err.into()))
+        self.step_until_receive(rx).await.and_then(|vec| {
+            decode_response::<R::Return>(&vec, self.incoming_response_limit).map_err(Into::into)
+        })
+    }
+
+    pub(crate) fn set_response_limit(&mut self, limit: usize) {
+        self.incoming_response_limit = limit;
     }
 
     pub(crate) fn enqueue_body(
@@ -322,7 +371,12 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
                 mtp::Deserialization::RpcResult(result) => self.process_result(result),
                 mtp::Deserialization::RpcError(error) => self.process_error(error),
                 mtp::Deserialization::BadMessage(bad_msg) => self.process_bad_message(bad_msg),
-                mtp::Deserialization::Failure(failure) => self.process_deserialize_error(failure),
+                mtp::Deserialization::Failure(failure) => {
+                    // A rejected RPC payload may have contained an own update.
+                    // Surface that uncertainty instead of silently acknowledging it.
+                    updates.push(UpdatesLike::MalformedUpdates);
+                    self.process_deserialize_error(failure);
+                }
             }
         }
     }
@@ -334,7 +388,7 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
         update: Vec<u8>,
     ) {
         match (
-            UpdatesLike::from_bytes(&update),
+            decode_updates_exact(&update),
             self.peek_request(msg_id).and_then(|request| {
                 tl::functions::messages::SendMessage::from_boxed_bytes(&request.body).ok()
             }),
@@ -378,13 +432,14 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
             (Err(e), _) => {
                 // This shouldn't happen. We just made the request, so they shouldn't be stale.
                 // If the request failed with a failed-to-deserialize error, callers will handle it.
-                warn!("telegram responded with updates that failed to be deserialized: {e}")
+                warn!("telegram responded with updates that failed to be deserialized: {e}");
+                updates.push(UpdatesLike::MalformedUpdates);
             }
         }
     }
 
     fn process_update(&mut self, updates: &mut Vec<UpdatesLike>, update: Vec<u8>) {
-        match UpdatesLike::from_bytes(&update) {
+        match decode_updates_exact(&update) {
             Ok(u) => updates.push(u),
             Err(e) => {
                 // These are to be treated as a gap.
@@ -522,6 +577,12 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
 }
 
 impl<T: Transport> Sender<T, mtp::Encrypted> {
+    pub(crate) fn set_incoming_limits(&mut self, response: usize, expanded: usize, nesting: usize) {
+        self.incoming_response_limit = response;
+        self.state
+            .mtp
+            .set_incoming_limits(response, expanded, nesting);
+    }
     pub fn auth_key(&self) -> [u8; 256] {
         self.state.mtp.auth_key()
     }
@@ -563,6 +624,7 @@ pub async fn generate_auth_key<T: Transport>(
         state: sender.state.into_encrypted(auth),
         requests: sender.requests,
         next_ping: Instant::now() + PING_DELAY,
+        incoming_response_limit: sender.incoming_response_limit,
     })
 }
 
@@ -574,3 +636,7 @@ pub async fn connect_with_auth<T: Transport>(
 ) -> Result<Sender<T, mtp::Encrypted>, io::Error> {
     Sender::connect(transport, mtp::Encrypted::build().finish(auth_key), addr).await
 }
+
+#[cfg(test)]
+#[path = "tg_sender_receive_tests.rs"]
+mod tg_sender_receive_tests;

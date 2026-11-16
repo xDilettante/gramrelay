@@ -77,9 +77,9 @@ dependencies = [
 
 [[package]]
 name = "bumpalo"
-version = "3.20.4"
+version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87a0cf66fd1eb2fb7b822cb78370d82303750809bc6ba855f3f58e517d3238db"
+checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
 name = "bytes"
@@ -461,8 +461,6 @@ dependencies = [
 [[package]]
 name = "grammers-mtproto"
 version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc95dd02ac37101d8121e5098706a9c9b342e855ca7d7b8b5daa91ec7b119649"
 dependencies = [
  "crc32fast",
  "flate2",
@@ -526,8 +524,6 @@ dependencies = [
 [[package]]
 name = "grammers-tl-types"
 version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb4da570f8dbcea3e0d0a1746240045555bacc56b4d57d3a81204ee0e84736bd"
 dependencies = [
  "grammers-tl-gen",
  "grammers-tl-parser",

@@ -5,8 +5,10 @@ mod data;
 mod tests;
 mod types;
 mod worker;
+pub(crate) use backend::BackendSession;
 use data::Snapshot;
 use grammers_session::types::UpdatesState;
+use std::sync::atomic::Ordering;
 use std::{
     fmt,
     path::Path,
@@ -58,13 +60,96 @@ impl Session {
         &self.inner.database.binding
     }
     /// Stop admission on all clones, drain native jobs and release ownership.
+    /// Returns `Owned` while attached to a Client; use `Client::close` instead.
     pub async fn close(&self) -> Result<()> {
+        match self
+            .inner
+            .owner
+            .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire)
+        {
+            Ok(_) | Err(2) => {}
+            Err(_) => return Err(error(SessionErrorKind::Owned)),
+        }
         self.inner.database.close().await
+    }
+    pub(crate) fn claim_client(&self) -> Result<ClientClaim> {
+        self.inner.database.shared.read(|_| ())?;
+        self.inner
+            .owner
+            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| error(SessionErrorKind::Owned))?;
+        if let Err(failure) = self.inner.database.shared.read(|_| ()) {
+            let _ = self
+                .inner
+                .owner
+                .compare_exchange(1, 0, Ordering::AcqRel, Ordering::Acquire);
+            return Err(failure);
+        }
+        Ok(ClientClaim {
+            session: self.clone(),
+            started: false,
+        })
+    }
+    pub(crate) fn live(&self) -> Result<()> {
+        self.inner.database.shared.read(|_| ())
+    }
+    #[cfg(test)]
+    pub(crate) fn test_fence(&self) {
+        self.inner
+            .database
+            .shared
+            .health
+            .send_replace(Health::Fenced);
+    }
+}
+
+pub(crate) struct ClientClaim {
+    session: Session,
+    started: bool,
+}
+impl ClientClaim {
+    pub fn api_id(&self) -> i32 {
+        self.session.binding().api_id()
+    }
+    pub fn backend(&self) -> Arc<BackendSession> {
+        self.session.inner.clone()
+    }
+    pub fn start(&mut self) {
+        self.started = true;
+    }
+    pub fn live(&self) -> Result<()> {
+        self.session.live()
+    }
+    pub fn deadline(&self) -> Result<Instant> {
+        self.session
+            .inner
+            .database
+            .shared
+            .read(|view| view.deadline)
+    }
+    pub fn health(&self) -> watch::Receiver<Health> {
+        self.session.inner.database.shared.health.subscribe()
+    }
+    pub async fn finish(&self) -> Result<()> {
+        self.session.inner.owner.store(2, Ordering::Release);
+        self.session.inner.database.close().await
+    }
+}
+impl Drop for ClientClaim {
+    fn drop(&mut self) {
+        if !self.started {
+            let _ = self.session.inner.owner.compare_exchange(
+                1,
+                0,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
+        }
     }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
-enum Health {
+pub(crate) enum Health {
     Opening,
     Ready,
     Closing,

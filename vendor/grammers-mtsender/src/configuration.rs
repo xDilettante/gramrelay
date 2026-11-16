@@ -65,6 +65,12 @@ pub struct ConnectionParams {
     ///
     /// When the channel is full, newly received updates are **dropped**.
     pub updates_channel_capacity: NonZeroUsize,
+    /// Maximum uncompressed incoming RPC/control body, including setup calls.
+    pub max_response_bytes: usize,
+    /// Cumulative gzip output allowed in one encrypted transport payload.
+    pub max_expanded_bytes: usize,
+    /// Maximum nesting of incoming protocol envelopes and compressed objects.
+    pub max_incoming_nesting: usize,
 
     pub transport: Box<TransportFactory>,
 
@@ -154,6 +160,9 @@ impl Default for ConnectionParams {
             proxy_url: None,
             retry_policy: Box::new(super::AutoSleep::default()),
             updates_channel_capacity: NonZeroUsize::new(100).unwrap(),
+            max_response_bytes: 8 * 1024 * 1024,
+            max_expanded_bytes: 16 * 1024 * 1024,
+            max_incoming_nesting: 32,
             transport: Box::new(|| Box::new(transport::Full::new())),
             __non_exhaustive: (),
         }

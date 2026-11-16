@@ -6,7 +6,8 @@ SHA-256 `9a6339a64b7b70ae4447ae4ae7b1b5a1e2e15649882bf26550df356e7a8bb1a4`.
 Published VCS commit: `e61cf8585e1e9969ab81eda9fb4725a1500e2d86`.
 Upstream copyright headers are retained. Distributed under Apache-2.0.
 
-Only sender_pool.rs and the normalized Cargo.toml differ from the release:
+Existing source changes are limited to sender_pool.rs, sender.rs,
+configuration.rs and the normalized Cargo.toml:
 
 - Quit uses an independent sticky signal, interruptible during connection setup.
 - Completion closes admission, aborts and joins all child senders. Unwinding is
@@ -20,6 +21,11 @@ Only sender_pool.rs and the normalized Cargo.toml differ from the release:
   The upstream dependency-documentation integration test also requires its full
   repository layout (an includes file is absent from the published archive), so
   it is gated together with those upstream-only tests.
+- Response limits reach plain authentication setup and every encrypted sender,
+  including the 404 fresh-key path. Setup RPCs and incoming updates require exact
+  TL consumption. Malformed update/control input emits a loss marker. The
+  separately pinned mtproto/TL patches enforce bounds and strict primitive
+  decoding before remote control/error/update objects are constructed.
 
 The recorded tg-safety.patch is checked against the hash-verified archive with
 `python tools/verify_grammers.py check` (cached archive), or add `--download` to

@@ -28,7 +28,7 @@ class VendorVerification(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "path"):
                 verify.upstream(data)
 
-    def test_only_the_two_reviewed_files_may_differ(self):
+    def test_only_declared_reviewed_files_may_differ(self):
         original = {"Cargo.toml": b"original\n", "src/sender_pool.rs": b"original\n", "src/crypto.rs": b"unchanged\n"}
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -46,6 +46,16 @@ class VendorVerification(unittest.TestCase):
             (directory / "unexpected.rs").write_bytes(b"new\n")
             with self.assertRaisesRegex(ValueError, "unexpected"):
                 verify.patch_text(original, directory)
+
+    def test_package_allowlists_do_not_leak_into_each_other(self):
+        original={"Cargo.toml":b"original\n","src/sender_pool.rs":b"original\n"}
+        with tempfile.TemporaryDirectory() as temporary:
+            directory=Path(temporary)
+            for name,content in original.items():
+                destination=directory/name;destination.parent.mkdir(parents=True,exist_ok=True);destination.write_bytes(content)
+            (directory/"src/sender_pool.rs").write_bytes(b"unexpected\n")
+            with self.assertRaisesRegex(ValueError,"unreviewed"):
+                verify.patch_text(original,directory,patched={"Cargo.toml"},local=set())
 
 
 if __name__ == "__main__":

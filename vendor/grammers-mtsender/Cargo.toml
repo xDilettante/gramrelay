@@ -41,6 +41,10 @@ license = "MIT OR Apache-2.0"
 repository = "https://codeberg.org/Lonami/grammers"
 resolver = "2"
 
+[patch.crates-io]
+grammers-mtproto = { path = "../grammers-mtproto" }
+grammers-tl-types = { path = "../grammers-tl-types" }
+
 [features]
 tg-test-kit = []
 upstream-live-tests = []

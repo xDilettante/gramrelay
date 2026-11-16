@@ -1,7 +1,8 @@
 # tg-mtproto
 
-Separate MTProto package, currently implementing M2. The first usable increment
-is encrypted local session storage; a network Client is still in progress.
+Separate MTProto package, currently implementing M2. Encrypted local session
+storage and the owned network Client with typed raw TL calls are implemented.
+Authentication, common actions, files and observable update recovery remain open.
 This package does not route MTProto operations through the Bot API.
 
 ```rust,no_run
@@ -23,8 +24,41 @@ async fn open_session(
 Provision a cryptographically random 32-byte key through a host secret store.
 Keep it outside this database, tool arguments and logs. The host protects the
 database directory and backups. Opening performs no network request; remembered
-account metadata is not proof of current authorization. The future Client must
-verify the expected identity before admitting account actions.
+account metadata is not proof of current authorization. The forthcoming common
+actions must verify the expected identity before accessing account data.
+
+Trusted Rust code can invoke the pinned TL layer directly:
+
+```rust,no_run
+use tg_mtproto::{Client, ClientError, ClientOptions, Session, tl};
+
+async fn probe(session: Session) -> Result<tl::enums::Pong, ClientError> {
+    let client = Client::new(session, ClientOptions::default())?;
+    let response = client.invoke(&tl::functions::Ping { ping_id: 42 }).await;
+    client.close().await?;
+    response
+}
+```
+
+Construction is lazy and claims a single client per session. The first polled
+call starts the driver; Tokio timers are required. Defaults allow 16 owned jobs,
+a 30-second absolute deadline, a 1 MiB encoded request and an 8 MiB response.
+Admission precedes serialization. Dropping a caller does not release capacity
+while its owned work remains active. A timeout or session fence closes the whole
+generation; `close().await` joins the driver tree before draining storage.
+Public `Session::close` refuses while attached: close through the Client.
+
+Raw calls do not retry. An ambiguous remote effect returns `Outcome::Unknown`;
+a confirmed RPC refusal is `Rejected`, and a locally unsent call is `NotSent`.
+Diagnostics retain static kinds/codes and allowlisted numeric flood waits only.
+Raw TL is a trusted host capability, never a generic agent tool. Encoded response,
+gzip expansion and envelope nesting limits apply before SDK control/update
+decoding. Arbitrary Rust deserializers are trusted; decoded TL heap/stack fuzzing
+remains a release gate.
+
+Build this development package from the repository workspace. Its hardened
+grammers dependency graph currently uses workspace patch overrides; external
+distribution is still a release gate. Do not remove those overrides.
 
 Snapshots use full-round XChaCha20Poly1305 with a fresh OS nonce and authenticated
 profile, application ID, storage ID and revision. A native SQLite worker commits
@@ -41,6 +75,7 @@ lease. Zeroization covers owned key/plaintext buffers on a best-effort basis;
 the runtime, operating system and upstream copies are outside that guarantee.
 
 Run `cargo test --locked -p tg-mtproto --all-targets` from the workspace root.
-Tests use synthetic keys, actual encrypted SQLite files and a killed child
-process; no Telegram account or live server is contacted. The full contract is
+Tests use synthetic keys, actual encrypted SQLite files, a killed child process,
+the SDK-backed RPC fixture and an encrypted loopback connection. No Telegram
+account or live server is contacted. The full contract is
 in SPEC-mtproto-client.md and SPEC-mtproto-session.md at the repository root.

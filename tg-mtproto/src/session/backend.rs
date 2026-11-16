@@ -9,15 +9,19 @@ use grammers_session::{
     BoxFuture, Session,
     types::{ChannelState, DcOption, PeerId, PeerInfo, UpdateState, UpdatesState},
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::atomic::AtomicU8};
 use zeroize::Zeroize;
 
-pub(super) struct BackendSession {
-    pub database: Database,
+pub(crate) struct BackendSession {
+    pub(super) database: Database,
+    pub(super) owner: AtomicU8,
 }
 impl BackendSession {
-    pub fn new(database: Database) -> Self {
-        Self { database }
+    pub(super) fn new(database: Database) -> Self {
+        Self {
+            database,
+            owner: AtomicU8::new(0),
+        }
     }
 }
 struct PendingDc(DcOption);

@@ -16,6 +16,77 @@ async fn open(path: &Path, options: SessionOptions) -> Session {
     .unwrap()
 }
 #[tokio::test]
+async fn production_client_uses_encrypted_loopback_once_and_joins_after_io_loss() {
+    use tokio::{io::AsyncReadExt, net::TcpListener, time::timeout};
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(
+        &dir.path().join("session.sqlite"),
+        SessionOptions::default(),
+    )
+    .await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let dc_id = session.inner.home_dc_id().unwrap();
+    let mut dc = session.inner.dc_option(dc_id).unwrap().unwrap();
+    dc.ipv4 = match listener.local_addr().unwrap() {
+        std::net::SocketAddr::V4(address) => address,
+        _ => unreachable!(),
+    };
+    dc.auth_key = Some([0x5a; 256]);
+    session.inner.set_dc_option(&dc).await.unwrap();
+    let client = crate::Client::new(
+        session.clone(),
+        crate::ClientOptions::default().request_timeout(Duration::from_secs(2)),
+    )
+    .unwrap();
+    assert!(
+        timeout(Duration::from_millis(20), listener.accept())
+            .await
+            .is_err()
+    );
+    let (stop, mut stopping) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let mut connections = 0;
+        let mut received = 0;
+        loop {
+            tokio::select! {
+                _ = &mut stopping => break,
+                accepted = listener.accept() => {
+                    let (mut socket, _) = accepted.unwrap();
+                    connections += 1;
+                    let mut bytes = [0; 1024];
+                    if let Ok(Ok(length)) = timeout(Duration::from_secs(1), socket.read(&mut bytes)).await {
+                        received += length;
+                    }
+                    // Close during InitConnection without replying or opening any real DC.
+                }
+            }
+        }
+        (connections, received)
+    });
+    let result = timeout(
+        Duration::from_secs(3),
+        client.invoke(&crate::tl::functions::Ping { ping_id: 42 }),
+    )
+    .await;
+    let closed = timeout(Duration::from_secs(3), client.close()).await;
+    let _ = stop.send(());
+    let (connections, received) = server.await.unwrap();
+    assert_eq!(
+        result.unwrap().unwrap_err().outcome(),
+        crate::Outcome::Unknown
+    );
+    closed.unwrap().unwrap();
+    assert_eq!(connections, 1, "ambiguous I/O loss must not retry");
+    assert!(
+        received > 0,
+        "the production sender wrote an encrypted request"
+    );
+    assert_eq!(
+        session.remembered_account().unwrap_err().kind(),
+        SessionErrorKind::Closed
+    );
+}
+#[tokio::test]
 async fn valid_incremental_state_reaches_the_configured_channel_count() {
     let dir = tempfile::tempdir().unwrap();
     let session = open(

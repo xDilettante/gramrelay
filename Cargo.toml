@@ -9,10 +9,12 @@ description = "A predictable Telegram Bot API client for humans and agents"
 members = ["tg-agent", "tg-mtproto"]
 default-members = [".", "tg-agent", "tg-mtproto"]
 resolver = "3"
-exclude = ["vendor/grammers-mtsender"]
+exclude = ["vendor/grammers-mtsender", "vendor/grammers-mtproto", "vendor/grammers-tl-types"]
 
 [patch.crates-io]
 grammers-mtsender = { path = "vendor/grammers-mtsender" }
+grammers-mtproto = { path = "vendor/grammers-mtproto" }
+grammers-tl-types = { path = "vendor/grammers-tl-types" }
 
 [features]
 default = ["bot"]

@@ -839,8 +839,6 @@ dependencies = [
 [[package]]
 name = "grammers-mtproto"
 version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc95dd02ac37101d8121e5098706a9c9b342e855ca7d7b8b5daa91ec7b119649"
 dependencies = [
  "crc32fast",
  "flate2",
@@ -900,8 +898,6 @@ dependencies = [
 [[package]]
 name = "grammers-tl-types"
 version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb4da570f8dbcea3e0d0a1746240045555bacc56b4d57d3a81204ee0e84736bd"
 dependencies = [
  "grammers-tl-gen",
  "grammers-tl-parser",
@@ -2808,8 +2804,10 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "chacha20poly1305",
  "getrandom 0.4.3",
+ "grammers-mtproto",
  "grammers-mtsender",
  "grammers-session",
+ "grammers-tl-types",
  "rusqlite",
  "serde",
  "serde_ignored",

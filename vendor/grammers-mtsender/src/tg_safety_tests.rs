@@ -2,6 +2,7 @@
 use super::*;
 use grammers_session::{SessionData, storages::MemorySession};
 use std::sync::atomic::{AtomicBool, Ordering};
+use tl::Deserializable;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 use tokio::time::timeout;

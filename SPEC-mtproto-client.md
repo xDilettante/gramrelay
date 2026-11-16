@@ -50,6 +50,14 @@ return conservative outcomes, call quit, await the whole driver tree, then
 abort/join residual client jobs and drain Session. No successor may start before
 that barrier. A timeout can return Unknown while cleanup still owns capacity;
 close().await confirms completion. Dropping a handle never reports joined close.
+Local serialization/validation and command-queue expiry before an owned backend
+job starts return NotSent without restarting an otherwise healthy generation.
+An owned job's deadline seals its generation, including an unsent job: tracked
+dispatch state distinguishes NotSent from Unknown. Completed RPCs are excluded
+from deadline scans even while their result-delivery task is still unwinding.
+An unsupported Tokio timer runtime is rejected before transferring the claim;
+unstarted close requires no timer. Normal cleanup never externally aborts the
+runner in place of awaiting its child barrier.
 
 Common actions verify expected/stored account identity before account data or
 write effects. Login and logout serialize authorization transitions. A logout
@@ -129,8 +137,8 @@ schema checks, deterministic protocol/agent artifacts and clean audit of 320
 dependencies. One ignored subprocess fixture is invoked by the crash test.
 This evidence does not complete M2 or claim authenticated network compatibility.
 
-Backend patch increment: the pinned grammers-mtsender archive is vendored with
-only sender_pool.rs/Cargo.toml changes plus local tests/provenance. Eight
+Initial backend patch increment: the pinned grammers-mtsender archive was
+vendored with sender_pool.rs/Cargo.toml changes plus local tests/provenance. Eight
 downstream regressions and the upstream parser unit pass. Quit/setup/child join,
 panic cleanup, post-quit refusal, sticky update loss, NoRetries I/O and flood
 refusal are covered. tools/verify_grammers.py checks archive SHA-256, unchanged
@@ -139,3 +147,31 @@ to 24. Whole-workspace all-feature tests, doctests and Clippy remain passing.
 The owning Client must still provide admission, deadlines, joined replacement,
 authorization and observable application acknowledgement; the backend patch
 does not supply those by itself.
+
+Client ownership/raw increment: lazy unique attachment, admission before bounded
+serialization, owned jobs after caller cancellation, absolute deadlines, session
+fencing and whole-driver joined close are implemented. The network backend uses
+NoRetries. Ten client lifecycle regressions include late unsent jobs, completed
+jobs pending collection, cancelled result destructors, unavailable Tokio timers,
+late session fencing, cancelled close waiters and capacity held through child
+cleanup. A public attachment test and a production Client encrypted-loopback
+test cover the ordinary constructor; I/O loss opens exactly one connection and
+returns Unknown. These join the eighteen session checks for thirty package tests.
+
+Pinned incoming parser increments separately vendor grammers-mtproto and
+grammers-tl-types 0.12.0. Response bounds precede SDK setup/control/error/update
+decoding. Exact TL consumption, canonical byte lengths/zero padding, cumulative
+gzip expansion, all gzip members and envelope depth are checked. Rejected
+containers restore receive state and queued results/acknowledgements without
+replenishing the expansion budget. Malformed own-updates/control failures remain
+observable. Source verification checks all three archives, unchanged files and
+recorded diffs; crypto/key derivation, schemas and generators are untouched.
+There are 59 core, three TL primitive and 11 sender unit tests (15 with its
+development fixture), plus 24 upstream TL doctests. Focused independent reviews
+found and fixed lifecycle, early parsing and rollback gaps with regressions.
+
+Whole-workspace evidence on Windows/Rust 1.98.0, 17 November 2026: 373 all-feature
+and 209 default tests, clean Clippy, 25 Python checks and audit of 362 dependencies.
+No authenticated Telegram compatibility, generated decoded-heap/stack bound,
+external-consumer packaging or cross-platform claim follows from this increment.
+Auth, common actions, files, history, observable updates and M3 remain open.

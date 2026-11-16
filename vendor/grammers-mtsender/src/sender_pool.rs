@@ -19,7 +19,7 @@ use grammers_session::Session;
 use grammers_session::storages::{ErasedSession, erase};
 use grammers_session::types::DcOption;
 use grammers_session::updates::UpdatesLike;
-use grammers_tl_types::{self as tl, Deserializable, enums};
+use grammers_tl_types::{self as tl, enums};
 use tokio::task::AbortHandle;
 use tokio::{
     sync::{mpsc, oneshot, watch},
@@ -30,7 +30,7 @@ use tracing::{debug, info, warn};
 
 use crate::configuration::{ConnectionParams, RetryContext};
 use crate::errors::{InvocationError, ReadError};
-use crate::{Sender, ServerAddr, connect, connect_with_auth};
+use crate::{Sender, ServerAddr, connect_with_auth};
 
 /// How long to wait after warning the user that the updates was dropped.
 const UPDATES_DROPPED_LOG_COOLDOWN: Duration = Duration::from_secs(300);
@@ -150,7 +150,7 @@ impl SenderPoolHandle {
     ) -> Result<R::Return, InvocationError> {
         self.do_invoke_in_dc(dc_id, request.to_bytes())
             .await
-            .and_then(|body| R::Return::from_bytes(&body).map_err(|e| e.into()))
+            .and_then(|body| crate::sender::decode_exact::<R::Return>(&body).map_err(Into::into))
     }
 
     /// Communicate with the running [`SenderPoolRunner`] instance
@@ -524,13 +524,31 @@ impl SenderPoolRunner {
                 .await
                 .map_err(InvocationError::Io)?
         } else {
-            connect(transport(), addr()).await?
+            let mut plain = Sender::connect(transport(), mtp::Plain::new(), addr())
+                .await
+                .map_err(InvocationError::Io)?;
+            plain.set_response_limit(self.connection_params.max_response_bytes);
+            crate::generate_auth_key(plain).await?
         };
+        sender.set_incoming_limits(
+            self.connection_params.max_response_bytes,
+            self.connection_params.max_expanded_bytes,
+            self.connection_params.max_incoming_nesting,
+        );
 
         let enums::Config::Config(remote_config) = match sender.invoke(&init_connection).await {
             Ok(config) => config,
             Err(InvocationError::Transport(transport::Error::BadStatus { status: 404 })) => {
-                sender = connect(transport(), addr()).await?;
+                let mut plain = Sender::connect(transport(), mtp::Plain::new(), addr())
+                    .await
+                    .map_err(InvocationError::Io)?;
+                plain.set_response_limit(self.connection_params.max_response_bytes);
+                sender = crate::generate_auth_key(plain).await?;
+                sender.set_incoming_limits(
+                    self.connection_params.max_response_bytes,
+                    self.connection_params.max_expanded_bytes,
+                    self.connection_params.max_incoming_nesting,
+                );
                 sender.invoke(&init_connection).await?
             }
             Err(e) => return Err(e),
