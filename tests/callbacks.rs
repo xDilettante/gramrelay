@@ -68,3 +68,32 @@ async fn callback_data_limit_counts_bytes_not_characters() {
     assert_eq!(error.outcome(), EffectOutcome::NotSent);
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn invalid_callback_reply_is_not_sent() {
+    let server = MockServer::start().await;
+    let bot = bot(&server);
+    for request in [
+        bot.answer_callback_query("".into()),
+        bot.answer_callback_query("valid-id".into())
+            .text("x".repeat(201)),
+    ] {
+        let error = request.await.unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Validation);
+        assert_eq!(error.outcome(), EffectOutcome::NotSent);
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[test]
+fn unknown_update_fields_survive_but_malformed_callbacks_are_rejected() {
+    let future = json!({"update_id":10,"future_event":{"value":42}});
+    let update: Update = serde_json::from_value(future).unwrap();
+    assert_eq!(update.unknown_fields["future_event"]["value"], 42);
+    assert!(
+        serde_json::from_value::<Update>(
+            json!({"update_id":11,"callback_query":{"id":"missing-required-fields"}})
+        )
+        .is_err()
+    );
+}

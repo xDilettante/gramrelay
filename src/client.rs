@@ -306,3 +306,22 @@ struct Parameters {
     retry_after: Option<u64>,
     migrate_to_chat_id: Option<ChatId>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn deadline_before_dispatch_is_not_sent() {
+        let bot = Bot::builder("123456:OFFLINE_TEST_TOKEN")
+            .timeout(Duration::from_millis(20))
+            .build()
+            .unwrap();
+        let error = bot
+            .perform::<bool>(std::future::pending())
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Timeout);
+        assert_eq!(error.outcome(), EffectOutcome::NotSent);
+    }
+}
