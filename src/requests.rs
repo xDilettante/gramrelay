@@ -1,4 +1,6 @@
-use crate::{Bot, ChatId, Error, ErrorKind, Message, Result};
+use crate::{
+    Bot, CallbackQueryId, ChatId, Error, ErrorKind, InlineKeyboardMarkup, Message, Result,
+};
 use serde::Serialize;
 use std::{
     future::{Future, IntoFuture},
@@ -20,6 +22,8 @@ struct MessageParams {
     text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     disable_notification: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reply_markup: Option<InlineKeyboardMarkup>,
 }
 
 impl<'a> SendMessage<'a> {
@@ -30,11 +34,16 @@ impl<'a> SendMessage<'a> {
                 chat_id,
                 text,
                 disable_notification: None,
+                reply_markup: None,
             },
         }
     }
     pub fn disable_notification(mut self, value: bool) -> Self {
         self.params.disable_notification = Some(value);
+        self
+    }
+    pub fn reply_markup(mut self, keyboard: InlineKeyboardMarkup) -> Self {
+        self.params.reply_markup = Some(keyboard);
         self
     }
 }
@@ -45,8 +54,63 @@ impl<'a> IntoFuture for SendMessage<'a> {
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move {
             validate_text(&self.params.text, "text", 1, 4096)?;
+            if let Some(keyboard) = &self.params.reply_markup {
+                keyboard.validate()?;
+            }
             self.bot
                 .perform(async { Ok(self.bot.post("sendMessage")?.json(&self.params)) })
+                .await
+        })
+    }
+}
+
+#[must_use = "requests are lazy; await the request to execute it"]
+pub struct AnswerCallbackQuery<'a> {
+    bot: &'a Bot,
+    params: CallbackParams,
+}
+
+#[derive(Serialize)]
+struct CallbackParams {
+    callback_query_id: CallbackQueryId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    show_alert: Option<bool>,
+}
+impl<'a> AnswerCallbackQuery<'a> {
+    pub(crate) fn new(bot: &'a Bot, id: CallbackQueryId) -> Self {
+        Self {
+            bot,
+            params: CallbackParams {
+                callback_query_id: id,
+                text: None,
+                show_alert: None,
+            },
+        }
+    }
+    pub fn text(mut self, text: impl Into<String>) -> Self {
+        self.params.text = Some(text.into());
+        self
+    }
+    pub fn show_alert(mut self, show: bool) -> Self {
+        self.params.show_alert = Some(show);
+        self
+    }
+}
+impl<'a> IntoFuture for AnswerCallbackQuery<'a> {
+    type Output = Result<bool>;
+    type IntoFuture = RequestFuture<'a, bool>;
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move {
+            if self.params.callback_query_id.is_empty() {
+                return Err(Error::local(ErrorKind::Validation, "callback_query_id"));
+            }
+            if let Some(text) = &self.params.text {
+                validate_text(text, "text", 0, 200)?;
+            }
+            self.bot
+                .perform(async { Ok(self.bot.post("answerCallbackQuery")?.json(&self.params)) })
                 .await
         })
     }

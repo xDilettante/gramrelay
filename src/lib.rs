@@ -8,5 +8,8 @@ mod types;
 
 pub use client::{Bot, BotBuilder};
 pub use error::{EffectOutcome, Error, ErrorKind, Result};
-pub use requests::{RequestFuture, SendMessage};
-pub use types::{Chat, ChatId, Message, MessageId, UserId};
+pub use requests::{AnswerCallbackQuery, RequestFuture, SendMessage};
+pub use types::{
+    CallbackQuery, CallbackQueryId, Chat, ChatId, InlineKeyboardButton, InlineKeyboardMarkup,
+    Message, MessageId, Update, User, UserId,
+};

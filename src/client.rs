@@ -1,4 +1,7 @@
-use crate::{ChatId, EffectOutcome, Error, ErrorKind, Result, SendMessage};
+use crate::{
+    AnswerCallbackQuery, CallbackQueryId, ChatId, EffectOutcome, Error, ErrorKind, Result,
+    SendMessage,
+};
 use reqwest::{Client, RequestBuilder, Url};
 use serde::{Deserialize, de::DeserializeOwned};
 use std::{
@@ -66,6 +69,11 @@ impl Bot {
     /// Create a lazy plain-text request. Only awaiting it dispatches the request.
     pub fn send_message(&self, chat: ChatId, text: impl Into<String>) -> SendMessage<'_> {
         SendMessage::new(self, chat, text.into())
+    }
+
+    /// Answer a callback from an update already received by the host.
+    pub fn answer_callback_query(&self, id: CallbackQueryId) -> AnswerCallbackQuery<'_> {
+        AnswerCallbackQuery::new(self, id)
     }
 
     pub(crate) fn post(&self, method: &str) -> Result<RequestBuilder> {
