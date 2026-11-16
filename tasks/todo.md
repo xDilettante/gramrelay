@@ -20,7 +20,7 @@ See tasks/goal.md. The active goal includes every unchecked module below.
 ## Durable state and agent tools
 
 - [x] J1: SQLite operation journal with canonical fingerprints, atomic claims and owner/version fencing. Verified: 22 journal tests, including real child-process termination at 4 boundaries, competing processes, lock-wait expiry, TTL/tombstones/capacity, safe receipts, cancellation and database-thread Drop/close. 141 all-feature workspace tests, 140 default tests, 3 doctests, Clippy, client-only builds, audit and offline journal example pass. Recovery never reissues Unknown; result expiry never frees a key. See SPEC-journal.md. Authorized execution remains A1.
-- [ ] J2: durable update ingestion, acknowledgements, retention and executor ownership. Verify: crash/replay/TTL tests.
+- [ ] J2: durable update ingestion, acknowledgements, retention and executor ownership. Transactional v1-to-v2 feed schema migration preserves operation receipts/hashes/active fences; migration and all J1 tests pass. Storage API, sources, consumers and polling remain open. See SPEC-update-journal.md.
 - [ ] A1: shared authorized executor with grants, bot/chat scopes, quotas and file handles. Depends J1/P2. Verify: policy bypass and cached-result access tests.
 - [ ] A2: CLI JSON with versioned input/output schemas. Depends A1. Verify: executable-level offline tests.
 - [ ] A3: MCP stdio adapter over the same executor, stable tool listing and correct annotations. Depends A2. Verify: protocol integration tests.

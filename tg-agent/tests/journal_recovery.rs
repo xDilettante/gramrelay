@@ -383,7 +383,7 @@ async fn foreign_newer_incomplete_and_corrupt_databases_fail_closed() {
                     connection
                         .pragma_update(None, "application_id", 0x54474131i64)
                         .unwrap();
-                    connection.pragma_update(None, "user_version", 2).unwrap();
+                    connection.pragma_update(None, "user_version", 99).unwrap();
                 }
                 _ => {
                     connection

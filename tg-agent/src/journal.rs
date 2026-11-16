@@ -245,21 +245,61 @@ fn initialize(connection: &mut Connection) -> Result<()> {
         transaction
             .pragma_update(None, "application_id", APPLICATION)
             .map_err(|_| storage())?;
-        transaction
-            .pragma_update(None, "user_version", 1)
-            .map_err(|_| storage())?;
-    } else if application != APPLICATION || version != 1 {
+    } else if application != APPLICATION || !(1..=2).contains(&version) {
         return Err(JournalError::new(JournalErrorKind::UnsupportedSchema));
     }
+    if version < 2 {
+        verify_schema(&transaction, &[include_str!("journal/schema.sql")])?;
+        transaction
+            .execute_batch(include_str!("updates/schema.sql"))
+            .map_err(|_| storage())?;
+        transaction
+            .pragma_update(None, "user_version", 2)
+            .map_err(|_| storage())?;
+    }
+    verify_schema(
+        &transaction,
+        &[
+            include_str!("journal/schema.sql"),
+            include_str!("updates/schema.sql"),
+        ],
+    )?;
+    transaction.commit().map_err(|_| storage())?;
+    let mode: String = connection
+        .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
+        .map_err(|_| storage())?;
+    connection
+        .pragma_update(None, "synchronous", "FULL")
+        .map_err(|_| storage())?;
+    connection
+        .pragma_update(None, "secure_delete", "ON")
+        .map_err(|_| storage())?;
+    connection
+        .pragma_update(None, "foreign_keys", "ON")
+        .map_err(|_| storage())?;
+    let synchronous: i64 = connection
+        .pragma_query_value(None, "synchronous", |row| row.get(0))
+        .map_err(|_| storage())?;
+    let foreign_keys: bool = connection
+        .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+        .map_err(|_| storage())?;
+    if !mode.eq_ignore_ascii_case("wal") || synchronous != 2 || !foreign_keys {
+        return Err(storage());
+    }
+    Ok(())
+}
+
+fn verify_schema(connection: &Connection, schemas: &[&str]) -> Result<()> {
     // The reviewed DDL is part of this version, including constraints and indexes.
     let mut expected_count = 0;
-    for expected in include_str!("journal/schema.sql")
-        .split(';')
+    for expected in schemas
+        .iter()
+        .flat_map(|schema| schema.split(';'))
         .map(str::trim)
         .filter(|sql| !sql.is_empty())
     {
         let name = expected.split_whitespace().nth(2).ok_or_else(storage)?;
-        let actual: Option<String> = transaction
+        let actual: Option<String> = connection
             .query_row(
                 "SELECT sql FROM sqlite_schema WHERE name=?1",
                 [name],
@@ -272,7 +312,7 @@ fn initialize(connection: &mut Connection) -> Result<()> {
         }
         expected_count += 1;
     }
-    let actual_count: i64 = transaction
+    let actual_count: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
             [],
@@ -281,22 +321,6 @@ fn initialize(connection: &mut Connection) -> Result<()> {
         .map_err(|_| storage())?;
     if actual_count != expected_count {
         return Err(JournalError::new(JournalErrorKind::UnsupportedSchema));
-    }
-    transaction.commit().map_err(|_| storage())?;
-    let mode: String = connection
-        .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
-        .map_err(|_| storage())?;
-    connection
-        .pragma_update(None, "synchronous", "FULL")
-        .map_err(|_| storage())?;
-    connection
-        .pragma_update(None, "secure_delete", "ON")
-        .map_err(|_| storage())?;
-    let synchronous: i64 = connection
-        .pragma_query_value(None, "synchronous", |row| row.get(0))
-        .map_err(|_| storage())?;
-    if !mode.eq_ignore_ascii_case("wal") || synchronous != 2 {
-        return Err(storage());
     }
     Ok(())
 }
