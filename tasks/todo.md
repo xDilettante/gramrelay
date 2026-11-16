@@ -12,7 +12,7 @@ See tasks/goal.md. The active goal includes every unchecked module below.
 ## Protocol and client
 
 - [x] P1: pinned 10.4 structural schema (193 methods / 425 types), standard-library importer and reproducible Rust inventory catalog. Verified: 13 Python tests, complete reference/inventory checks, byte-identical re-import/regeneration, Rust catalog test and full regressions. Adversarial review corrected a conditional numeric fact and added fail-closed markup/union regressions. Full callable Rust types/methods remain P2.
-- [ ] P2: all pinned Bot API methods/types, fixtures, effect/replay metadata and compatibility cases. Depends P1. Verify: generated API tests and coverage manifest.
+- [ ] P2: all pinned Bot API methods/types, fixtures, effect/replay metadata and compatibility cases. Types implemented: all 425 definitions, strict literal/union decoding, read-only unknown fields, bounded Update/enum storage; 425 structural fixtures and 5 compatibility tests pass. Methods remain open. Depends P1. Verify: generated API tests and coverage manifest.
 - [ ] C1: rich text/entities, complete contextual replies/files, download limits and opt-in safe retry policy. Depends P2. Verify: Unicode, streaming and failure tests.
 - [ ] C2: optional tracing/metrics and narrow integration features. Verify: privacy and feature-matrix checks.
 

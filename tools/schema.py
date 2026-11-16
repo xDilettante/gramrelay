@@ -404,16 +404,24 @@ def main():
     if schema.get("overrides_sha256") != hashlib.sha256(canonical(overrides).encode("utf-8")).hexdigest():
         raise SchemaError("overrides changed; re-import the pinned source")
     generated = generate_catalog(schema)
+    try:
+        from .rustgen import generate_types, generate_type_fixtures
+    except ImportError:
+        from rustgen import generate_types, generate_type_fixtures
+    outputs = {catalog_path: generated, ROOT / "src/generated/types.rs": generate_types(schema)}
+    outputs[ROOT / "src/generated/fixtures.rs"] = generate_type_fixtures(schema)
     if args.command == "check":
         if schema_path.read_text(encoding="utf-8") != canonical(schema):
             raise SchemaError("canonical schema formatting drifted")
-        if catalog_path.read_text(encoding="utf-8") != generated:
-            raise SchemaError("generated catalog drifted; run generate")
+        for path, source in outputs.items():
+            if not path.exists() or path.read_text(encoding="utf-8") != source:
+                raise SchemaError(f"generated {path.name} drifted; run generate")
         print(f"verified {len(schema['methods'])} methods and {len(schema['types'])} types")
     else:
-        catalog_path.parent.mkdir(parents=True, exist_ok=True)
-        catalog_path.write_text(generated, encoding="utf-8", newline="\n")
-        print(catalog_path.relative_to(ROOT))
+        for path, source in outputs.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(source, encoding="utf-8", newline="\n")
+            print(path.relative_to(ROOT))
 
 
 if __name__ == "__main__":

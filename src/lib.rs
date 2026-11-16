@@ -21,6 +21,7 @@ mod requests;
 mod routing;
 mod types;
 mod updates;
+mod wire;
 
 #[path = "generated/mod.rs"]
 pub mod api;

@@ -26,6 +26,11 @@ impl From<ChatId> for i64 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct MessageId(i64);
+impl From<i64> for MessageId {
+    fn from(value: i64) -> Self {
+        Self(value)
+    }
+}
 impl From<MessageId> for i64 {
     fn from(value: MessageId) -> Self {
         value.0
@@ -76,6 +81,16 @@ pub struct Message {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct FileId(String);
+impl From<String> for FileId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+impl From<&str> for FileId {
+    fn from(value: &str) -> Self {
+        Self(value.into())
+    }
+}
 impl FileId {
     pub fn as_str(&self) -> &str {
         &self.0
