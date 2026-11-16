@@ -5,6 +5,9 @@ edition = "2024"
 publish = false
 description = "Durable and authorized Telegram actions for agents"
 
+[features]
+bot = ["tg/bot", "tokio/macros", "tokio/time"]
+
 [dependencies]
 base64 = "0.23"
 getrandom = "0.4"
@@ -22,3 +25,7 @@ tg = { path = "..", default-features = false, features = ["test-kit"] }
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[[example]]
+name = "durable_bot"
+required-features = ["bot"]

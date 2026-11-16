@@ -24,6 +24,14 @@ impl fmt::Debug for UpdateFeed {
     }
 }
 impl UpdateFeed {
+    #[cfg(feature = "bot")]
+    pub(crate) fn bot_id(&self) -> i64 {
+        self.bot_id
+    }
+    #[cfg(feature = "bot")]
+    pub(crate) fn lease_duration(&self) -> std::time::Duration {
+        self.journal.lease_duration()
+    }
     pub async fn open(
         journal: Journal,
         profile: impl Into<String>,

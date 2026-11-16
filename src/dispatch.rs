@@ -30,7 +30,8 @@ impl DispatchOptions {
         self.handler_timeout = timeout;
         self
     }
-    pub(crate) fn validate(&self) -> Result<()> {
+    /// Validate bounds without dispatching work or making a request.
+    pub fn validate(&self) -> Result<()> {
         if !(1..=100).contains(&self.max_concurrency) {
             return Err(Error::local(ErrorKind::Validation, "max_concurrency"));
         }

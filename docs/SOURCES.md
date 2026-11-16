@@ -45,3 +45,7 @@ The implementation uses reqwest 0.13.5, Tokio 1.54.1, tokio-util 0.7.20 and wire
 - Opaque cursor encoding: base64 0.23.1, already pinned in Cargo.lock; URL_SAFE_NO_PAD and Engine verified against installed registry source. Primary project: https://github.com/marshallpierce/rust-base64
 
 Unknown effect handling is our conservative contract, not a Telegram idempotency guarantee. It intentionally treats connection and decode failures after dispatch as ambiguous.
+
+- Bounded dispatcher task ownership and abort-on-drop: https://docs.rs/tokio/1.54.1/tokio/task/struct.JoinSet.html
+- Fair cleanup/confirmation admission and close wakeups: https://docs.rs/tokio/1.54.1/tokio/sync/struct.Semaphore.html
+- Cooperative timeout/cancellation limitations: Tokio 1.54.1 installed source src/time/timeout.rs, including the documented non-yielding future limitation; canonical reference https://docs.rs/tokio/1.54.1/tokio/time/fn.timeout.html (web fetch unavailable, local pinned source checked).
