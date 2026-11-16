@@ -5,6 +5,11 @@ edition = "2024"
 publish = false
 description = "A predictable Telegram Bot API client for humans and agents"
 
+[workspace]
+members = ["tg-agent"]
+default-members = [".", "tg-agent"]
+resolver = "3"
+
 [features]
 default = ["bot"]
 bot = ["tokio-util/rt", "tokio/signal"]
