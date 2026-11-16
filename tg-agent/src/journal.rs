@@ -321,7 +321,7 @@ fn initialize(connection: &mut Connection) -> Result<()> {
     if application == 0 && version == 0 {
         let tables: i64 = transaction
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
+                "SELECT COUNT(*) FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'",
                 [],
                 |row| row.get(0),
             )
@@ -463,7 +463,7 @@ fn verify_schema(connection: &Connection, schemas: &[&str]) -> Result<()> {
     }
     let actual_count: i64 = connection
         .query_row(
-            "SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
+            "SELECT COUNT(*) FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'",
             [],
             |row| row.get(0),
         )

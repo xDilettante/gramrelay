@@ -6,8 +6,8 @@ publish = false
 description = "A predictable Telegram Bot API client for humans and agents"
 
 [workspace]
-members = ["tg-agent"]
-default-members = [".", "tg-agent"]
+members = ["tg-agent", "tg-mtproto"]
+default-members = [".", "tg-agent", "tg-mtproto"]
 resolver = "3"
 
 [features]

@@ -22,6 +22,28 @@ fn prepared(result: Preparation) -> tg_agent::journal::Prepared {
 }
 
 #[tokio::test]
+async fn schema_rejects_extra_objects_named_like_sqlite_internal_objects() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("operations.sqlite");
+    let journal = Journal::open(&path, JournalOptions::default())
+        .await
+        .unwrap();
+    journal.close().await.unwrap();
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute_batch("CREATE VIEW sqliteXhidden AS SELECT 1;")
+        .unwrap();
+    let result = Journal::open(&path, JournalOptions::default()).await;
+    if let Ok(journal) = &result {
+        journal.close().await.unwrap();
+    }
+    assert_eq!(
+        result.unwrap_err().kind(),
+        JournalErrorKind::UnsupportedSchema
+    );
+}
+
+#[tokio::test]
 async fn success_is_durable_and_duplicate_calls_never_receive_another_lease() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("operations.sqlite");
