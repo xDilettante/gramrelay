@@ -89,3 +89,17 @@ async fn invalid_poll_parameters_do_not_discard_or_fetch_updates() {
     }
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn an_update_with_two_known_event_kinds_is_rejected() {
+    let server = MockServer::start().await;
+    Mock::given(path(format!("/bot{TOKEN}/getUpdates")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok":true,"result":[{
+            "update_id":1,
+            "message":{"message_id":1,"date":1,"chat":{"id":1,"type":"private"}},
+            "callback_query":{"id":"query","from":{"id":1,"is_bot":false,"first_name":"User"},"chat_instance":"instance"}
+        }]}))).expect(1).mount(&server).await;
+    let error = bot(&server).get_updates().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Decode);
+    assert_eq!(error.outcome(), EffectOutcome::Unknown);
+}

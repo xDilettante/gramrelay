@@ -140,6 +140,7 @@ pub struct CallbackQuery {
 
 /// Decode an update received by the host. This type does not start a receiver.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(try_from = "UpdateWire")]
 #[non_exhaustive]
 pub struct Update {
     pub update_id: i64,
@@ -148,6 +149,30 @@ pub struct Update {
     /// Preserve update fields not yet modeled by this prototype.
     #[serde(flatten)]
     pub unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct UpdateWire {
+    update_id: i64,
+    message: Option<Message>,
+    callback_query: Option<CallbackQuery>,
+    #[serde(flatten)]
+    unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+impl TryFrom<UpdateWire> for Update {
+    type Error = &'static str;
+    fn try_from(wire: UpdateWire) -> std::result::Result<Self, Self::Error> {
+        if wire.message.is_some() && wire.callback_query.is_some() {
+            return Err("an update cannot contain multiple known event kinds");
+        }
+        Ok(Self {
+            update_id: wire.update_id,
+            message: wire.message,
+            callback_query: wire.callback_query,
+            unknown_fields: wire.unknown_fields,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
