@@ -1,6 +1,6 @@
 # Protocol schema and generation
 
-Module ID: protocol. This slice implements P1; P2 remains responsible for the complete callable typed Rust API.
+Module ID: protocol. P1 specifies source extraction and pinning; P2 specifies the complete callable typed Rust API.
 
 ## P2: typed wire surface
 
@@ -12,7 +12,7 @@ Tagged unions decode known tags strictly and preserve new string tags in an opaq
 
 All generated methods use one sealed typed request path and the existing bounded, redacted transport. Wire methods support all pinned parameters; convenience helpers remain available. Effect/replay metadata requires explicit review, with conservative defaults never granting agent permissions. Files, retries and agent authorization are separate gates, not implicit consequences of generation.
 
-`schema/method-policy.json` lists the effect for every method and binds it to the exact canonical schema hash; missing/stale/unknown entries fail generation. Only explicitly reviewed Read methods have ReadOnly replay advice; all other categories have Never advice. There is no automatic retry, including for reads. Credential-returning methods and credential fields use SecretString with redacted Debug and explicit exposure. Generated parameter objects reject unknown arguments. Generic multipart attachment support is tracked with C1; the wire InputFile string represents a file ID, URL or attachment reference.
+`schema/method-policy.json` lists the effect for every method and binds it to the exact canonical schema hash; missing/stale/unknown entries fail generation. Only explicitly reviewed Read methods have ReadOnly replay advice; all other categories have Never advice. There is no automatic retry, including for reads. Credential-returning methods and credential fields use SecretString with redacted Debug and explicit exposure. Generated parameter objects reject unknown arguments. The wire InputFile string represents a file ID, URL or attachment reference. Generic multipart and the reviewed String file-field policy are specified in SPEC-client.md; typed traversal ignores ordinary strings and unknown variants.
 
 Verify strict known/unknown union behavior, required/literal fields, nested recursion, Unicode, ID separation, reproducibility, complete method/type coverage and representative exact JSON requests against localhost mocks. No live Telegram calls are needed.
 
@@ -26,7 +26,8 @@ The canonical schema records API version, source URL/SHA-256, all object fields,
 
 - schema/bot-api.json: sorted, pinned structural schema, independent of filesystem timestamps.
 - schema/overrides.json: explicit reviewed corrections for return/type ambiguities; stale or unused overrides fail.
-- src/generated/catalog.rs: reproducible method/type inventory and schema identity, later extended with typed code by P2.
+- src/generated/catalog.rs: reproducible method/type inventory and schema identity.
+- src/generated/types.rs and methods.rs: the complete pinned typed wire surface; fixtures verify every definition.
 - Coverage report: every recognized official type/method appears once; all named references resolve. The initial 10.4 source contains 193 methods and 425 types; count changes require deliberate review.
 
 Use Python's standard library for development-only HTML extraction/generation, with unittest fixtures and no additional runtime dependencies. The library and callable generated surface remain Rust. Generated code and the canonical schema are checked in.

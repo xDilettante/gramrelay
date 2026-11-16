@@ -141,7 +141,7 @@ Bot::builder(token) поддерживает:
 | Настройка | Значение по умолчанию |
 |---|---|
 | timeout | 30 секунд на подготовку, upload и чтение ответа |
-| max_upload_bytes | 50 000 000 байт для нового файла |
+| max_upload_bytes | 50 000 000 байт суммарно для новых файлов запроса |
 | max_response_bytes | 1 MiB, проверяется также без Content-Length |
 | max_in_flight | 32; превышение возвращает Capacity без очереди |
 | api_url | https://api.telegram.org/ |
@@ -162,7 +162,7 @@ async fn full_api(bot: &Bot) -> tg::Result<()> {
         .chat_id(ChatId::from(123456789).into())
         .protect_content(true)
         .await?;
-    let request = methods::DeleteMessage::new(sent.chat.id.into(), sent.message_id);
+    let request = methods::GetChat::new(sent.chat.id.into());
     bot.call(request).await?;
     Ok(())
 }
@@ -170,7 +170,21 @@ async fn full_api(bot: &Bot) -> tg::Result<()> {
 
 Сборка запроса не отправляет его. Оба способа используют тот же транспорт, ограничения и семантику Unknown без автоматических повторов. schema/method-policy.json закрепляет эффекты всех методов за точным хешем схемы; метаданные не предоставляют агенту разрешений. Возвращаемые токены и поля с credentials используют SecretString: Debug скрыт, чтение требует expose_secret(). Сериализация SecretString намеренно сохраняет значение для отправки в API.
 
-Wire InputFile — строковая ссылка на file ID, URL или attach://name. Для новой загрузки пока доступен корневой send_document; общий multipart для сгенерированных методов — следующий этап C1.
+Wire InputFile — строковая ссылка на file ID, URL или attach://name. Новые файлы привязываются к сгенерированному запросу через attach; пути открываются только при await:
+
+```rust
+use tg::{Bot, ChatId, InputFile};
+
+async fn upload(bot: &Bot) -> tg::Result<()> {
+    bot.api().send_photo("attach://image".into())
+        .chat_id(ChatId::from(123456789).into())
+        .attach("image", InputFile::path("photo.jpg"))
+        .await?;
+    Ok(())
+}
+```
+
+Это работает и для вложенных media group. Имя привязки содержит до 64 ASCII-букв/цифр/подчёркиваний, начинается с буквы и отличается от имён параметров. До 32 привязок; лишние, повторные и отсутствующие привязки отклоняются до отправки. Общий размер ограничен max_upload_bytes. Ссылки распознаются только в типизированных файловых полях; обычный текст attach://… остаётся текстом. String-поля Telegram с файловой семантикой закреплены в schema/file-policy.json. Существующий file ID указывается прямо в wire-параметре, не через attach.
 
 Инструмент разработки tools/schema.py использует стандартную библиотеку Python 3 и не обращается к сети. Сгенерированные файлы хранятся в Git; обычной сборке Cargo Python не нужен. Проверка и регенерация:
 
@@ -205,6 +219,6 @@ cargo run --example answer_callback -- "C:/path/update.json"
 cargo run --example polling
 ```
 
-Проверки выполнялись на Windows x86_64, Rust 1.98.0: 55 unit/integration-тестов и 2 doctest, а также 19 тестов инструментов схемы; проходят также тесты клиентской сборки без слоя bot. Структурные fixtures охватывают все 425 типов и 193 метода, включая обязательные поля и запрет неизвестных параметров запроса. MSRV и работа на Linux/macOS пока не подтверждены. Проверяются JSON/multipart, callback, файлы, локальные отказы, 429, 5xx, неизвестные ответы, тайм-ауты, ограничения нагрузки, redirects, секреты в диагностике, маршрутизация, polling, порядок событий и остановка. Живые вызовы Telegram при разработке не выполнялись.
+Проверки выполнялись на Windows x86_64, Rust 1.98.0: 62 unit/integration-теста и 2 doctest, а также 21 тест инструментов схемы. Структурные fixtures охватывают все 425 типов и 193 метода, включая обязательные поля и запрет неизвестных параметров запроса. MSRV и работа на Linux/macOS пока не подтверждены. Проверяются JSON/multipart, callback, файлы, локальные отказы, 429, 5xx, неизвестные ответы, тайм-ауты, ограничения нагрузки, redirects, секреты в диагностике, маршрутизация, polling, порядок событий и остановка. Живые вызовы Telegram при разработке не выполнялись.
 
-Следующие этапы: общий multipart, rich text, интеграция полного wire API с runtime, постоянный журнал и webhook endpoint, CLI/MCP, затем отдельный MTProto-клиент. Полная цель остаётся активной. Источники контрактов: [docs/SOURCES.md](docs/SOURCES.md). План: [tasks/todo.md](tasks/todo.md).
+Следующие этапы: rich text, интеграция полного wire API с runtime, download/retry, постоянный журнал и webhook endpoint, CLI/MCP, затем отдельный MTProto-клиент. Полная цель остаётся активной. Источники контрактов: [docs/SOURCES.md](docs/SOURCES.md). План: [tasks/todo.md](tasks/todo.md).

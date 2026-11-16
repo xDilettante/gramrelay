@@ -1319,6 +1319,10 @@ impl AcceptedGiftTypes {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for AcceptedGiftTypes {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`AffiliateInfo`](https://core.telegram.org/bots/api#affiliateinfo).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1361,6 +1365,12 @@ impl AffiliateInfo {
     pub fn nanostar_amount(mut self, value: i64) -> Self {
         self.nanostar_amount = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for AffiliateInfo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.affiliate_user, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.affiliate_chat, references);
     }
 }
 
@@ -1420,6 +1430,11 @@ impl Animation {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for Animation {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, references);
+    }
+}
 
 /// Telegram [`AreaPosition`](https://core.telegram.org/bots/api#areaposition).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1449,6 +1464,10 @@ impl AreaPosition {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for AreaPosition {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -1518,6 +1537,11 @@ impl Audio {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for Audio {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, references);
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -1549,6 +1573,16 @@ impl From<BackgroundFillGradient> for BackgroundFill {
 impl From<BackgroundFillFreeformGradient> for BackgroundFill {
     fn from(value: BackgroundFillFreeformGradient) -> Self { Self::BackgroundFillFreeformGradient(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for BackgroundFill {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::BackgroundFillSolid(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::BackgroundFillGradient(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::BackgroundFillFreeformGradient(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`BackgroundFillFreeformGradient`](https://core.telegram.org/bots/api#backgroundfillfreeformgradient).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1571,6 +1605,10 @@ impl BackgroundFillFreeformGradient {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for BackgroundFillFreeformGradient {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -1601,6 +1639,10 @@ impl BackgroundFillGradient {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for BackgroundFillGradient {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`BackgroundFillSolid`](https://core.telegram.org/bots/api#backgroundfillsolid).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1623,6 +1665,10 @@ impl BackgroundFillSolid {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for BackgroundFillSolid {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -1661,6 +1707,17 @@ impl From<BackgroundTypePattern> for BackgroundType {
 impl From<BackgroundTypeChatTheme> for BackgroundType {
     fn from(value: BackgroundTypeChatTheme) -> Self { Self::BackgroundTypeChatTheme(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for BackgroundType {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::BackgroundTypeFill(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::BackgroundTypeWallpaper(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::BackgroundTypePattern(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::BackgroundTypeChatTheme(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`BackgroundTypeChatTheme`](https://core.telegram.org/bots/api#backgroundtypechattheme).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1683,6 +1740,10 @@ impl BackgroundTypeChatTheme {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for BackgroundTypeChatTheme {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -1709,6 +1770,11 @@ impl BackgroundTypeFill {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for BackgroundTypeFill {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.fill, references);
     }
 }
 
@@ -1753,6 +1819,12 @@ impl BackgroundTypePattern {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for BackgroundTypePattern {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.document, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.fill, references);
+    }
+}
 
 /// Telegram [`BackgroundTypeWallpaper`](https://core.telegram.org/bots/api#backgroundtypewallpaper).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1793,6 +1865,11 @@ impl BackgroundTypeWallpaper {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for BackgroundTypeWallpaper {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.document, references);
+    }
+}
 
 /// Telegram [`Birthdate`](https://core.telegram.org/bots/api#birthdate).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1823,6 +1900,10 @@ impl Birthdate {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for Birthdate {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`BotAccessSettings`](https://core.telegram.org/bots/api#botaccesssettings).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1849,6 +1930,11 @@ impl BotAccessSettings {
     pub fn added_users(mut self, value: Vec<User>) -> Self {
         self.added_users = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for BotAccessSettings {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.added_users, references);
     }
 }
 
@@ -1879,6 +1965,10 @@ impl BotCommand {
     pub fn is_ephemeral(mut self, value: bool) -> Self {
         self.is_ephemeral = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for BotCommand {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -1932,6 +2022,20 @@ impl From<BotCommandScopeChatAdministrators> for BotCommandScope {
 impl From<BotCommandScopeChatMember> for BotCommandScope {
     fn from(value: BotCommandScopeChatMember) -> Self { Self::BotCommandScopeChatMember(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for BotCommandScope {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::BotCommandScopeDefault(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::BotCommandScopeAllPrivateChats(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::BotCommandScopeAllGroupChats(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::BotCommandScopeAllChatAdministrators(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::BotCommandScopeChat(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::BotCommandScopeChatAdministrators(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::BotCommandScopeChatMember(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`BotCommandScopeAllChatAdministrators`](https://core.telegram.org/bots/api#botcommandscopeallchatadministrators).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1956,6 +2060,10 @@ impl BotCommandScopeAllChatAdministrators {
 }
 impl Default for BotCommandScopeAllChatAdministrators {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for BotCommandScopeAllChatAdministrators {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`BotCommandScopeAllGroupChats`](https://core.telegram.org/bots/api#botcommandscopeallgroupchats).
@@ -1982,6 +2090,10 @@ impl BotCommandScopeAllGroupChats {
 impl Default for BotCommandScopeAllGroupChats {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for BotCommandScopeAllGroupChats {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`BotCommandScopeAllPrivateChats`](https://core.telegram.org/bots/api#botcommandscopeallprivatechats).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2007,6 +2119,10 @@ impl BotCommandScopeAllPrivateChats {
 impl Default for BotCommandScopeAllPrivateChats {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for BotCommandScopeAllPrivateChats {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`BotCommandScopeChat`](https://core.telegram.org/bots/api#botcommandscopechat).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2031,6 +2147,10 @@ impl BotCommandScopeChat {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for BotCommandScopeChat {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`BotCommandScopeChatAdministrators`](https://core.telegram.org/bots/api#botcommandscopechatadministrators).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2053,6 +2173,10 @@ impl BotCommandScopeChatAdministrators {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for BotCommandScopeChatAdministrators {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -2081,6 +2205,10 @@ impl BotCommandScopeChatMember {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for BotCommandScopeChatMember {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`BotCommandScopeDefault`](https://core.telegram.org/bots/api#botcommandscopedefault).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2106,6 +2234,10 @@ impl BotCommandScopeDefault {
 impl Default for BotCommandScopeDefault {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for BotCommandScopeDefault {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`BotDescription`](https://core.telegram.org/bots/api#botdescription).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2125,6 +2257,10 @@ impl BotDescription {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for BotDescription {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -2148,6 +2284,10 @@ impl BotName {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for BotName {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`BotShortDescription`](https://core.telegram.org/bots/api#botshortdescription).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2167,6 +2307,10 @@ impl BotShortDescription {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for BotShortDescription {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -2192,6 +2336,11 @@ impl BotSubscriptionUpdated {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for BotSubscriptionUpdated {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
     }
 }
 
@@ -2314,6 +2463,10 @@ impl BusinessBotRights {
 impl Default for BusinessBotRights {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for BusinessBotRights {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`BusinessConnection`](https://core.telegram.org/bots/api#businessconnection).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2348,6 +2501,12 @@ impl BusinessConnection {
     pub fn rights(mut self, value: BusinessBotRights) -> Self {
         self.rights = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for BusinessConnection {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.rights, references);
     }
 }
 
@@ -2393,6 +2552,11 @@ impl BusinessIntro {
 impl Default for BusinessIntro {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for BusinessIntro {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sticker, references);
+    }
+}
 
 /// Telegram [`BusinessLocation`](https://core.telegram.org/bots/api#businesslocation).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2421,6 +2585,11 @@ impl BusinessLocation {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for BusinessLocation {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.location, references);
+    }
+}
 
 /// Telegram [`BusinessMessagesDeleted`](https://core.telegram.org/bots/api#businessmessagesdeleted).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2446,6 +2615,11 @@ impl BusinessMessagesDeleted {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for BusinessMessagesDeleted {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
+    }
+}
 
 /// Telegram [`BusinessOpeningHours`](https://core.telegram.org/bots/api#businessopeninghours).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2467,6 +2641,11 @@ impl BusinessOpeningHours {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for BusinessOpeningHours {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.opening_hours, references);
     }
 }
 
@@ -2492,6 +2671,10 @@ impl BusinessOpeningHoursInterval {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for BusinessOpeningHoursInterval {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`CallbackGame`](https://core.telegram.org/bots/api#callbackgame).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2513,6 +2696,10 @@ impl CallbackGame {
 }
 impl Default for CallbackGame {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for CallbackGame {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`CallbackQuery`](https://core.telegram.org/bots/api#callbackquery).
@@ -2565,6 +2752,12 @@ impl CallbackQuery {
     pub fn game_short_name(mut self, value: String) -> Self {
         self.game_short_name = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for CallbackQuery {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.from, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.message, references);
     }
 }
 
@@ -2631,6 +2824,10 @@ impl Chat {
     pub fn is_direct_messages(mut self, value: crate::api::True) -> Self {
         self.is_direct_messages = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for Chat {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -2718,6 +2915,10 @@ impl ChatAdministratorRights {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ChatAdministratorRights {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`ChatBackground`](https://core.telegram.org/bots/api#chatbackground).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2738,6 +2939,11 @@ impl ChatBackground {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ChatBackground {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.kind, references);
     }
 }
 
@@ -2767,6 +2973,11 @@ impl ChatBoost {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for ChatBoost {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.source, references);
+    }
+}
 
 /// Telegram [`ChatBoostAdded`](https://core.telegram.org/bots/api#chatboostadded).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2786,6 +2997,10 @@ impl ChatBoostAdded {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ChatBoostAdded {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -2813,6 +3028,12 @@ impl ChatBoostRemoved {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ChatBoostRemoved {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.source, references);
     }
 }
 
@@ -2846,6 +3067,16 @@ impl From<ChatBoostSourceGiftCode> for ChatBoostSource {
 impl From<ChatBoostSourceGiveaway> for ChatBoostSource {
     fn from(value: ChatBoostSourceGiveaway) -> Self { Self::ChatBoostSourceGiveaway(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for ChatBoostSource {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::ChatBoostSourcePremium(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ChatBoostSourceGiftCode(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ChatBoostSourceGiveaway(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`ChatBoostSourceGiftCode`](https://core.telegram.org/bots/api#chatboostsourcegiftcode).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2867,6 +3098,11 @@ impl ChatBoostSourceGiftCode {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ChatBoostSourceGiftCode {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
     }
 }
 
@@ -2913,6 +3149,11 @@ impl ChatBoostSourceGiveaway {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ChatBoostSourceGiveaway {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
+    }
+}
 
 /// Telegram [`ChatBoostSourcePremium`](https://core.telegram.org/bots/api#chatboostsourcepremium).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2936,6 +3177,11 @@ impl ChatBoostSourcePremium {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for ChatBoostSourcePremium {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
+    }
+}
 
 /// Telegram [`ChatBoostUpdated`](https://core.telegram.org/bots/api#chatboostupdated).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2957,6 +3203,12 @@ impl ChatBoostUpdated {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ChatBoostUpdated {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.boost, references);
     }
 }
 
@@ -3339,6 +3591,29 @@ impl ChatFullInfo {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ChatFullInfo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.birthdate, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.business_intro, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.business_location, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.business_opening_hours, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.personal_chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.parent_chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.available_reactions, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.pinned_message, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.permissions, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.accepted_gift_types, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.location, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.rating, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.first_profile_audio, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.unique_gift_colors, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.guard_bot, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.community, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ton_wallet_card, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.share_theme, references);
+    }
+}
 
 /// Telegram [`ChatInviteLink`](https://core.telegram.org/bots/api#chatinvitelink).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3410,6 +3685,11 @@ impl ChatInviteLink {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ChatInviteLink {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.creator, references);
+    }
+}
 
 /// Telegram [`ChatJoinRequest`](https://core.telegram.org/bots/api#chatjoinrequest).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3458,6 +3738,13 @@ impl ChatJoinRequest {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ChatJoinRequest {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.from, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.invite_link, references);
+    }
+}
 
 /// Telegram [`ChatLocation`](https://core.telegram.org/bots/api#chatlocation).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3479,6 +3766,11 @@ impl ChatLocation {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ChatLocation {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.location, references);
     }
 }
 
@@ -3526,6 +3818,19 @@ impl From<ChatMemberLeft> for ChatMember {
 }
 impl From<ChatMemberBanned> for ChatMember {
     fn from(value: ChatMemberBanned) -> Self { Self::ChatMemberBanned(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for ChatMember {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::ChatMemberOwner(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ChatMemberAdministrator(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ChatMemberMember(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ChatMemberRestricted(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ChatMemberLeft(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ChatMemberBanned(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
 }
 
 /// Telegram [`ChatMemberAdministrator`](https://core.telegram.org/bots/api#chatmemberadministrator).
@@ -3625,6 +3930,11 @@ impl ChatMemberAdministrator {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ChatMemberAdministrator {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
+    }
+}
 
 /// Telegram [`ChatMemberBanned`](https://core.telegram.org/bots/api#chatmemberbanned).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3650,6 +3960,11 @@ impl ChatMemberBanned {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for ChatMemberBanned {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
+    }
+}
 
 /// Telegram [`ChatMemberLeft`](https://core.telegram.org/bots/api#chatmemberleft).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3671,6 +3986,11 @@ impl ChatMemberLeft {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ChatMemberLeft {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
     }
 }
 
@@ -3710,6 +4030,11 @@ impl ChatMemberMember {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ChatMemberMember {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
+    }
+}
 
 /// Telegram [`ChatMemberOwner`](https://core.telegram.org/bots/api#chatmemberowner).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3740,6 +4065,11 @@ impl ChatMemberOwner {
     pub fn custom_title(mut self, value: String) -> Self {
         self.custom_title = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for ChatMemberOwner {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
     }
 }
 
@@ -3808,6 +4138,11 @@ impl ChatMemberRestricted {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ChatMemberRestricted {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
+    }
+}
 
 /// Telegram [`ChatMemberUpdated`](https://core.telegram.org/bots/api#chatmemberupdated).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3858,6 +4193,15 @@ impl ChatMemberUpdated {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ChatMemberUpdated {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.from, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.old_chat_member, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.new_chat_member, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.invite_link, references);
+    }
+}
 
 /// Telegram [`ChatOwnerChanged`](https://core.telegram.org/bots/api#chatownerchanged).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3877,6 +4221,11 @@ impl ChatOwnerChanged {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ChatOwnerChanged {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.new_owner, references);
     }
 }
 
@@ -3907,6 +4256,11 @@ impl ChatOwnerLeft {
 }
 impl Default for ChatOwnerLeft {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for ChatOwnerLeft {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.new_owner, references);
+    }
 }
 
 /// Telegram [`ChatPermissions`](https://core.telegram.org/bots/api#chatpermissions).
@@ -4042,6 +4396,10 @@ impl ChatPermissions {
 impl Default for ChatPermissions {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for ChatPermissions {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`ChatPhoto`](https://core.telegram.org/bots/api#chatphoto).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4067,6 +4425,10 @@ impl ChatPhoto {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ChatPhoto {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -4095,6 +4457,15 @@ impl From<ChatShareThemeEmoji> for ChatShareTheme {
 impl From<ChatShareThemeUniqueGift> for ChatShareTheme {
     fn from(value: ChatShareThemeUniqueGift) -> Self { Self::ChatShareThemeUniqueGift(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for ChatShareTheme {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::ChatShareThemeEmoji(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ChatShareThemeUniqueGift(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`ChatShareThemeBackdrop`](https://core.telegram.org/bots/api#chatsharethemebackdrop).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4120,6 +4491,11 @@ impl ChatShareThemeBackdrop {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for ChatShareThemeBackdrop {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.colors, references);
+    }
+}
 
 /// Telegram [`ChatShareThemeBackdrops`](https://core.telegram.org/bots/api#chatsharethemebackdrops).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4139,6 +4515,11 @@ impl ChatShareThemeBackdrops {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ChatShareThemeBackdrops {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.backdrops, references);
     }
 }
 
@@ -4172,6 +4553,11 @@ impl ChatShareThemeEmoji {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ChatShareThemeEmoji {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.emojis, references);
+    }
+}
 
 /// Telegram [`ChatShareThemeUniqueGift`](https://core.telegram.org/bots/api#chatsharethemeuniquegift).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4194,6 +4580,11 @@ impl ChatShareThemeUniqueGift {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ChatShareThemeUniqueGift {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.gift, references);
     }
 }
 
@@ -4240,6 +4631,11 @@ impl ChatShared {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ChatShared {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, references);
+    }
+}
 
 /// Telegram [`Checklist`](https://core.telegram.org/bots/api#checklist).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4282,6 +4678,12 @@ impl Checklist {
     pub fn others_can_mark_tasks_as_done(mut self, value: crate::api::True) -> Self {
         self.others_can_mark_tasks_as_done = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for Checklist {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.title_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.tasks, references);
     }
 }
 
@@ -4335,6 +4737,13 @@ impl ChecklistTask {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ChecklistTask {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.completed_by_user, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.completed_by_chat, references);
+    }
+}
 
 /// Telegram [`ChecklistTasksAdded`](https://core.telegram.org/bots/api#checklisttasksadded).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4361,6 +4770,12 @@ impl ChecklistTasksAdded {
     pub fn checklist_message(mut self, value: Message) -> Self {
         self.checklist_message = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for ChecklistTasksAdded {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.checklist_message, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.tasks, references);
     }
 }
 
@@ -4406,6 +4821,11 @@ impl ChecklistTasksDone {
 impl Default for ChecklistTasksDone {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for ChecklistTasksDone {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.checklist_message, references);
+    }
+}
 
 /// Telegram [`ChosenInlineResult`](https://core.telegram.org/bots/api#choseninlineresult).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4445,6 +4865,12 @@ impl ChosenInlineResult {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ChosenInlineResult {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.from, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.location, references);
+    }
+}
 
 /// Telegram [`Community`](https://core.telegram.org/bots/api#community).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4468,6 +4894,10 @@ impl Community {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for Community {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`CommunityChatAdded`](https://core.telegram.org/bots/api#communitychatadded).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4487,6 +4917,11 @@ impl CommunityChatAdded {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for CommunityChatAdded {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.community, references);
     }
 }
 
@@ -4510,6 +4945,11 @@ impl CommunityChatJoined {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for CommunityChatJoined {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.community, references);
+    }
+}
 
 /// Telegram [`CommunityChatRemoved`](https://core.telegram.org/bots/api#communitychatremoved).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4531,6 +4971,10 @@ impl CommunityChatRemoved {
 }
 impl Default for CommunityChatRemoved {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for CommunityChatRemoved {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`Contact`](https://core.telegram.org/bots/api#contact).
@@ -4576,6 +5020,10 @@ impl Contact {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for Contact {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -4616,6 +5064,16 @@ impl From<ReplyKeyboardRemove> for CopyMessageReplyMarkup {
 impl From<ForceReply> for CopyMessageReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for CopyMessageReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
+}
 
 /// Telegram [`CopyTextButton`](https://core.telegram.org/bots/api#copytextbutton).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4635,6 +5093,10 @@ impl CopyTextButton {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for CopyTextButton {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -4658,6 +5120,10 @@ impl Dice {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for Dice {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -4688,6 +5154,10 @@ impl DirectMessagePriceChanged {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for DirectMessagePriceChanged {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`DirectMessagesTopic`](https://core.telegram.org/bots/api#directmessagestopic).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4716,6 +5186,11 @@ impl DirectMessagesTopic {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for DirectMessagesTopic {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
+    }
+}
 
 /// Telegram [`DisabledButton`](https://core.telegram.org/bots/api#disabledbutton).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4737,6 +5212,10 @@ impl DisabledButton {
 }
 impl Default for DisabledButton {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for DisabledButton {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`Document`](https://core.telegram.org/bots/api#document).
@@ -4789,6 +5268,11 @@ impl Document {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for Document {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, references);
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -4817,6 +5301,14 @@ impl From<Message> for EditMessageCaptionResult {
 }
 impl From<crate::api::True> for EditMessageCaptionResult {
     fn from(value: crate::api::True) -> Self { Self::True(value) }
+}
+impl crate::typed_api::CollectAttachments for EditMessageCaptionResult {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::Message(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::True(_) => {},
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -4847,6 +5339,14 @@ impl From<Message> for EditMessageLiveLocationResult {
 impl From<crate::api::True> for EditMessageLiveLocationResult {
     fn from(value: crate::api::True) -> Self { Self::True(value) }
 }
+impl crate::typed_api::CollectAttachments for EditMessageLiveLocationResult {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::Message(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::True(_) => {},
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -4875,6 +5375,14 @@ impl From<Message> for EditMessageMediaResult {
 }
 impl From<crate::api::True> for EditMessageMediaResult {
     fn from(value: crate::api::True) -> Self { Self::True(value) }
+}
+impl crate::typed_api::CollectAttachments for EditMessageMediaResult {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::Message(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::True(_) => {},
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -4905,6 +5413,14 @@ impl From<Message> for EditMessageReplyMarkupResult {
 impl From<crate::api::True> for EditMessageReplyMarkupResult {
     fn from(value: crate::api::True) -> Self { Self::True(value) }
 }
+impl crate::typed_api::CollectAttachments for EditMessageReplyMarkupResult {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::Message(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::True(_) => {},
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -4934,6 +5450,14 @@ impl From<Message> for EditMessageTextResult {
 impl From<crate::api::True> for EditMessageTextResult {
     fn from(value: crate::api::True) -> Self { Self::True(value) }
 }
+impl crate::typed_api::CollectAttachments for EditMessageTextResult {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::Message(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::True(_) => {},
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -4960,6 +5484,15 @@ impl From<EmojiTypeEmoji> for EmojiType {
 impl From<EmojiTypeCustomEmoji> for EmojiType {
     fn from(value: EmojiTypeCustomEmoji) -> Self { Self::EmojiTypeCustomEmoji(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for EmojiType {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::EmojiTypeEmoji(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::EmojiTypeCustomEmoji(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`EmojiTypeCustomEmoji`](https://core.telegram.org/bots/api#emojitypecustomemoji).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4982,6 +5515,10 @@ impl EmojiTypeCustomEmoji {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for EmojiTypeCustomEmoji {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -5008,6 +5545,10 @@ impl EmojiTypeEmoji {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for EmojiTypeEmoji {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`EncryptedCredentials`](https://core.telegram.org/bots/api#encryptedcredentials).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5031,6 +5572,10 @@ impl EncryptedCredentials {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for EncryptedCredentials {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -5113,6 +5658,15 @@ impl EncryptedPassportElement {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for EncryptedPassportElement {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.files, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.front_side, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reverse_side, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.selfie, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.translation, references);
+    }
+}
 
 /// Telegram [`EphemeralMessageParameters`](https://core.telegram.org/bots/api#ephemeralmessageparameters).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5155,6 +5709,10 @@ impl EphemeralMessageParameters {
 }
 impl Default for EphemeralMessageParameters {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for EphemeralMessageParameters {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`ExternalReplyInfo`](https://core.telegram.org/bots/api#externalreplyinfo).
@@ -5359,6 +5917,35 @@ impl ExternalReplyInfo {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ExternalReplyInfo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.origin, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.link_preview_options, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.animation, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.audio, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.document, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.live_photo, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.paid_media, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sticker, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.story, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.video, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.video_note, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.voice, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.widget, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.checklist, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.contact, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.dice, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.game, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.giveaway, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.giveaway_winners, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.invoice, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.location, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.poll, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.venue, references);
+    }
+}
 
 /// Telegram [`File`](https://core.telegram.org/bots/api#file).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5394,6 +5981,10 @@ impl File {
     pub fn file_path(mut self, value: String) -> Self {
         self.file_path = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for File {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -5434,6 +6025,10 @@ impl ForceReply {
 impl Default for ForceReply {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for ForceReply {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`ForumTopic`](https://core.telegram.org/bots/api#forumtopic).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5473,6 +6068,10 @@ impl ForumTopic {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ForumTopic {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`ForumTopicClosed`](https://core.telegram.org/bots/api#forumtopicclosed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5494,6 +6093,10 @@ impl ForumTopicClosed {
 }
 impl Default for ForumTopicClosed {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for ForumTopicClosed {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`ForumTopicCreated`](https://core.telegram.org/bots/api#forumtopiccreated).
@@ -5532,6 +6135,10 @@ impl ForumTopicCreated {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ForumTopicCreated {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`ForumTopicEdited`](https://core.telegram.org/bots/api#forumtopicedited).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5568,6 +6175,10 @@ impl ForumTopicEdited {
 impl Default for ForumTopicEdited {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for ForumTopicEdited {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`ForumTopicReopened`](https://core.telegram.org/bots/api#forumtopicreopened).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5589,6 +6200,10 @@ impl ForumTopicReopened {
 }
 impl Default for ForumTopicReopened {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for ForumTopicReopened {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`Game`](https://core.telegram.org/bots/api#game).
@@ -5636,6 +6251,13 @@ impl Game {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for Game {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.animation, references);
+    }
+}
 
 /// Telegram [`GameHighScore`](https://core.telegram.org/bots/api#gamehighscore).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5661,6 +6283,11 @@ impl GameHighScore {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for GameHighScore {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
+    }
+}
 
 /// Telegram [`GeneralForumTopicHidden`](https://core.telegram.org/bots/api#generalforumtopichidden).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5683,6 +6310,10 @@ impl GeneralForumTopicHidden {
 impl Default for GeneralForumTopicHidden {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for GeneralForumTopicHidden {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`GeneralForumTopicUnhidden`](https://core.telegram.org/bots/api#generalforumtopicunhidden).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5704,6 +6335,10 @@ impl GeneralForumTopicUnhidden {
 }
 impl Default for GeneralForumTopicUnhidden {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for GeneralForumTopicUnhidden {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`Gift`](https://core.telegram.org/bots/api#gift).
@@ -5800,6 +6435,13 @@ impl Gift {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for Gift {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sticker, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.background, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.publisher_chat, references);
+    }
+}
 
 /// Telegram [`GiftBackground`](https://core.telegram.org/bots/api#giftbackground).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5823,6 +6465,10 @@ impl GiftBackground {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for GiftBackground {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -5909,6 +6555,12 @@ impl GiftInfo {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for GiftInfo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.gift, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.entities, references);
+    }
+}
 
 /// Telegram [`Gifts`](https://core.telegram.org/bots/api#gifts).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5928,6 +6580,11 @@ impl Gifts {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for Gifts {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.gifts, references);
     }
 }
 
@@ -5997,6 +6654,11 @@ impl Giveaway {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for Giveaway {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chats, references);
+    }
+}
 
 /// Telegram [`GiveawayCompleted`](https://core.telegram.org/bots/api#giveawaycompleted).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -6039,6 +6701,11 @@ impl GiveawayCompleted {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for GiveawayCompleted {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.giveaway_message, references);
+    }
+}
 
 /// Telegram [`GiveawayCreated`](https://core.telegram.org/bots/api#giveawaycreated).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -6067,6 +6734,10 @@ impl GiveawayCreated {
 }
 impl Default for GiveawayCreated {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for GiveawayCreated {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`GiveawayWinners`](https://core.telegram.org/bots/api#giveawaywinners).
@@ -6146,6 +6817,12 @@ impl GiveawayWinners {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for GiveawayWinners {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.winners, references);
+    }
+}
 
 /// Telegram [`InaccessibleMessage`](https://core.telegram.org/bots/api#inaccessiblemessage).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -6169,6 +6846,11 @@ impl InaccessibleMessage {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for InaccessibleMessage {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
     }
 }
 
@@ -6283,6 +6965,16 @@ impl InlineKeyboardButton {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InlineKeyboardButton {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.web_app, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.login_url, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.switch_inline_query_chosen_chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.copy_text, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.callback_game, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.disabled, references);
+    }
+}
 
 /// Telegram [`InlineKeyboardMarkup`](https://core.telegram.org/bots/api#inlinekeyboardmarkup).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -6309,6 +7001,11 @@ impl InlineKeyboardMarkup {
     pub fn force_reply(mut self, value: bool) -> Self {
         self.force_reply = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InlineKeyboardMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.inline_keyboard, references);
     }
 }
 
@@ -6350,6 +7047,12 @@ impl InlineQuery {
     pub fn location(mut self, value: Location) -> Self {
         self.location = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InlineQuery {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.from, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.location, references);
     }
 }
 
@@ -6531,6 +7234,33 @@ impl From<InlineQueryResultVideo> for InlineQueryResult {
 impl From<InlineQueryResultVoice> for InlineQueryResult {
     fn from(value: InlineQueryResultVoice) -> Self { Self::InlineQueryResultVoice(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for InlineQueryResult {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineQueryResultCachedAudio(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultCachedDocument(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultCachedGif(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultCachedMpeg4Gif(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultCachedPhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultCachedSticker(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultCachedVideo(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultCachedVoice(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultArticle(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultAudio(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultContact(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultGame(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultDocument(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultGif(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultLocation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultMpeg4Gif(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultPhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultVenue(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultVideo(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InlineQueryResultVoice(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`InlineQueryResultArticle`](https://core.telegram.org/bots/api#inlinequeryresultarticle).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -6599,6 +7329,12 @@ impl InlineQueryResultArticle {
     pub fn thumbnail_height(mut self, value: i64) -> Self {
         self.thumbnail_height = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InlineQueryResultArticle {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
     }
 }
 
@@ -6678,6 +7414,13 @@ impl InlineQueryResultAudio {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InlineQueryResultAudio {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
+    }
+}
 
 /// Telegram [`InlineQueryResultCachedAudio`](https://core.telegram.org/bots/api#inlinequeryresultcachedaudio).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -6737,6 +7480,13 @@ impl InlineQueryResultCachedAudio {
     pub fn input_message_content(mut self, value: InputMessageContent) -> Self {
         self.input_message_content = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InlineQueryResultCachedAudio {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
     }
 }
 
@@ -6807,6 +7557,13 @@ impl InlineQueryResultCachedDocument {
     pub fn input_message_content(mut self, value: InputMessageContent) -> Self {
         self.input_message_content = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InlineQueryResultCachedDocument {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
     }
 }
 
@@ -6884,6 +7641,13 @@ impl InlineQueryResultCachedGif {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InlineQueryResultCachedGif {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
+    }
+}
 
 /// Telegram [`InlineQueryResultCachedMpeg4Gif`](https://core.telegram.org/bots/api#inlinequeryresultcachedmpeg4gif).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -6957,6 +7721,13 @@ impl InlineQueryResultCachedMpeg4Gif {
     pub fn input_message_content(mut self, value: InputMessageContent) -> Self {
         self.input_message_content = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InlineQueryResultCachedMpeg4Gif {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
     }
 }
 
@@ -7041,6 +7812,13 @@ impl InlineQueryResultCachedPhoto {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InlineQueryResultCachedPhoto {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
+    }
+}
 
 /// Telegram [`InlineQueryResultCachedSticker`](https://core.telegram.org/bots/api#inlinequeryresultcachedsticker).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -7079,6 +7857,12 @@ impl InlineQueryResultCachedSticker {
     pub fn input_message_content(mut self, value: InputMessageContent) -> Self {
         self.input_message_content = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InlineQueryResultCachedSticker {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
     }
 }
 
@@ -7158,6 +7942,13 @@ impl InlineQueryResultCachedVideo {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InlineQueryResultCachedVideo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
+    }
+}
 
 /// Telegram [`InlineQueryResultCachedVoice`](https://core.telegram.org/bots/api#inlinequeryresultcachedvoice).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -7219,6 +8010,13 @@ impl InlineQueryResultCachedVoice {
     pub fn input_message_content(mut self, value: InputMessageContent) -> Self {
         self.input_message_content = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InlineQueryResultCachedVoice {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
     }
 }
 
@@ -7296,6 +8094,12 @@ impl InlineQueryResultContact {
     pub fn thumbnail_height(mut self, value: i64) -> Self {
         self.thumbnail_height = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InlineQueryResultContact {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
     }
 }
 
@@ -7391,6 +8195,13 @@ impl InlineQueryResultDocument {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InlineQueryResultDocument {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
+    }
+}
 
 /// Telegram [`InlineQueryResultGame`](https://core.telegram.org/bots/api#inlinequeryresultgame).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -7422,6 +8233,11 @@ impl InlineQueryResultGame {
     pub fn reply_markup(mut self, value: InlineKeyboardMarkup) -> Self {
         self.reply_markup = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InlineQueryResultGame {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
     }
 }
 
@@ -7529,6 +8345,13 @@ impl InlineQueryResultGif {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InlineQueryResultGif {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
+    }
+}
 
 /// Telegram [`InlineQueryResultLocation`](https://core.telegram.org/bots/api#inlinequeryresultlocation).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -7620,6 +8443,12 @@ impl InlineQueryResultLocation {
     pub fn thumbnail_height(mut self, value: i64) -> Self {
         self.thumbnail_height = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InlineQueryResultLocation {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
     }
 }
 
@@ -7727,6 +8556,13 @@ impl InlineQueryResultMpeg4Gif {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InlineQueryResultMpeg4Gif {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
+    }
+}
 
 /// Telegram [`InlineQueryResultPhoto`](https://core.telegram.org/bots/api#inlinequeryresultphoto).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -7825,6 +8661,13 @@ impl InlineQueryResultPhoto {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InlineQueryResultPhoto {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
+    }
+}
 
 /// Telegram [`InlineQueryResultVenue`](https://core.telegram.org/bots/api#inlinequeryresultvenue).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -7918,6 +8761,12 @@ impl InlineQueryResultVenue {
     pub fn thumbnail_height(mut self, value: i64) -> Self {
         self.thumbnail_height = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InlineQueryResultVenue {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
     }
 }
 
@@ -8022,6 +8871,13 @@ impl InlineQueryResultVideo {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InlineQueryResultVideo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
+    }
+}
 
 /// Telegram [`InlineQueryResultVoice`](https://core.telegram.org/bots/api#inlinequeryresultvoice).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8092,6 +8948,13 @@ impl InlineQueryResultVoice {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InlineQueryResultVoice {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.input_message_content, references);
+    }
+}
 
 /// Telegram [`InlineQueryResultsButton`](https://core.telegram.org/bots/api#inlinequeryresultsbutton).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8125,6 +8988,11 @@ impl InlineQueryResultsButton {
     pub fn start_parameter(mut self, value: String) -> Self {
         self.start_parameter = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InlineQueryResultsButton {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.web_app, references);
     }
 }
 
@@ -8178,6 +9046,12 @@ impl InputChecklist {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputChecklist {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.title_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.tasks, references);
+    }
+}
 
 /// Telegram [`InputChecklistTask`](https://core.telegram.org/bots/api#inputchecklisttask).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8215,6 +9089,11 @@ impl InputChecklistTask {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputChecklistTask {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text_entities, references);
+    }
+}
 
 /// Telegram [`InputContactMessageContent`](https://core.telegram.org/bots/api#inputcontactmessagecontent).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8250,6 +9129,10 @@ impl InputContactMessageContent {
     pub fn vcard(mut self, value: String) -> Self {
         self.vcard = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InputContactMessageContent {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -8389,6 +9272,11 @@ impl InputInvoiceMessageContent {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputInvoiceMessageContent {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.prices, references);
+    }
+}
 
 /// Telegram [`InputLocationMessageContent`](https://core.telegram.org/bots/api#inputlocationmessagecontent).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8440,6 +9328,10 @@ impl InputLocationMessageContent {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputLocationMessageContent {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -8485,6 +9377,19 @@ impl From<InputMediaPhoto> for InputMedia {
 }
 impl From<InputMediaVideo> for InputMedia {
     fn from(value: InputMediaVideo) -> Self { Self::InputMediaVideo(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for InputMedia {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InputMediaAnimation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaAudio(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaDocument(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaLivePhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaPhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaVideo(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
 }
 
 /// Telegram [`InputMediaAnimation`](https://core.telegram.org/bots/api#inputmediaanimation).
@@ -8573,6 +9478,13 @@ impl InputMediaAnimation {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputMediaAnimation {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+    }
+}
 
 /// Telegram [`InputMediaAudio`](https://core.telegram.org/bots/api#inputmediaaudio).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8646,6 +9558,13 @@ impl InputMediaAudio {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputMediaAudio {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+    }
+}
 
 /// Telegram [`InputMediaDocument`](https://core.telegram.org/bots/api#inputmediadocument).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8705,6 +9624,13 @@ impl InputMediaDocument {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputMediaDocument {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+    }
+}
 
 /// Telegram [`InputMediaLink`](https://core.telegram.org/bots/api#inputmedialink).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8727,6 +9653,10 @@ impl InputMediaLink {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for InputMediaLink {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -8790,6 +9720,13 @@ impl InputMediaLivePhoto {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputMediaLivePhoto {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+    }
+}
 
 /// Telegram [`InputMediaLocation`](https://core.telegram.org/bots/api#inputmedialocation).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8821,6 +9758,10 @@ impl InputMediaLocation {
     pub fn horizontal_accuracy(mut self, value: f64) -> Self {
         self.horizontal_accuracy = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InputMediaLocation {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -8882,6 +9823,12 @@ impl InputMediaPhoto {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputMediaPhoto {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+    }
+}
 
 /// Telegram [`InputMediaSticker`](https://core.telegram.org/bots/api#inputmediasticker).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8911,6 +9858,11 @@ impl InputMediaSticker {
     pub fn emoji(mut self, value: String) -> Self {
         self.emoji = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InputMediaSticker {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
     }
 }
 
@@ -8969,6 +9921,10 @@ impl InputMediaVenue {
     pub fn google_place_type(mut self, value: String) -> Self {
         self.google_place_type = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InputMediaVenue {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -9079,6 +10035,14 @@ impl InputMediaVideo {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputMediaVideo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.cover, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+    }
+}
 
 /// Telegram [`InputMediaVoiceNote`](https://core.telegram.org/bots/api#inputmediavoicenote).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9129,6 +10093,12 @@ impl InputMediaVoiceNote {
     pub fn duration(mut self, value: i64) -> Self {
         self.duration = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InputMediaVoiceNote {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
     }
 }
 
@@ -9195,6 +10165,20 @@ impl From<InputWidgetMessageContent> for InputMessageContent {
 impl From<InputSharedWidgetMessageContent> for InputMessageContent {
     fn from(value: InputSharedWidgetMessageContent) -> Self { Self::InputSharedWidgetMessageContent(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for InputMessageContent {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InputTextMessageContent(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichMessageContent(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputLocationMessageContent(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputVenueMessageContent(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputContactMessageContent(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputInvoiceMessageContent(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputWidgetMessageContent(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputSharedWidgetMessageContent(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -9226,6 +10210,16 @@ impl From<InputPaidMediaPhoto> for InputPaidMedia {
 impl From<InputPaidMediaVideo> for InputPaidMedia {
     fn from(value: InputPaidMediaVideo) -> Self { Self::InputPaidMediaVideo(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for InputPaidMedia {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InputPaidMediaLivePhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputPaidMediaPhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputPaidMediaVideo(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`InputPaidMediaLivePhoto`](https://core.telegram.org/bots/api#inputpaidmedialivephoto).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9252,6 +10246,12 @@ impl InputPaidMediaLivePhoto {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for InputPaidMediaLivePhoto {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, references);
+    }
+}
 
 /// Telegram [`InputPaidMediaPhoto`](https://core.telegram.org/bots/api#inputpaidmediaphoto).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9274,6 +10274,11 @@ impl InputPaidMediaPhoto {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for InputPaidMediaPhoto {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
     }
 }
 
@@ -9349,6 +10354,13 @@ impl InputPaidMediaVideo {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputPaidMediaVideo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.cover, references);
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -9405,6 +10417,21 @@ impl From<InputMediaVenue> for InputPollMedia {
 impl From<InputMediaVideo> for InputPollMedia {
     fn from(value: InputMediaVideo) -> Self { Self::InputMediaVideo(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for InputPollMedia {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InputMediaAnimation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaAudio(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaDocument(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaLivePhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaLocation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaPhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaVenue(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaVideo(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`InputPollOption`](https://core.telegram.org/bots/api#inputpolloption).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9445,6 +10472,12 @@ impl InputPollOption {
     pub fn media(mut self, value: InputPollOptionMedia) -> Self {
         self.media = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InputPollOption {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
     }
 }
 
@@ -9503,6 +10536,21 @@ impl From<InputMediaVenue> for InputPollOptionMedia {
 impl From<InputMediaVideo> for InputPollOptionMedia {
     fn from(value: InputMediaVideo) -> Self { Self::InputMediaVideo(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for InputPollOptionMedia {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InputMediaAnimation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaLink(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaLivePhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaLocation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaPhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaSticker(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaVenue(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaVideo(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -9528,6 +10576,15 @@ impl From<InputProfilePhotoStatic> for InputProfilePhoto {
 }
 impl From<InputProfilePhotoAnimated> for InputProfilePhoto {
     fn from(value: InputProfilePhotoAnimated) -> Self { Self::InputProfilePhotoAnimated(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for InputProfilePhoto {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InputProfilePhotoStatic(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputProfilePhotoAnimated(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
 }
 
 /// Telegram [`InputProfilePhotoAnimated`](https://core.telegram.org/bots/api#inputprofilephotoanimated).
@@ -9560,6 +10617,11 @@ impl InputProfilePhotoAnimated {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputProfilePhotoAnimated {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.animation, references);
+    }
+}
 
 /// Telegram [`InputProfilePhotoStatic`](https://core.telegram.org/bots/api#inputprofilephotostatic).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9582,6 +10644,11 @@ impl InputProfilePhotoStatic {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for InputProfilePhotoStatic {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, references);
     }
 }
 
@@ -9720,6 +10787,37 @@ impl From<InputRichBlockVoiceNote> for InputRichBlock {
 impl From<InputRichBlockThinking> for InputRichBlock {
     fn from(value: InputRichBlockThinking) -> Self { Self::InputRichBlockThinking(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for InputRichBlock {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InputRichBlockParagraph(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockSectionHeading(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockPreformatted(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockFooter(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockDivider(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockMathematicalExpression(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockAnchor(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockList(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockBlockQuotation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockExpandableBlockQuotation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockPullQuotation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockCollage(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockSlideshow(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockTable(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockDetails(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockMap(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockButtons(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockAnimation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockAudio(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockDocument(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockPhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockVideo(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockVoiceNote(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputRichBlockThinking(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`InputRichBlockAnchor`](https://core.telegram.org/bots/api#inputrichblockanchor).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9742,6 +10840,10 @@ impl InputRichBlockAnchor {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for InputRichBlockAnchor {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -9775,6 +10877,12 @@ impl InputRichBlockAnimation {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputRichBlockAnimation {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.animation, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
+    }
+}
 
 /// Telegram [`InputRichBlockAudio`](https://core.telegram.org/bots/api#inputrichblockaudio).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9804,6 +10912,12 @@ impl InputRichBlockAudio {
     pub fn caption(mut self, value: RichBlockCaption) -> Self {
         self.caption = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InputRichBlockAudio {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.audio, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
     }
 }
 
@@ -9837,6 +10951,12 @@ impl InputRichBlockBlockQuotation {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputRichBlockBlockQuotation {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.blocks, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.credit, references);
+    }
+}
 
 /// Telegram [`InputRichBlockButtons`](https://core.telegram.org/bots/api#inputrichblockbuttons).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9868,6 +10988,11 @@ impl InputRichBlockButtons {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputRichBlockButtons {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.buttons, references);
+    }
+}
 
 /// Telegram [`InputRichBlockCollage`](https://core.telegram.org/bots/api#inputrichblockcollage).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9897,6 +11022,12 @@ impl InputRichBlockCollage {
     pub fn caption(mut self, value: RichBlockCaption) -> Self {
         self.caption = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InputRichBlockCollage {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.blocks, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
     }
 }
 
@@ -9932,6 +11063,12 @@ impl InputRichBlockDetails {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputRichBlockDetails {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.summary, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.blocks, references);
+    }
+}
 
 /// Telegram [`InputRichBlockDivider`](https://core.telegram.org/bots/api#inputrichblockdivider).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9956,6 +11093,10 @@ impl InputRichBlockDivider {
 }
 impl Default for InputRichBlockDivider {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for InputRichBlockDivider {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`InputRichBlockDocument`](https://core.telegram.org/bots/api#inputrichblockdocument).
@@ -9986,6 +11127,12 @@ impl InputRichBlockDocument {
     pub fn caption(mut self, value: RichBlockCaption) -> Self {
         self.caption = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InputRichBlockDocument {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.document, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
     }
 }
 
@@ -10019,6 +11166,12 @@ impl InputRichBlockExpandableBlockQuotation {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputRichBlockExpandableBlockQuotation {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.credit, references);
+    }
+}
 
 /// Telegram [`InputRichBlockFooter`](https://core.telegram.org/bots/api#inputrichblockfooter).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10043,6 +11196,11 @@ impl InputRichBlockFooter {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for InputRichBlockFooter {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`InputRichBlockList`](https://core.telegram.org/bots/api#inputrichblocklist).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10065,6 +11223,11 @@ impl InputRichBlockList {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for InputRichBlockList {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.items, references);
     }
 }
 
@@ -10115,6 +11278,11 @@ impl InputRichBlockListItem {
     pub fn kind(mut self, value: String) -> Self {
         self.kind = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InputRichBlockListItem {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.blocks, references);
     }
 }
 
@@ -10169,6 +11337,12 @@ impl InputRichBlockMap {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputRichBlockMap {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.location, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
+    }
+}
 
 /// Telegram [`InputRichBlockMathematicalExpression`](https://core.telegram.org/bots/api#inputrichblockmathematicalexpression).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10193,6 +11367,10 @@ impl InputRichBlockMathematicalExpression {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for InputRichBlockMathematicalExpression {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`InputRichBlockParagraph`](https://core.telegram.org/bots/api#inputrichblockparagraph).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10215,6 +11393,11 @@ impl InputRichBlockParagraph {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for InputRichBlockParagraph {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -10248,6 +11431,12 @@ impl InputRichBlockPhoto {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputRichBlockPhoto {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
+    }
+}
 
 /// Telegram [`InputRichBlockPreformatted`](https://core.telegram.org/bots/api#inputrichblockpreformatted).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10277,6 +11466,11 @@ impl InputRichBlockPreformatted {
     pub fn language(mut self, value: String) -> Self {
         self.language = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InputRichBlockPreformatted {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -10310,6 +11504,12 @@ impl InputRichBlockPullQuotation {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputRichBlockPullQuotation {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.credit, references);
+    }
+}
 
 /// Telegram [`InputRichBlockSectionHeading`](https://core.telegram.org/bots/api#inputrichblocksectionheading).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10334,6 +11534,11 @@ impl InputRichBlockSectionHeading {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for InputRichBlockSectionHeading {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -10365,6 +11570,12 @@ impl InputRichBlockSlideshow {
     pub fn caption(mut self, value: RichBlockCaption) -> Self {
         self.caption = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InputRichBlockSlideshow {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.blocks, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
     }
 }
 
@@ -10419,6 +11630,12 @@ impl InputRichBlockTable {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputRichBlockTable {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.cells, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
+    }
+}
 
 /// Telegram [`InputRichBlockThinking`](https://core.telegram.org/bots/api#inputrichblockthinking).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10441,6 +11658,11 @@ impl InputRichBlockThinking {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for InputRichBlockThinking {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -10474,6 +11696,12 @@ impl InputRichBlockVideo {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputRichBlockVideo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.video, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
+    }
+}
 
 /// Telegram [`InputRichBlockVoiceNote`](https://core.telegram.org/bots/api#inputrichblockvoicenote).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10503,6 +11731,12 @@ impl InputRichBlockVoiceNote {
     pub fn caption(mut self, value: RichBlockCaption) -> Self {
         self.caption = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InputRichBlockVoiceNote {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.voice_note, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
     }
 }
 
@@ -10569,6 +11803,12 @@ impl InputRichMessage {
 impl Default for InputRichMessage {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for InputRichMessage {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.blocks, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
+    }
+}
 
 /// Telegram [`InputRichMessageContent`](https://core.telegram.org/bots/api#inputrichmessagecontent).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10588,6 +11828,11 @@ impl InputRichMessageContent {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for InputRichMessageContent {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.rich_message, references);
     }
 }
 
@@ -10611,6 +11856,11 @@ impl InputRichMessageMedia {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for InputRichMessageMedia {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
     }
 }
 
@@ -10658,6 +11908,19 @@ impl From<InputMediaVideo> for InputRichMessageMediaMedia {
 }
 impl From<InputMediaVoiceNote> for InputRichMessageMediaMedia {
     fn from(value: InputMediaVoiceNote) -> Self { Self::InputMediaVoiceNote(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for InputRichMessageMediaMedia {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InputMediaAnimation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaAudio(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaDocument(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaPhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaVideo(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaVoiceNote(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
 }
 
 /// Telegram [`InputSharedWidgetMessageContent`](https://core.telegram.org/bots/api#inputsharedwidgetmessagecontent).
@@ -10715,6 +11978,11 @@ impl InputSharedWidgetMessageContent {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputSharedWidgetMessageContent {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+    }
+}
 
 /// Telegram [`InputSticker`](https://core.telegram.org/bots/api#inputsticker).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10754,6 +12022,12 @@ impl InputSticker {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputSticker {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sticker, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.mask_position, references);
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -10780,6 +12054,15 @@ impl From<InputStoryContentPhoto> for InputStoryContent {
 impl From<InputStoryContentVideo> for InputStoryContent {
     fn from(value: InputStoryContentVideo) -> Self { Self::InputStoryContentVideo(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for InputStoryContent {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InputStoryContentPhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputStoryContentVideo(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`InputStoryContentPhoto`](https://core.telegram.org/bots/api#inputstorycontentphoto).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10802,6 +12085,11 @@ impl InputStoryContentPhoto {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for InputStoryContentPhoto {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, references);
     }
 }
 
@@ -10849,6 +12137,11 @@ impl InputStoryContentVideo {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputStoryContentVideo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.video, references);
+    }
+}
 
 /// Telegram [`InputTextMessageContent`](https://core.telegram.org/bots/api#inputtextmessagecontent).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10889,6 +12182,12 @@ impl InputTextMessageContent {
     pub fn link_preview_options(mut self, value: LinkPreviewOptions) -> Self {
         self.link_preview_options = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InputTextMessageContent {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.link_preview_options, references);
     }
 }
 
@@ -10944,6 +12243,10 @@ impl InputVenueMessageContent {
     pub fn google_place_type(mut self, value: String) -> Self {
         self.google_place_type = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for InputVenueMessageContent {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -11037,6 +12340,11 @@ impl InputWidgetMessageContent {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for InputWidgetMessageContent {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+    }
+}
 
 /// Telegram [`Invoice`](https://core.telegram.org/bots/api#invoice).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11064,6 +12372,10 @@ impl Invoice {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for Invoice {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -11150,6 +12462,15 @@ impl KeyboardButton {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for KeyboardButton {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.request_users, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.request_chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.request_managed_bot, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.request_poll, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.web_app, references);
+    }
+}
 
 /// Telegram [`KeyboardButtonPollType`](https://core.telegram.org/bots/api#keyboardbuttonpolltype).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11179,6 +12500,10 @@ impl KeyboardButtonPollType {
 }
 impl Default for KeyboardButtonPollType {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for KeyboardButtonPollType {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`KeyboardButtonRequestChat`](https://core.telegram.org/bots/api#keyboardbuttonrequestchat).
@@ -11266,6 +12591,12 @@ impl KeyboardButtonRequestChat {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for KeyboardButtonRequestChat {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user_administrator_rights, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.bot_administrator_rights, references);
+    }
+}
 
 /// Telegram [`KeyboardButtonRequestManagedBot`](https://core.telegram.org/bots/api#keyboardbuttonrequestmanagedbot).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11299,6 +12630,10 @@ impl KeyboardButtonRequestManagedBot {
     pub fn suggested_username(mut self, value: String) -> Self {
         self.suggested_username = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for KeyboardButtonRequestManagedBot {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -11364,6 +12699,10 @@ impl KeyboardButtonRequestUsers {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for KeyboardButtonRequestUsers {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`LabeledPrice`](https://core.telegram.org/bots/api#labeledprice).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11387,6 +12726,10 @@ impl LabeledPrice {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for LabeledPrice {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`Link`](https://core.telegram.org/bots/api#link).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11406,6 +12749,10 @@ impl Link {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for Link {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -11465,6 +12812,10 @@ impl LinkPreviewOptions {
 impl Default for LinkPreviewOptions {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for LinkPreviewOptions {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`LivePhoto`](https://core.telegram.org/bots/api#livephoto).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11513,6 +12864,11 @@ impl LivePhoto {
     pub fn file_size(mut self, value: i64) -> Self {
         self.file_size = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for LivePhoto {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, references);
     }
 }
 
@@ -11566,6 +12922,10 @@ impl Location {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for Location {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`LocationAddress`](https://core.telegram.org/bots/api#locationaddress).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11606,6 +12966,10 @@ impl LocationAddress {
     pub fn street(mut self, value: String) -> Self {
         self.street = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for LocationAddress {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -11650,6 +13014,10 @@ impl LoginUrl {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for LoginUrl {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`ManagedBotCreated`](https://core.telegram.org/bots/api#managedbotcreated).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11669,6 +13037,11 @@ impl ManagedBotCreated {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ManagedBotCreated {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.bot, references);
     }
 }
 
@@ -11692,6 +13065,12 @@ impl ManagedBotUpdated {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ManagedBotUpdated {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.bot, references);
     }
 }
 
@@ -11721,6 +13100,10 @@ impl MaskPosition {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for MaskPosition {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -11744,6 +13127,14 @@ impl From<Message> for MaybeInaccessibleMessage {
 }
 impl From<InaccessibleMessage> for MaybeInaccessibleMessage {
     fn from(value: InaccessibleMessage) -> Self { Self::InaccessibleMessage(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for MaybeInaccessibleMessage {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::Message(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InaccessibleMessage(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -11776,6 +13167,16 @@ impl From<MenuButtonWebApp> for MenuButton {
 impl From<MenuButtonDefault> for MenuButton {
     fn from(value: MenuButtonDefault) -> Self { Self::MenuButtonDefault(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for MenuButton {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::MenuButtonCommands(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::MenuButtonWebApp(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::MenuButtonDefault(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`MenuButtonCommands`](https://core.telegram.org/bots/api#menubuttoncommands).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11800,6 +13201,10 @@ impl MenuButtonCommands {
 }
 impl Default for MenuButtonCommands {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for MenuButtonCommands {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`MenuButtonDefault`](https://core.telegram.org/bots/api#menubuttondefault).
@@ -11826,6 +13231,10 @@ impl MenuButtonDefault {
 impl Default for MenuButtonDefault {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for MenuButtonDefault {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`MenuButtonWebApp`](https://core.telegram.org/bots/api#menubuttonwebapp).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11850,6 +13259,11 @@ impl MenuButtonWebApp {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for MenuButtonWebApp {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.web_app, references);
     }
 }
 
@@ -12717,6 +14131,101 @@ impl Message {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for Message {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.direct_messages_topic, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.from, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sender_chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sender_business_bot, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.receiver_user, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.forward_origin, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_to_message, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.external_reply, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.quote, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_to_story, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.via_bot, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.guest_bot_caller_user, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.guest_bot_caller_chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.link_preview_options, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_info, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.rich_message, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.animation, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.audio, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.document, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.live_photo, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.paid_media, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sticker, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.story, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.video, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.video_note, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.voice, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.widget, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.checklist, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.contact, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.dice, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.game, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.poll, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.venue, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.location, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.new_chat_members, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.left_chat_member, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat_owner_left, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat_owner_changed, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.new_chat_photo, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.message_auto_delete_timer_changed, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.pinned_message, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.invoice, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.successful_payment, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.refunded_payment, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.users_shared, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat_shared, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.gift, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.unique_gift, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.gift_upgrade_sent, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.write_access_allowed, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.passport_data, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.proximity_alert_triggered, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.boost_added, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat_background_set, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.checklist_tasks_done, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.checklist_tasks_added, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.community_chat_added, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.community_chat_joined, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.community_chat_removed, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.direct_message_price_changed, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.forum_topic_created, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.forum_topic_edited, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.forum_topic_closed, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.forum_topic_reopened, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.general_forum_topic_hidden, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.general_forum_topic_unhidden, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.giveaway_created, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.giveaway, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.giveaway_winners, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.giveaway_completed, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.managed_bot_created, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.paid_message_price_changed, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.paid_messages_waived, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.poll_option_added, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.poll_option_deleted, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_approved, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_approval_failed, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_declined, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_paid, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_refunded, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ton_wallet_transfer, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.video_chat_scheduled, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.video_chat_started, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.video_chat_ended, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.video_chat_participants_invited, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.web_app_data, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, references);
+    }
+}
 
 /// Telegram [`MessageAutoDeleteTimerChanged`](https://core.telegram.org/bots/api#messageautodeletetimerchanged).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12736,6 +14245,10 @@ impl MessageAutoDeleteTimerChanged {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for MessageAutoDeleteTimerChanged {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -12806,6 +14319,11 @@ impl MessageEntity {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for MessageEntity {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
+    }
+}
 
 /// Telegram [`MessageGenerationStopped`](https://core.telegram.org/bots/api#messagegenerationstopped).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12836,6 +14354,11 @@ impl MessageGenerationStopped {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for MessageGenerationStopped {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
+    }
+}
 
 /// Telegram [`MessageId`](https://core.telegram.org/bots/api#messageid).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12855,6 +14378,10 @@ impl MessageId {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for MessageId {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -12893,6 +14420,17 @@ impl From<MessageOriginChat> for MessageOrigin {
 impl From<MessageOriginChannel> for MessageOrigin {
     fn from(value: MessageOriginChannel) -> Self { Self::MessageOriginChannel(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for MessageOrigin {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::MessageOriginUser(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::MessageOriginHiddenUser(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::MessageOriginChat(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::MessageOriginChannel(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`MessageOriginChannel`](https://core.telegram.org/bots/api#messageoriginchannel).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12928,6 +14466,11 @@ impl MessageOriginChannel {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for MessageOriginChannel {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
+    }
+}
 
 /// Telegram [`MessageOriginChat`](https://core.telegram.org/bots/api#messageoriginchat).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12961,6 +14504,11 @@ impl MessageOriginChat {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for MessageOriginChat {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sender_chat, references);
+    }
+}
 
 /// Telegram [`MessageOriginHiddenUser`](https://core.telegram.org/bots/api#messageoriginhiddenuser).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12985,6 +14533,10 @@ impl MessageOriginHiddenUser {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for MessageOriginHiddenUser {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -13013,6 +14565,11 @@ impl MessageOriginUser {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for MessageOriginUser {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sender_user, references);
+    }
+}
 
 /// Telegram [`MessageReactionCountUpdated`](https://core.telegram.org/bots/api#messagereactioncountupdated).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13038,6 +14595,12 @@ impl MessageReactionCountUpdated {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for MessageReactionCountUpdated {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reactions, references);
     }
 }
 
@@ -13081,6 +14644,15 @@ impl MessageReactionUpdated {
     pub fn actor_chat(mut self, value: Chat) -> Self {
         self.actor_chat = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for MessageReactionUpdated {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.actor_chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.old_reaction, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.new_reaction, references);
     }
 }
 
@@ -13133,6 +14705,11 @@ impl OrderInfo {
 impl Default for OrderInfo {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for OrderInfo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.shipping_address, references);
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -13158,6 +14735,15 @@ impl From<OwnedGiftRegular> for OwnedGift {
 }
 impl From<OwnedGiftUnique> for OwnedGift {
     fn from(value: OwnedGiftUnique) -> Self { Self::OwnedGiftUnique(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for OwnedGift {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::OwnedGiftRegular(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::OwnedGiftUnique(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
 }
 
 /// Telegram [`OwnedGiftRegular`](https://core.telegram.org/bots/api#ownedgiftregular).
@@ -13269,6 +14855,13 @@ impl OwnedGiftRegular {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for OwnedGiftRegular {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.gift, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sender_user, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.entities, references);
+    }
+}
 
 /// Telegram [`OwnedGiftUnique`](https://core.telegram.org/bots/api#ownedgiftunique).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13337,6 +14930,12 @@ impl OwnedGiftUnique {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for OwnedGiftUnique {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.gift, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sender_user, references);
+    }
+}
 
 /// Telegram [`OwnedGifts`](https://core.telegram.org/bots/api#ownedgifts).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13365,6 +14964,11 @@ impl OwnedGifts {
     pub fn next_offset(mut self, value: String) -> Self {
         self.next_offset = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for OwnedGifts {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.gifts, references);
     }
 }
 
@@ -13403,6 +15007,17 @@ impl From<PaidMediaPreview> for PaidMedia {
 impl From<PaidMediaVideo> for PaidMedia {
     fn from(value: PaidMediaVideo) -> Self { Self::PaidMediaVideo(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for PaidMedia {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::PaidMediaLivePhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::PaidMediaPhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::PaidMediaPreview(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::PaidMediaVideo(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`PaidMediaInfo`](https://core.telegram.org/bots/api#paidmediainfo).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13424,6 +15039,11 @@ impl PaidMediaInfo {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for PaidMediaInfo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.paid_media, references);
     }
 }
 
@@ -13450,6 +15070,11 @@ impl PaidMediaLivePhoto {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for PaidMediaLivePhoto {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.live_photo, references);
+    }
+}
 
 /// Telegram [`PaidMediaPhoto`](https://core.telegram.org/bots/api#paidmediaphoto).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13472,6 +15097,11 @@ impl PaidMediaPhoto {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for PaidMediaPhoto {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, references);
     }
 }
 
@@ -13520,6 +15150,10 @@ impl PaidMediaPreview {
 impl Default for PaidMediaPreview {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for PaidMediaPreview {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`PaidMediaPurchased`](https://core.telegram.org/bots/api#paidmediapurchased).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13541,6 +15175,11 @@ impl PaidMediaPurchased {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for PaidMediaPurchased {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.from, references);
     }
 }
 
@@ -13567,6 +15206,11 @@ impl PaidMediaVideo {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for PaidMediaVideo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.video, references);
+    }
+}
 
 /// Telegram [`PaidMessagePriceChanged`](https://core.telegram.org/bots/api#paidmessagepricechanged).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13586,6 +15230,10 @@ impl PaidMessagePriceChanged {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for PaidMessagePriceChanged {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -13610,6 +15258,10 @@ impl PaidMessagesWaived {
 impl Default for PaidMessagesWaived {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for PaidMessagesWaived {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`PassportData`](https://core.telegram.org/bots/api#passportdata).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13631,6 +15283,12 @@ impl PassportData {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for PassportData {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.data, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.credentials, references);
     }
 }
 
@@ -13694,6 +15352,22 @@ impl From<PassportElementErrorTranslationFiles> for PassportElementError {
 impl From<PassportElementErrorUnspecified> for PassportElementError {
     fn from(value: PassportElementErrorUnspecified) -> Self { Self::PassportElementErrorUnspecified(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for PassportElementError {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::PassportElementErrorDataField(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::PassportElementErrorFrontSide(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::PassportElementErrorReverseSide(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::PassportElementErrorSelfie(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::PassportElementErrorFile(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::PassportElementErrorFiles(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::PassportElementErrorTranslationFile(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::PassportElementErrorTranslationFiles(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::PassportElementErrorUnspecified(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`PassportElementErrorDataField`](https://core.telegram.org/bots/api#passportelementerrordatafield).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13724,6 +15398,10 @@ impl PassportElementErrorDataField {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for PassportElementErrorDataField {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`PassportElementErrorFile`](https://core.telegram.org/bots/api#passportelementerrorfile).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13750,6 +15428,10 @@ impl PassportElementErrorFile {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for PassportElementErrorFile {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -13780,6 +15462,10 @@ impl PassportElementErrorFiles {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for PassportElementErrorFiles {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`PassportElementErrorFrontSide`](https://core.telegram.org/bots/api#passportelementerrorfrontside).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13806,6 +15492,10 @@ impl PassportElementErrorFrontSide {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for PassportElementErrorFrontSide {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -13836,6 +15526,10 @@ impl PassportElementErrorReverseSide {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for PassportElementErrorReverseSide {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`PassportElementErrorSelfie`](https://core.telegram.org/bots/api#passportelementerrorselfie).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13862,6 +15556,10 @@ impl PassportElementErrorSelfie {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for PassportElementErrorSelfie {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -13892,6 +15590,10 @@ impl PassportElementErrorTranslationFile {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for PassportElementErrorTranslationFile {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`PassportElementErrorTranslationFiles`](https://core.telegram.org/bots/api#passportelementerrortranslationfiles).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13918,6 +15620,10 @@ impl PassportElementErrorTranslationFiles {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for PassportElementErrorTranslationFiles {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -13948,6 +15654,10 @@ impl PassportElementErrorUnspecified {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for PassportElementErrorUnspecified {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`PassportFile`](https://core.telegram.org/bots/api#passportfile).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13973,6 +15683,10 @@ impl PassportFile {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for PassportFile {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -14007,6 +15721,10 @@ impl PhotoSize {
     pub fn file_size(mut self, value: i64) -> Self {
         self.file_size = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for PhotoSize {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -14126,6 +15844,16 @@ impl Poll {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for Poll {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.question_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.options, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.explanation_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.explanation_media, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.description_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
+    }
+}
 
 /// Telegram [`PollAnswer`](https://core.telegram.org/bots/api#pollanswer).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14163,6 +15891,12 @@ impl PollAnswer {
     pub fn user(mut self, value: User) -> Self {
         self.user = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for PollAnswer {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.voter_chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
     }
 }
 
@@ -14257,6 +15991,20 @@ impl PollMedia {
 impl Default for PollMedia {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for PollMedia {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.animation, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.audio, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.document, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.link, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.live_photo, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.location, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sticker, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.venue, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.video, references);
+    }
+}
 
 /// Telegram [`PollOption`](https://core.telegram.org/bots/api#polloption).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14317,6 +16065,14 @@ impl PollOption {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for PollOption {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.added_by_user, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.added_by_chat, references);
+    }
+}
 
 /// Telegram [`PollOptionAdded`](https://core.telegram.org/bots/api#polloptionadded).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14354,6 +16110,12 @@ impl PollOptionAdded {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for PollOptionAdded {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.poll_message, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.option_text_entities, references);
+    }
+}
 
 /// Telegram [`PollOptionDeleted`](https://core.telegram.org/bots/api#polloptiondeleted).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14389,6 +16151,12 @@ impl PollOptionDeleted {
     pub fn option_text_entities(mut self, value: Vec<MessageEntity>) -> Self {
         self.option_text_entities = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for PollOptionDeleted {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.poll_message, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.option_text_entities, references);
     }
 }
 
@@ -14434,6 +16202,12 @@ impl PreCheckoutQuery {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for PreCheckoutQuery {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.from, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.order_info, references);
+    }
+}
 
 /// Telegram [`PreparedInlineMessage`](https://core.telegram.org/bots/api#preparedinlinemessage).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14457,6 +16231,10 @@ impl PreparedInlineMessage {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for PreparedInlineMessage {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`PreparedKeyboardButton`](https://core.telegram.org/bots/api#preparedkeyboardbutton).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14476,6 +16254,10 @@ impl PreparedKeyboardButton {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for PreparedKeyboardButton {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -14503,6 +16285,12 @@ impl ProximityAlertTriggered {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for ProximityAlertTriggered {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.traveler, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.watcher, references);
+    }
+}
 
 /// Telegram [`ReactionCount`](https://core.telegram.org/bots/api#reactioncount).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14525,6 +16313,11 @@ impl ReactionCount {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ReactionCount {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.kind, references);
     }
 }
 
@@ -14558,6 +16351,16 @@ impl From<ReactionTypeCustomEmoji> for ReactionType {
 impl From<ReactionTypePaid> for ReactionType {
     fn from(value: ReactionTypePaid) -> Self { Self::ReactionTypePaid(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for ReactionType {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::ReactionTypeEmoji(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReactionTypeCustomEmoji(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReactionTypePaid(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`ReactionTypeCustomEmoji`](https://core.telegram.org/bots/api#reactiontypecustomemoji).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14580,6 +16383,10 @@ impl ReactionTypeCustomEmoji {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ReactionTypeCustomEmoji {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -14606,6 +16413,10 @@ impl ReactionTypeEmoji {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for ReactionTypeEmoji {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`ReactionTypePaid`](https://core.telegram.org/bots/api#reactiontypepaid).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14630,6 +16441,10 @@ impl ReactionTypePaid {
 }
 impl Default for ReactionTypePaid {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for ReactionTypePaid {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`RefundedPayment`](https://core.telegram.org/bots/api#refundedpayment).
@@ -14663,6 +16478,10 @@ impl RefundedPayment {
     pub fn provider_payment_charge_id(mut self, value: String) -> Self {
         self.provider_payment_charge_id = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for RefundedPayment {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -14728,6 +16547,11 @@ impl ReplyKeyboardMarkup {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for ReplyKeyboardMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.keyboard, references);
+    }
+}
 
 /// Telegram [`ReplyKeyboardRemove`](https://core.telegram.org/bots/api#replykeyboardremove).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14758,6 +16582,10 @@ impl ReplyKeyboardRemove {
 }
 impl Default for ReplyKeyboardRemove {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for ReplyKeyboardRemove {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`ReplyParameters`](https://core.telegram.org/bots/api#replyparameters).
@@ -14858,6 +16686,12 @@ impl ReplyParameters {
 impl Default for ReplyParameters {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for ReplyParameters {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.quote_entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.quote_rich_texts, references);
+    }
+}
 
 /// Telegram [`ResponseParameters`](https://core.telegram.org/bots/api#responseparameters).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14894,6 +16728,10 @@ impl ResponseParameters {
 impl Default for ResponseParameters {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for ResponseParameters {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -14925,6 +16763,16 @@ impl From<RevenueWithdrawalStateSucceeded> for RevenueWithdrawalState {
 impl From<RevenueWithdrawalStateFailed> for RevenueWithdrawalState {
     fn from(value: RevenueWithdrawalStateFailed) -> Self { Self::RevenueWithdrawalStateFailed(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for RevenueWithdrawalState {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::RevenueWithdrawalStatePending(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RevenueWithdrawalStateSucceeded(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RevenueWithdrawalStateFailed(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`RevenueWithdrawalStateFailed`](https://core.telegram.org/bots/api#revenuewithdrawalstatefailed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14949,6 +16797,10 @@ impl RevenueWithdrawalStateFailed {
 }
 impl Default for RevenueWithdrawalStateFailed {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for RevenueWithdrawalStateFailed {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`RevenueWithdrawalStatePending`](https://core.telegram.org/bots/api#revenuewithdrawalstatepending).
@@ -14975,6 +16827,10 @@ impl RevenueWithdrawalStatePending {
 impl Default for RevenueWithdrawalStatePending {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for RevenueWithdrawalStatePending {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`RevenueWithdrawalStateSucceeded`](https://core.telegram.org/bots/api#revenuewithdrawalstatesucceeded).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14999,6 +16855,10 @@ impl RevenueWithdrawalStateSucceeded {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RevenueWithdrawalStateSucceeded {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -15137,6 +16997,37 @@ impl From<RichBlockVoiceNote> for RichBlock {
 impl From<RichBlockThinking> for RichBlock {
     fn from(value: RichBlockThinking) -> Self { Self::RichBlockThinking(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for RichBlock {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::RichBlockParagraph(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockSectionHeading(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockPreformatted(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockFooter(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockDivider(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockMathematicalExpression(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockAnchor(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockList(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockBlockQuotation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockExpandableBlockQuotation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockPullQuotation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockCollage(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockSlideshow(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockTable(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockDetails(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockMap(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockButtons(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockAnimation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockAudio(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockDocument(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockPhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockVideo(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockVoiceNote(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichBlockThinking(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`RichBlockAnchor`](https://core.telegram.org/bots/api#richblockanchor).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15159,6 +17050,10 @@ impl RichBlockAnchor {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichBlockAnchor {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -15199,6 +17094,12 @@ impl RichBlockAnimation {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for RichBlockAnimation {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.animation, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
+    }
+}
 
 /// Telegram [`RichBlockAudio`](https://core.telegram.org/bots/api#richblockaudio).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15228,6 +17129,12 @@ impl RichBlockAudio {
     pub fn caption(mut self, value: RichBlockCaption) -> Self {
         self.caption = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for RichBlockAudio {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.audio, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
     }
 }
 
@@ -15261,6 +17168,12 @@ impl RichBlockBlockQuotation {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for RichBlockBlockQuotation {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.blocks, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.credit, references);
+    }
+}
 
 /// Telegram [`RichBlockButtons`](https://core.telegram.org/bots/api#richblockbuttons).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15292,6 +17205,11 @@ impl RichBlockButtons {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for RichBlockButtons {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.buttons, references);
+    }
+}
 
 /// Telegram [`RichBlockCaption`](https://core.telegram.org/bots/api#richblockcaption).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15318,6 +17236,12 @@ impl RichBlockCaption {
     pub fn credit(mut self, value: RichText) -> Self {
         self.credit = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for RichBlockCaption {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.credit, references);
     }
 }
 
@@ -15349,6 +17273,12 @@ impl RichBlockCollage {
     pub fn caption(mut self, value: RichBlockCaption) -> Self {
         self.caption = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for RichBlockCollage {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.blocks, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
     }
 }
 
@@ -15384,6 +17314,12 @@ impl RichBlockDetails {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for RichBlockDetails {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.summary, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.blocks, references);
+    }
+}
 
 /// Telegram [`RichBlockDivider`](https://core.telegram.org/bots/api#richblockdivider).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15408,6 +17344,10 @@ impl RichBlockDivider {
 }
 impl Default for RichBlockDivider {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for RichBlockDivider {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`RichBlockDocument`](https://core.telegram.org/bots/api#richblockdocument).
@@ -15438,6 +17378,12 @@ impl RichBlockDocument {
     pub fn caption(mut self, value: RichBlockCaption) -> Self {
         self.caption = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for RichBlockDocument {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.document, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
     }
 }
 
@@ -15471,6 +17417,12 @@ impl RichBlockExpandableBlockQuotation {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for RichBlockExpandableBlockQuotation {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.credit, references);
+    }
+}
 
 /// Telegram [`RichBlockFooter`](https://core.telegram.org/bots/api#richblockfooter).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15495,6 +17447,11 @@ impl RichBlockFooter {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichBlockFooter {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`RichBlockList`](https://core.telegram.org/bots/api#richblocklist).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15517,6 +17474,11 @@ impl RichBlockList {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichBlockList {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.items, references);
     }
 }
 
@@ -15571,6 +17533,11 @@ impl RichBlockListItem {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for RichBlockListItem {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.blocks, references);
+    }
+}
 
 /// Telegram [`RichBlockMap`](https://core.telegram.org/bots/api#richblockmap).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15608,6 +17575,12 @@ impl RichBlockMap {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for RichBlockMap {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.location, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
+    }
+}
 
 /// Telegram [`RichBlockMathematicalExpression`](https://core.telegram.org/bots/api#richblockmathematicalexpression).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15632,6 +17605,10 @@ impl RichBlockMathematicalExpression {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichBlockMathematicalExpression {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`RichBlockParagraph`](https://core.telegram.org/bots/api#richblockparagraph).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15654,6 +17631,11 @@ impl RichBlockParagraph {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichBlockParagraph {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -15694,6 +17676,12 @@ impl RichBlockPhoto {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for RichBlockPhoto {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
+    }
+}
 
 /// Telegram [`RichBlockPreformatted`](https://core.telegram.org/bots/api#richblockpreformatted).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15723,6 +17711,11 @@ impl RichBlockPreformatted {
     pub fn language(mut self, value: String) -> Self {
         self.language = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for RichBlockPreformatted {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -15756,6 +17749,12 @@ impl RichBlockPullQuotation {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for RichBlockPullQuotation {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.credit, references);
+    }
+}
 
 /// Telegram [`RichBlockSectionHeading`](https://core.telegram.org/bots/api#richblocksectionheading).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15780,6 +17779,11 @@ impl RichBlockSectionHeading {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichBlockSectionHeading {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -15811,6 +17815,12 @@ impl RichBlockSlideshow {
     pub fn caption(mut self, value: RichBlockCaption) -> Self {
         self.caption = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for RichBlockSlideshow {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.blocks, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
     }
 }
 
@@ -15865,6 +17875,12 @@ impl RichBlockTable {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for RichBlockTable {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.cells, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
+    }
+}
 
 /// Telegram [`RichBlockTableCell`](https://core.telegram.org/bots/api#richblocktablecell).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15916,6 +17932,11 @@ impl RichBlockTableCell {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for RichBlockTableCell {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`RichBlockThinking`](https://core.telegram.org/bots/api#richblockthinking).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15938,6 +17959,11 @@ impl RichBlockThinking {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichBlockThinking {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -15978,6 +18004,12 @@ impl RichBlockVideo {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for RichBlockVideo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.video, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
+    }
+}
 
 /// Telegram [`RichBlockVoiceNote`](https://core.telegram.org/bots/api#richblockvoicenote).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16009,6 +18041,12 @@ impl RichBlockVoiceNote {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for RichBlockVoiceNote {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.voice_note, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption, references);
+    }
+}
 
 /// Telegram [`RichMessage`](https://core.telegram.org/bots/api#richmessage).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16035,6 +18073,11 @@ impl RichMessage {
     pub fn is_rtl(mut self, value: bool) -> Self {
         self.is_rtl = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for RichMessage {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.blocks, references);
     }
 }
 
@@ -16126,6 +18169,16 @@ impl RichMessageButton {
     pub fn disabled(mut self, value: DisabledButton) -> Self {
         self.disabled = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for RichMessageButton {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.web_app, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.login_url, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.switch_inline_query_chosen_chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.copy_text, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.disabled, references);
     }
 }
 
@@ -16293,6 +18346,42 @@ impl From<RichTextReference> for RichText {
 impl From<RichTextReferenceLink> for RichText {
     fn from(value: RichTextReferenceLink) -> Self { Self::RichTextReferenceLink(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for RichText {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::String(_) => {},
+            Self::Array(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextBold(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextItalic(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextUnderline(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextStrikethrough(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextSpoiler(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextDateTime(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextTextMention(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextSubscript(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextSuperscript(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextMarked(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextCode(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextCustomEmoji(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextMathematicalExpression(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextUrl(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextEmailAddress(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextPhoneNumber(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextBankCardNumber(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextTonAddress(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextMention(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextHashtag(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextCashtag(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextBotCommand(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextButton(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextAnchor(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextAnchorLink(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextReference(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::RichTextReferenceLink(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`RichTextAnchor`](https://core.telegram.org/bots/api#richtextanchor).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16315,6 +18404,10 @@ impl RichTextAnchor {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichTextAnchor {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -16343,6 +18436,11 @@ impl RichTextAnchorLink {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichTextAnchorLink {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`RichTextBankCardNumber`](https://core.telegram.org/bots/api#richtextbankcardnumber).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16369,6 +18467,11 @@ impl RichTextBankCardNumber {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichTextBankCardNumber {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`RichTextBold`](https://core.telegram.org/bots/api#richtextbold).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16391,6 +18494,11 @@ impl RichTextBold {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichTextBold {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -16419,6 +18527,11 @@ impl RichTextBotCommand {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichTextBotCommand {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`RichTextButton`](https://core.telegram.org/bots/api#richtextbutton).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16441,6 +18554,11 @@ impl RichTextButton {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichTextButton {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.button, references);
     }
 }
 
@@ -16469,6 +18587,11 @@ impl RichTextCashtag {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichTextCashtag {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`RichTextCode`](https://core.telegram.org/bots/api#richtextcode).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16491,6 +18614,11 @@ impl RichTextCode {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichTextCode {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -16517,6 +18645,10 @@ impl RichTextCustomEmoji {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichTextCustomEmoji {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -16547,6 +18679,11 @@ impl RichTextDateTime {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichTextDateTime {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`RichTextEmailAddress`](https://core.telegram.org/bots/api#richtextemailaddress).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16571,6 +18708,11 @@ impl RichTextEmailAddress {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichTextEmailAddress {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -16599,6 +18741,11 @@ impl RichTextHashtag {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichTextHashtag {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`RichTextItalic`](https://core.telegram.org/bots/api#richtextitalic).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16621,6 +18768,11 @@ impl RichTextItalic {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichTextItalic {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -16647,6 +18799,11 @@ impl RichTextMarked {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichTextMarked {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`RichTextMathematicalExpression`](https://core.telegram.org/bots/api#richtextmathematicalexpression).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16669,6 +18826,10 @@ impl RichTextMathematicalExpression {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichTextMathematicalExpression {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -16697,6 +18858,11 @@ impl RichTextMention {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichTextMention {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`RichTextPhoneNumber`](https://core.telegram.org/bots/api#richtextphonenumber).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16721,6 +18887,11 @@ impl RichTextPhoneNumber {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichTextPhoneNumber {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -16749,6 +18920,11 @@ impl RichTextReference {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichTextReference {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`RichTextReferenceLink`](https://core.telegram.org/bots/api#richtextreferencelink).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16775,6 +18951,11 @@ impl RichTextReferenceLink {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichTextReferenceLink {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`RichTextSpoiler`](https://core.telegram.org/bots/api#richtextspoiler).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16797,6 +18978,11 @@ impl RichTextSpoiler {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichTextSpoiler {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -16823,6 +19009,11 @@ impl RichTextStrikethrough {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichTextStrikethrough {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`RichTextSubscript`](https://core.telegram.org/bots/api#richtextsubscript).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16847,6 +19038,11 @@ impl RichTextSubscript {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichTextSubscript {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`RichTextSuperscript`](https://core.telegram.org/bots/api#richtextsuperscript).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16869,6 +19065,11 @@ impl RichTextSuperscript {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichTextSuperscript {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -16897,6 +19098,12 @@ impl RichTextTextMention {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichTextTextMention {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
+    }
+}
 
 /// Telegram [`RichTextTonAddress`](https://core.telegram.org/bots/api#richtexttonaddress).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16923,6 +19130,11 @@ impl RichTextTonAddress {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for RichTextTonAddress {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
+    }
+}
 
 /// Telegram [`RichTextUnderline`](https://core.telegram.org/bots/api#richtextunderline).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16945,6 +19157,11 @@ impl RichTextUnderline {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichTextUnderline {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -16971,6 +19188,11 @@ impl RichTextUrl {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for RichTextUrl {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text, references);
     }
 }
 
@@ -17013,6 +19235,16 @@ impl From<ReplyKeyboardRemove> for SendAnimationReplyMarkup {
 impl From<ForceReply> for SendAnimationReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for SendAnimationReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -17052,6 +19284,16 @@ impl From<ReplyKeyboardRemove> for SendAudioReplyMarkup {
 }
 impl From<ForceReply> for SendAudioReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for SendAudioReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -17093,6 +19335,16 @@ impl From<ReplyKeyboardRemove> for SendContactReplyMarkup {
 impl From<ForceReply> for SendContactReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for SendContactReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -17132,6 +19384,16 @@ impl From<ReplyKeyboardRemove> for SendDiceReplyMarkup {
 }
 impl From<ForceReply> for SendDiceReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for SendDiceReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -17173,6 +19435,16 @@ impl From<ReplyKeyboardRemove> for SendDocumentReplyMarkup {
 impl From<ForceReply> for SendDocumentReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for SendDocumentReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -17213,6 +19485,16 @@ impl From<ReplyKeyboardRemove> for SendLivePhotoReplyMarkup {
 impl From<ForceReply> for SendLivePhotoReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for SendLivePhotoReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -17252,6 +19534,16 @@ impl From<ReplyKeyboardRemove> for SendLocationReplyMarkup {
 }
 impl From<ForceReply> for SendLocationReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for SendLocationReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -17294,6 +19586,18 @@ impl From<InputMediaPhoto> for SendMediaGroupMediaItem {
 impl From<InputMediaVideo> for SendMediaGroupMediaItem {
     fn from(value: InputMediaVideo) -> Self { Self::InputMediaVideo(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for SendMediaGroupMediaItem {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InputMediaAudio(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaDocument(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaLivePhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaPhoto(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::InputMediaVideo(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -17333,6 +19637,16 @@ impl From<ReplyKeyboardRemove> for SendMessageReplyMarkup {
 }
 impl From<ForceReply> for SendMessageReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for SendMessageReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -17374,6 +19688,16 @@ impl From<ReplyKeyboardRemove> for SendPaidMediaReplyMarkup {
 impl From<ForceReply> for SendPaidMediaReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for SendPaidMediaReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -17413,6 +19737,16 @@ impl From<ReplyKeyboardRemove> for SendPhotoReplyMarkup {
 }
 impl From<ForceReply> for SendPhotoReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for SendPhotoReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -17454,6 +19788,16 @@ impl From<ReplyKeyboardRemove> for SendPollReplyMarkup {
 impl From<ForceReply> for SendPollReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for SendPollReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -17493,6 +19837,16 @@ impl From<ReplyKeyboardRemove> for SendRichMessageReplyMarkup {
 }
 impl From<ForceReply> for SendRichMessageReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for SendRichMessageReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -17534,6 +19888,16 @@ impl From<ReplyKeyboardRemove> for SendSharedWidgetReplyMarkup {
 impl From<ForceReply> for SendSharedWidgetReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for SendSharedWidgetReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -17573,6 +19937,16 @@ impl From<ReplyKeyboardRemove> for SendStickerReplyMarkup {
 }
 impl From<ForceReply> for SendStickerReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for SendStickerReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -17614,6 +19988,16 @@ impl From<ReplyKeyboardRemove> for SendVenueReplyMarkup {
 impl From<ForceReply> for SendVenueReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for SendVenueReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -17653,6 +20037,16 @@ impl From<ReplyKeyboardRemove> for SendVideoNoteReplyMarkup {
 }
 impl From<ForceReply> for SendVideoNoteReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for SendVideoNoteReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -17694,6 +20088,16 @@ impl From<ReplyKeyboardRemove> for SendVideoReplyMarkup {
 impl From<ForceReply> for SendVideoReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for SendVideoReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -17733,6 +20137,16 @@ impl From<ReplyKeyboardRemove> for SendVoiceReplyMarkup {
 }
 impl From<ForceReply> for SendVoiceReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for SendVoiceReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -17774,6 +20188,16 @@ impl From<ReplyKeyboardRemove> for SendWidgetReplyMarkup {
 impl From<ForceReply> for SendWidgetReplyMarkup {
     fn from(value: ForceReply) -> Self { Self::ForceReply(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for SendWidgetReplyMarkup {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::InlineKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardMarkup(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ReplyKeyboardRemove(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::ForceReply(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+        }
+    }
+}
 
 /// Telegram [`SentGuestMessage`](https://core.telegram.org/bots/api#sentguestmessage).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17793,6 +20217,10 @@ impl SentGuestMessage {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for SentGuestMessage {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -17824,6 +20252,10 @@ impl SentWebAppMessage {
 impl Default for SentWebAppMessage {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for SentWebAppMessage {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -17852,6 +20284,14 @@ impl From<Message> for SetGameScoreResult {
 }
 impl From<crate::api::True> for SetGameScoreResult {
     fn from(value: crate::api::True) -> Self { Self::True(value) }
+}
+impl crate::typed_api::CollectAttachments for SetGameScoreResult {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::Message(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::True(_) => {},
+        }
+    }
 }
 
 /// Telegram [`SharedUser`](https://core.telegram.org/bots/api#shareduser).
@@ -17902,6 +20342,11 @@ impl SharedUser {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for SharedUser {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, references);
+    }
+}
 
 /// Telegram [`SharedWidgetQuery`](https://core.telegram.org/bots/api#sharedwidgetquery).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17930,6 +20375,12 @@ impl SharedWidgetQuery {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for SharedWidgetQuery {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.from, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.kind, references);
     }
 }
 
@@ -17963,6 +20414,10 @@ impl ShippingAddress {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for ShippingAddress {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`ShippingOption`](https://core.telegram.org/bots/api#shippingoption).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17986,6 +20441,11 @@ impl ShippingOption {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for ShippingOption {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.prices, references);
     }
 }
 
@@ -18015,6 +20475,12 @@ impl ShippingQuery {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for ShippingQuery {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.from, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.shipping_address, references);
+    }
+}
 
 /// Telegram [`StarAmount`](https://core.telegram.org/bots/api#staramount).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18041,6 +20507,10 @@ impl StarAmount {
     pub fn nanostar_amount(mut self, value: i64) -> Self {
         self.nanostar_amount = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for StarAmount {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -18089,6 +20559,12 @@ impl StarTransaction {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for StarTransaction {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.source, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.receiver, references);
+    }
+}
 
 /// Telegram [`StarTransactions`](https://core.telegram.org/bots/api#startransactions).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18108,6 +20584,11 @@ impl StarTransactions {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for StarTransactions {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.transactions, references);
     }
 }
 
@@ -18200,6 +20681,13 @@ impl Sticker {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for Sticker {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.premium_animation, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.mask_position, references);
+    }
+}
 
 /// Telegram [`StickerSet`](https://core.telegram.org/bots/api#stickerset).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18234,6 +20722,12 @@ impl StickerSet {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for StickerSet {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.stickers, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, references);
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -18263,6 +20757,14 @@ impl From<Message> for StopMessageLiveLocationResult {
 impl From<crate::api::True> for StopMessageLiveLocationResult {
     fn from(value: crate::api::True) -> Self { Self::True(value) }
 }
+impl crate::typed_api::CollectAttachments for StopMessageLiveLocationResult {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::Message(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::True(_) => {},
+        }
+    }
+}
 
 /// Telegram [`Story`](https://core.telegram.org/bots/api#story).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18284,6 +20786,11 @@ impl Story {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for Story {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
     }
 }
 
@@ -18308,6 +20815,12 @@ impl StoryArea {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for StoryArea {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.position, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.kind, references);
     }
 }
 
@@ -18351,6 +20864,18 @@ impl From<StoryAreaTypeWeather> for StoryAreaType {
 impl From<StoryAreaTypeUniqueGift> for StoryAreaType {
     fn from(value: StoryAreaTypeUniqueGift) -> Self { Self::StoryAreaTypeUniqueGift(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for StoryAreaType {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::StoryAreaTypeLocation(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::StoryAreaTypeSuggestedReaction(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::StoryAreaTypeLink(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::StoryAreaTypeWeather(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::StoryAreaTypeUniqueGift(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`StoryAreaTypeLink`](https://core.telegram.org/bots/api#storyareatypelink).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18373,6 +20898,10 @@ impl StoryAreaTypeLink {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for StoryAreaTypeLink {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -18406,6 +20935,11 @@ impl StoryAreaTypeLocation {
     pub fn address(mut self, value: LocationAddress) -> Self {
         self.address = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for StoryAreaTypeLocation {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.address, references);
     }
 }
 
@@ -18446,6 +20980,11 @@ impl StoryAreaTypeSuggestedReaction {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for StoryAreaTypeSuggestedReaction {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reaction_type, references);
+    }
+}
 
 /// Telegram [`StoryAreaTypeUniqueGift`](https://core.telegram.org/bots/api#storyareatypeuniquegift).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18468,6 +21007,10 @@ impl StoryAreaTypeUniqueGift {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for StoryAreaTypeUniqueGift {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -18496,6 +21039,10 @@ impl StoryAreaTypeWeather {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for StoryAreaTypeWeather {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -18562,6 +21109,11 @@ impl SuccessfulPayment {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for SuccessfulPayment {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.order_info, references);
+    }
+}
 
 /// Telegram [`SuggestedPostApprovalFailed`](https://core.telegram.org/bots/api#suggestedpostapprovalfailed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18588,6 +21140,12 @@ impl SuggestedPostApprovalFailed {
     pub fn suggested_post_message(mut self, value: Message) -> Self {
         self.suggested_post_message = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for SuggestedPostApprovalFailed {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_message, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.price, references);
     }
 }
 
@@ -18623,6 +21181,12 @@ impl SuggestedPostApproved {
     pub fn price(mut self, value: SuggestedPostPrice) -> Self {
         self.price = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for SuggestedPostApproved {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_message, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.price, references);
     }
 }
 
@@ -18661,6 +21225,11 @@ impl SuggestedPostDeclined {
 impl Default for SuggestedPostDeclined {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for SuggestedPostDeclined {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_message, references);
+    }
+}
 
 /// Telegram [`SuggestedPostInfo`](https://core.telegram.org/bots/api#suggestedpostinfo).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18694,6 +21263,11 @@ impl SuggestedPostInfo {
     pub fn send_date(mut self, value: i64) -> Self {
         self.send_date = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for SuggestedPostInfo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.price, references);
     }
 }
 
@@ -18738,6 +21312,12 @@ impl SuggestedPostPaid {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for SuggestedPostPaid {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_message, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.star_amount, references);
+    }
+}
 
 /// Telegram [`SuggestedPostParameters`](https://core.telegram.org/bots/api#suggestedpostparameters).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18774,6 +21354,11 @@ impl SuggestedPostParameters {
 impl Default for SuggestedPostParameters {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for SuggestedPostParameters {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.price, references);
+    }
+}
 
 /// Telegram [`SuggestedPostPrice`](https://core.telegram.org/bots/api#suggestedpostprice).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18795,6 +21380,10 @@ impl SuggestedPostPrice {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for SuggestedPostPrice {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -18823,6 +21412,11 @@ impl SuggestedPostRefunded {
     pub fn suggested_post_message(mut self, value: Message) -> Self {
         self.suggested_post_message = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for SuggestedPostRefunded {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_message, references);
     }
 }
 
@@ -18882,6 +21476,10 @@ impl SwitchInlineQueryChosenChat {
 impl Default for SwitchInlineQueryChosenChat {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for SwitchInlineQueryChosenChat {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`TextQuote`](https://core.telegram.org/bots/api#textquote).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18924,6 +21522,12 @@ impl TextQuote {
     pub fn is_manual(mut self, value: crate::api::True) -> Self {
         self.is_manual = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for TextQuote {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.entities, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.rich_texts, references);
     }
 }
 
@@ -18974,6 +21578,12 @@ impl TonNft {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for TonNft {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.attributes, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.gift, references);
+    }
+}
 
 /// Telegram [`TonNftAttribute`](https://core.telegram.org/bots/api#tonnftattribute).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18995,6 +21605,10 @@ impl TonNftAttribute {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for TonNftAttribute {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -19029,6 +21643,11 @@ impl TonWalletCard {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for TonWalletCard {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.stickers, references);
+    }
+}
 
 /// Telegram [`TonWalletCardSticker`](https://core.telegram.org/bots/api#tonwalletcardsticker).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19050,6 +21669,12 @@ impl TonWalletCardSticker {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for TonWalletCardSticker {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.position, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.nft, references);
     }
 }
 
@@ -19082,6 +21707,10 @@ impl TonWalletTransfer {
     pub fn comment(mut self, value: String) -> Self {
         self.comment = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for TonWalletTransfer {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -19135,6 +21764,20 @@ impl From<TransactionPartnerTelegramApi> for TransactionPartner {
 impl From<TransactionPartnerOther> for TransactionPartner {
     fn from(value: TransactionPartnerOther) -> Self { Self::TransactionPartnerOther(Box::new(value)) }
 }
+impl crate::typed_api::CollectAttachments for TransactionPartner {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::TransactionPartnerUser(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::TransactionPartnerChat(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::TransactionPartnerAffiliateProgram(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::TransactionPartnerFragment(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::TransactionPartnerTelegramAds(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::TransactionPartnerTelegramApi(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::TransactionPartnerOther(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
+}
 
 /// Telegram [`TransactionPartnerAffiliateProgram`](https://core.telegram.org/bots/api#transactionpartneraffiliateprogram).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19166,6 +21809,11 @@ impl TransactionPartnerAffiliateProgram {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for TransactionPartnerAffiliateProgram {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sponsor_user, references);
+    }
+}
 
 /// Telegram [`TransactionPartnerChat`](https://core.telegram.org/bots/api#transactionpartnerchat).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19195,6 +21843,12 @@ impl TransactionPartnerChat {
     pub fn gift(mut self, value: Gift) -> Self {
         self.gift = Some(Box::new(value));
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for TransactionPartnerChat {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.gift, references);
     }
 }
 
@@ -19229,6 +21883,11 @@ impl TransactionPartnerFragment {
 impl Default for TransactionPartnerFragment {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for TransactionPartnerFragment {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.withdrawal_state, references);
+    }
+}
 
 /// Telegram [`TransactionPartnerOther`](https://core.telegram.org/bots/api#transactionpartnerother).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19253,6 +21912,10 @@ impl TransactionPartnerOther {
 }
 impl Default for TransactionPartnerOther {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for TransactionPartnerOther {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`TransactionPartnerTelegramAds`](https://core.telegram.org/bots/api#transactionpartnertelegramads).
@@ -19279,6 +21942,10 @@ impl TransactionPartnerTelegramAds {
 impl Default for TransactionPartnerTelegramAds {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for TransactionPartnerTelegramAds {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`TransactionPartnerTelegramApi`](https://core.telegram.org/bots/api#transactionpartnertelegramapi).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19301,6 +21968,10 @@ impl TransactionPartnerTelegramApi {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for TransactionPartnerTelegramApi {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -19378,6 +22049,14 @@ impl TransactionPartnerUser {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for TransactionPartnerUser {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.user, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.affiliate, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.paid_media, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.gift, references);
+    }
+}
 
 /// Telegram [`UniqueGift`](https://core.telegram.org/bots/api#uniquegift).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19446,6 +22125,15 @@ impl UniqueGift {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for UniqueGift {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.model, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.symbol, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.backdrop, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.colors, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.publisher_chat, references);
+    }
+}
 
 /// Telegram [`UniqueGiftBackdrop`](https://core.telegram.org/bots/api#uniquegiftbackdrop).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19469,6 +22157,11 @@ impl UniqueGiftBackdrop {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for UniqueGiftBackdrop {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.colors, references);
     }
 }
 
@@ -19496,6 +22189,10 @@ impl UniqueGiftBackdropColors {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for UniqueGiftBackdropColors {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -19527,6 +22224,10 @@ impl UniqueGiftColors {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for UniqueGiftColors {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -19608,6 +22309,12 @@ impl UniqueGiftInfo {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for UniqueGiftInfo {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.gift, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.entities, references);
+    }
+}
 
 /// Telegram [`UniqueGiftModel`](https://core.telegram.org/bots/api#uniquegiftmodel).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19640,6 +22347,11 @@ impl UniqueGiftModel {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for UniqueGiftModel {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sticker, references);
+    }
+}
 
 /// Telegram [`UniqueGiftSymbol`](https://core.telegram.org/bots/api#uniquegiftsymbol).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19663,6 +22375,11 @@ impl UniqueGiftSymbol {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for UniqueGiftSymbol {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sticker, references);
     }
 }
 
@@ -20026,6 +22743,39 @@ impl Update {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for Update {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.message, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.edited_message, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.channel_post, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.edited_channel_post, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.business_connection, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.business_message, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.edited_business_message, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.deleted_business_messages, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.guest_message, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.message_reaction, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.message_reaction_count, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.inline_query, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chosen_inline_result, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.callback_query, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.widget_query, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.shared_widget_query, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.shipping_query, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.pre_checkout_query, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.purchased_paid_media, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.poll, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.poll_answer, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.my_chat_member, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat_member, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat_join_request, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat_boost, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.removed_chat_boost, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.managed_bot, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.subscription, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.stopped_message_generation, references);
+    }
+}
 
 /// Telegram [`User`](https://core.telegram.org/bots/api#user).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20156,6 +22906,10 @@ impl User {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for User {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`UserChatBoosts`](https://core.telegram.org/bots/api#userchatboosts).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20175,6 +22929,11 @@ impl UserChatBoosts {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for UserChatBoosts {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.boosts, references);
     }
 }
 
@@ -20200,6 +22959,11 @@ impl UserProfileAudios {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for UserProfileAudios {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.audios, references);
+    }
+}
 
 /// Telegram [`UserProfilePhotos`](https://core.telegram.org/bots/api#userprofilephotos).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20221,6 +22985,11 @@ impl UserProfilePhotos {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for UserProfilePhotos {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photos, references);
     }
 }
 
@@ -20255,6 +23024,10 @@ impl UserRating {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for UserRating {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`UsersShared`](https://core.telegram.org/bots/api#usersshared).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20276,6 +23049,11 @@ impl UsersShared {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for UsersShared {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.users, references);
     }
 }
 
@@ -20329,6 +23107,11 @@ impl Venue {
     pub fn google_place_type(mut self, value: String) -> Self {
         self.google_place_type = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for Venue {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.location, references);
     }
 }
 
@@ -20409,6 +23192,13 @@ impl Video {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for Video {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.cover, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.qualities, references);
+    }
+}
 
 /// Telegram [`VideoChatEnded`](https://core.telegram.org/bots/api#videochatended).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20428,6 +23218,10 @@ impl VideoChatEnded {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for VideoChatEnded {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -20451,6 +23245,11 @@ impl VideoChatParticipantsInvited {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for VideoChatParticipantsInvited {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.users, references);
+    }
+}
 
 /// Telegram [`VideoChatScheduled`](https://core.telegram.org/bots/api#videochatscheduled).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20470,6 +23269,10 @@ impl VideoChatScheduled {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for VideoChatScheduled {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -20493,6 +23296,10 @@ impl VideoChatStarted {
 }
 impl Default for VideoChatStarted {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for VideoChatStarted {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }
 
 /// Telegram [`VideoNote`](https://core.telegram.org/bots/api#videonote).
@@ -20535,6 +23342,11 @@ impl VideoNote {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for VideoNote {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, references);
+    }
+}
 
 /// Telegram [`VideoQuality`](https://core.telegram.org/bots/api#videoquality).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20569,6 +23381,10 @@ impl VideoQuality {
     pub fn file_size(mut self, value: i64) -> Self {
         self.file_size = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for VideoQuality {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -20610,6 +23426,10 @@ impl Voice {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for Voice {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`WebAppData`](https://core.telegram.org/bots/api#webappdata).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20633,6 +23453,10 @@ impl WebAppData {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for WebAppData {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`WebAppInfo`](https://core.telegram.org/bots/api#webappinfo).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20652,6 +23476,10 @@ impl WebAppInfo {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for WebAppInfo {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -20721,6 +23549,10 @@ impl WebhookInfo {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for WebhookInfo {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
+}
 
 /// Telegram [`Widget`](https://core.telegram.org/bots/api#widget).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20775,6 +23607,10 @@ impl Widget {
     pub fn chat_data(mut self, value: String) -> Self {
         self.chat_data = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for Widget {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -20842,6 +23678,13 @@ impl WidgetQuery {
         self
     }
 }
+impl crate::typed_api::CollectAttachments for WidgetQuery {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.from, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.chat, references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.kind, references);
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -20872,6 +23715,16 @@ impl From<WidgetQueryTypeSignData> for WidgetQueryType {
 }
 impl From<WidgetQueryTypeSentTransaction> for WidgetQueryType {
     fn from(value: WidgetQueryTypeSentTransaction) -> Self { Self::WidgetQueryTypeSentTransaction(Box::new(value)) }
+}
+impl crate::typed_api::CollectAttachments for WidgetQueryType {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::WidgetQueryTypeData(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::WidgetQueryTypeSignData(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::WidgetQueryTypeSentTransaction(value) => crate::typed_api::CollectAttachments::collect_attachments(value, references),
+            Self::Unknown(_) => {},
+        }
+    }
 }
 
 /// Telegram [`WidgetQueryTypeData`](https://core.telegram.org/bots/api#widgetquerytypedata).
@@ -20905,6 +23758,11 @@ impl WidgetQueryTypeData {
 impl Default for WidgetQueryTypeData {
     fn default() -> Self { Self::new() }
 }
+impl crate::typed_api::CollectAttachments for WidgetQueryTypeData {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.wallet_card, references);
+    }
+}
 
 /// Telegram [`WidgetQueryTypeSentTransaction`](https://core.telegram.org/bots/api#widgetquerytypesenttransaction).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20931,6 +23789,11 @@ impl WidgetQueryTypeSentTransaction {
         self.unknown_fields.as_map()
     }
 }
+impl crate::typed_api::CollectAttachments for WidgetQueryTypeSentTransaction {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.wallet, references);
+    }
+}
 
 /// Telegram [`WidgetQueryTypeSignData`](https://core.telegram.org/bots/api#widgetquerytypesigndata).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20955,6 +23818,11 @@ impl WidgetQueryTypeSignData {
     }
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
+    }
+}
+impl crate::typed_api::CollectAttachments for WidgetQueryTypeSignData {
+    fn collect_attachments(&self, references: &mut std::collections::BTreeSet<String>) {
+        crate::typed_api::CollectAttachments::collect_attachments(&self.wallet, references);
     }
 }
 
@@ -20992,6 +23860,10 @@ impl WidgetQueryWallet {
     pub fn state_init(mut self, value: String) -> Self {
         self.state_init = Some(value);
         self
+    }
+}
+impl crate::typed_api::CollectAttachments for WidgetQueryWallet {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
     }
 }
 
@@ -21036,4 +23908,8 @@ impl WriteAccessAllowed {
 }
 impl Default for WriteAccessAllowed {
     fn default() -> Self { Self::new() }
+}
+impl crate::typed_api::CollectAttachments for WriteAccessAllowed {
+    fn collect_attachments(&self, _references: &mut std::collections::BTreeSet<String>) {
+    }
 }

@@ -3,7 +3,7 @@ import hashlib
 import unittest
 from tools.schema import SchemaError, import_html, canonical
 from tools.tests.test_schema import FIXTURE
-from tools.rustgen import Model, generate_types, generate_type_fixtures, generate_methods, generate_method_fixtures
+from tools.rustgen import Model, generate_types, generate_type_fixtures, generate_methods, generate_method_fixtures, quoted
 
 
 class RustGeneratorTests(unittest.TestCase):
@@ -66,3 +66,21 @@ class RustGeneratorTests(unittest.TestCase):
         policy['schema_sha256'] = '0' * 64
         with self.assertRaisesRegex(SchemaError, 'different schema'):
             generate_methods(schema, policy)
+
+    def test_file_field_policy_is_explicit_and_rejects_stale_fields(self):
+        schema = import_html(FIXTURE, {})
+        policy = {'schema_sha256': hashlib.sha256(canonical(schema).encode()).hexdigest(),
+                  'string_fields': ['Message.text']}
+        self.assertNotIn('collect_attachments(&self.text, references)', generate_types(schema))
+        self.assertIn('collect_attachments(&self.text, references)', generate_types(schema, policy))
+        policy['string_fields'] = ['Message.missing']
+        with self.assertRaisesRegex(SchemaError, 'stale file field'):
+            generate_types(schema, policy)
+
+    def test_rust_strings_cannot_end_a_fixture_literal(self):
+        self.assertEqual(quoted('\b'), r'"\u{8}"')
+        schema = import_html(FIXTURE, {})
+        schema['types']['TrueVariant']['fields'][0]['literal'] = '"###; arbitrary_tokens'
+        fixtures = generate_type_fixtures(schema)
+        self.assertNotIn('r###"', fixtures)
+        self.assertIn(r'\"###; arbitrary_tokens', fixtures)

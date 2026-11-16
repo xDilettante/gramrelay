@@ -1,0 +1,30 @@
+{
+  "schema_sha256": "ab64ce7cc9b0344bde3dc50b8552632067361f2cb317dc42d5d592f06c7d89b9",
+  "string_fields": [
+    "InputMediaAnimation.media",
+    "InputMediaAnimation.thumbnail",
+    "InputMediaAudio.media",
+    "InputMediaAudio.thumbnail",
+    "InputMediaDocument.media",
+    "InputMediaDocument.thumbnail",
+    "InputMediaLivePhoto.media",
+    "InputMediaLivePhoto.photo",
+    "InputMediaPhoto.media",
+    "InputMediaSticker.media",
+    "InputMediaVideo.cover",
+    "InputMediaVideo.media",
+    "InputMediaVideo.thumbnail",
+    "InputMediaVoiceNote.media",
+    "InputPaidMediaLivePhoto.media",
+    "InputPaidMediaLivePhoto.photo",
+    "InputPaidMediaPhoto.media",
+    "InputPaidMediaVideo.cover",
+    "InputPaidMediaVideo.media",
+    "InputPaidMediaVideo.thumbnail",
+    "InputProfilePhotoAnimated.animation",
+    "InputProfilePhotoStatic.photo",
+    "InputSticker.sticker",
+    "InputStoryContentPhoto.photo",
+    "InputStoryContentVideo.video"
+  ]
+}

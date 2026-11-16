@@ -26,6 +26,11 @@ impl crate::api::Method for AddStickerToSet {
     type Response = crate::api::True;
     const NAME: &'static str = "addStickerToSet";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sticker, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for AddStickerToSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -88,6 +93,9 @@ impl crate::api::Method for AnswerCallbackQuery {
     type Response = crate::api::True;
     const NAME: &'static str = "answerCallbackQuery";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for AnswerCallbackQuery {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -140,6 +148,9 @@ impl crate::api::Method for AnswerChatJoinRequestQuery {
     type Response = crate::api::True;
     const NAME: &'static str = "answerChatJoinRequestQuery";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for AnswerChatJoinRequestQuery {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -176,6 +187,11 @@ impl crate::api::Method for AnswerGuestQuery {
     type Response = SentGuestMessage;
     const NAME: &'static str = "answerGuestQuery";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.result, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for AnswerGuestQuery {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -240,6 +256,12 @@ impl crate::api::Method for AnswerInlineQuery {
     type Response = crate::api::True;
     const NAME: &'static str = "answerInlineQuery";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.results, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.button, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for AnswerInlineQuery {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -299,6 +321,9 @@ impl crate::api::Method for AnswerPreCheckoutQuery {
     type Response = crate::api::True;
     const NAME: &'static str = "answerPreCheckoutQuery";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for AnswerPreCheckoutQuery {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -353,6 +378,11 @@ impl crate::api::Method for AnswerShippingQuery {
     type Response = crate::api::True;
     const NAME: &'static str = "answerShippingQuery";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.shipping_options, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for AnswerShippingQuery {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -397,6 +427,11 @@ impl crate::api::Method for AnswerWebAppQuery {
     type Response = SentWebAppMessage;
     const NAME: &'static str = "answerWebAppQuery";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.result, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for AnswerWebAppQuery {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -438,6 +473,9 @@ impl crate::api::Method for AnswerWidgetQuery {
     type Response = crate::api::True;
     const NAME: &'static str = "answerWidgetQuery";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for AnswerWidgetQuery {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -478,6 +516,9 @@ impl crate::api::Method for ApproveChatJoinRequest {
     type Response = crate::api::True;
     const NAME: &'static str = "approveChatJoinRequest";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for ApproveChatJoinRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -521,6 +562,9 @@ impl crate::api::Method for ApproveSuggestedPost {
     type Response = crate::api::True;
     const NAME: &'static str = "approveSuggestedPost";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for ApproveSuggestedPost {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -575,6 +619,9 @@ impl crate::api::Method for BanChatMember {
     type Response = crate::api::True;
     const NAME: &'static str = "banChatMember";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for BanChatMember {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -619,6 +666,9 @@ impl crate::api::Method for BanChatSenderChat {
     type Response = crate::api::True;
     const NAME: &'static str = "banChatSenderChat";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for BanChatSenderChat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -654,6 +704,9 @@ impl crate::api::Method for Close {
     type Response = crate::api::True;
     const NAME: &'static str = "close";
     const EFFECT: crate::api::Effect = crate::api::Effect::SessionChange;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for Close {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -690,6 +743,9 @@ impl crate::api::Method for CloseForumTopic {
     type Response = crate::api::True;
     const NAME: &'static str = "closeForumTopic";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for CloseForumTopic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -724,6 +780,9 @@ impl crate::api::Method for CloseGeneralForumTopic {
     type Response = crate::api::True;
     const NAME: &'static str = "closeGeneralForumTopic";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for CloseGeneralForumTopic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -760,6 +819,9 @@ impl crate::api::Method for ConvertGiftToStars {
     type Response = crate::api::True;
     const NAME: &'static str = "convertGiftToStars";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for ConvertGiftToStars {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -896,6 +958,14 @@ impl crate::api::Method for CopyMessage {
     type Response = MessageId;
     const NAME: &'static str = "copyMessage";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for CopyMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1025,6 +1095,9 @@ impl crate::api::Method for CopyMessages {
     type Response = Vec<MessageId>;
     const NAME: &'static str = "copyMessages";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for CopyMessages {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1107,6 +1180,9 @@ impl crate::api::Method for CreateChatInviteLink {
     type Response = ChatInviteLink;
     const NAME: &'static str = "createChatInviteLink";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for CreateChatInviteLink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1168,6 +1244,9 @@ impl crate::api::Method for CreateChatSubscriptionInviteLink {
     type Response = ChatInviteLink;
     const NAME: &'static str = "createChatSubscriptionInviteLink";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for CreateChatSubscriptionInviteLink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1222,6 +1301,9 @@ impl crate::api::Method for CreateForumTopic {
     type Response = ForumTopic;
     const NAME: &'static str = "createForumTopic";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for CreateForumTopic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1391,6 +1473,11 @@ impl crate::api::Method for CreateInvoiceLink {
     type Response = String;
     const NAME: &'static str = "createInvoiceLink";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.prices, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for CreateInvoiceLink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1513,6 +1600,11 @@ impl crate::api::Method for CreateNewStickerSet {
     type Response = crate::api::True;
     const NAME: &'static str = "createNewStickerSet";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.stickers, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for CreateNewStickerSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1557,6 +1649,9 @@ impl crate::api::Method for DeclineChatJoinRequest {
     type Response = crate::api::True;
     const NAME: &'static str = "declineChatJoinRequest";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeclineChatJoinRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1600,6 +1695,9 @@ impl crate::api::Method for DeclineSuggestedPost {
     type Response = crate::api::True;
     const NAME: &'static str = "declineSuggestedPost";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeclineSuggestedPost {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1652,6 +1750,9 @@ impl crate::api::Method for DeleteAllMessageReactions {
     type Response = crate::api::True;
     const NAME: &'static str = "deleteAllMessageReactions";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeleteAllMessageReactions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1696,6 +1797,9 @@ impl crate::api::Method for DeleteBusinessAccountGift {
     type Response = crate::api::True;
     const NAME: &'static str = "deleteBusinessAccountGift";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeleteBusinessAccountGift {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1732,6 +1836,9 @@ impl crate::api::Method for DeleteBusinessMessages {
     type Response = crate::api::True;
     const NAME: &'static str = "deleteBusinessMessages";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeleteBusinessMessages {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1766,6 +1873,9 @@ impl crate::api::Method for DeleteChatPhoto {
     type Response = crate::api::True;
     const NAME: &'static str = "deleteChatPhoto";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeleteChatPhoto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1800,6 +1910,9 @@ impl crate::api::Method for DeleteChatStickerSet {
     type Response = crate::api::True;
     const NAME: &'static str = "deleteChatStickerSet";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeleteChatStickerSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1838,6 +1951,9 @@ impl crate::api::Method for DeleteEphemeralMessage {
     type Response = crate::api::True;
     const NAME: &'static str = "deleteEphemeralMessage";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeleteEphemeralMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1874,6 +1990,9 @@ impl crate::api::Method for DeleteForumTopic {
     type Response = crate::api::True;
     const NAME: &'static str = "deleteForumTopic";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeleteForumTopic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1910,6 +2029,9 @@ impl crate::api::Method for DeleteMessage {
     type Response = crate::api::True;
     const NAME: &'static str = "deleteMessage";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeleteMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1960,6 +2082,9 @@ impl crate::api::Method for DeleteMessageReaction {
     type Response = crate::api::True;
     const NAME: &'static str = "deleteMessageReaction";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeleteMessageReaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2004,6 +2129,9 @@ impl crate::api::Method for DeleteMessages {
     type Response = crate::api::True;
     const NAME: &'static str = "deleteMessages";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeleteMessages {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2053,6 +2181,11 @@ impl crate::api::Method for DeleteMyCommands {
     type Response = crate::api::True;
     const NAME: &'static str = "deleteMyCommands";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.scope, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for DeleteMyCommands {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2095,6 +2228,9 @@ impl crate::api::Method for DeleteStickerFromSet {
     type Response = crate::api::True;
     const NAME: &'static str = "deleteStickerFromSet";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeleteStickerFromSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2129,6 +2265,9 @@ impl crate::api::Method for DeleteStickerSet {
     type Response = crate::api::True;
     const NAME: &'static str = "deleteStickerSet";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeleteStickerSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2165,6 +2304,9 @@ impl crate::api::Method for DeleteStory {
     type Response = crate::api::True;
     const NAME: &'static str = "deleteStory";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeleteStory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2207,6 +2349,9 @@ impl crate::api::Method for DeleteWebhook {
     type Response = crate::api::True;
     const NAME: &'static str = "deleteWebhook";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for DeleteWebhook {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2275,6 +2420,9 @@ impl crate::api::Method for EditChatInviteLink {
     type Response = ChatInviteLink;
     const NAME: &'static str = "editChatInviteLink";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for EditChatInviteLink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2334,6 +2482,9 @@ impl crate::api::Method for EditChatSubscriptionInviteLink {
     type Response = ChatInviteLink;
     const NAME: &'static str = "editChatSubscriptionInviteLink";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for EditChatSubscriptionInviteLink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2411,6 +2562,12 @@ impl crate::api::Method for EditEphemeralMessageCaption {
     type Response = crate::api::True;
     const NAME: &'static str = "editEphemeralMessageCaption";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for EditEphemeralMessageCaption {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2478,6 +2635,12 @@ impl crate::api::Method for EditEphemeralMessageMedia {
     type Response = crate::api::True;
     const NAME: &'static str = "editEphemeralMessageMedia";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for EditEphemeralMessageMedia {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2527,6 +2690,11 @@ impl crate::api::Method for EditEphemeralMessageReplyMarkup {
     type Response = crate::api::True;
     const NAME: &'static str = "editEphemeralMessageReplyMarkup";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for EditEphemeralMessageReplyMarkup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2611,6 +2779,14 @@ impl crate::api::Method for EditEphemeralMessageText {
     type Response = crate::api::True;
     const NAME: &'static str = "editEphemeralMessageText";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.rich_message, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.link_preview_options, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for EditEphemeralMessageText {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2685,6 +2861,9 @@ impl crate::api::Method for EditForumTopic {
     type Response = crate::api::True;
     const NAME: &'static str = "editForumTopic";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for EditForumTopic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2729,6 +2908,9 @@ impl crate::api::Method for EditGeneralForumTopic {
     type Response = crate::api::True;
     const NAME: &'static str = "editGeneralForumTopic";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for EditGeneralForumTopic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2827,6 +3009,12 @@ impl crate::api::Method for EditMessageCaption {
     type Response = EditMessageCaptionResult;
     const NAME: &'static str = "editMessageCaption";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for EditMessageCaption {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2910,6 +3098,12 @@ impl crate::api::Method for EditMessageChecklist {
     type Response = Message;
     const NAME: &'static str = "editMessageChecklist";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.checklist, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for EditMessageChecklist {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -3013,6 +3207,11 @@ impl crate::api::Method for EditMessageLiveLocation {
     type Response = EditMessageLiveLocationResult;
     const NAME: &'static str = "editMessageLiveLocation";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for EditMessageLiveLocation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -3118,6 +3317,12 @@ impl crate::api::Method for EditMessageMedia {
     type Response = EditMessageMediaResult;
     const NAME: &'static str = "editMessageMedia";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for EditMessageMedia {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -3208,6 +3413,11 @@ impl crate::api::Method for EditMessageReplyMarkup {
     type Response = EditMessageReplyMarkupResult;
     const NAME: &'static str = "editMessageReplyMarkup";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for EditMessageReplyMarkup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -3333,6 +3543,14 @@ impl crate::api::Method for EditMessageText {
     type Response = EditMessageTextResult;
     const NAME: &'static str = "editMessageText";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.link_preview_options, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.rich_message, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for EditMessageText {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -3443,6 +3661,9 @@ impl crate::api::Method for EditMessageWidgetData {
     type Response = crate::api::True;
     const NAME: &'static str = "editMessageWidgetData";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for EditMessageWidgetData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -3506,6 +3727,9 @@ impl crate::api::Method for EditSharedWidgetData {
     type Response = crate::api::True;
     const NAME: &'static str = "editSharedWidgetData";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for EditSharedWidgetData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -3576,6 +3800,13 @@ impl crate::api::Method for EditStory {
     type Response = Story;
     const NAME: &'static str = "editStory";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.content, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.areas, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for EditStory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -3630,6 +3861,9 @@ impl crate::api::Method for EditUserStarSubscription {
     type Response = crate::api::True;
     const NAME: &'static str = "editUserStarSubscription";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for EditUserStarSubscription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -3664,6 +3898,9 @@ impl crate::api::Method for ExportChatInviteLink {
     type Response = String;
     const NAME: &'static str = "exportChatInviteLink";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for ExportChatInviteLink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -3751,6 +3988,11 @@ impl crate::api::Method for ForwardMessage {
     type Response = Message;
     const NAME: &'static str = "forwardMessage";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for ForwardMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -3845,6 +4087,9 @@ impl crate::api::Method for ForwardMessages {
     type Response = Vec<MessageId>;
     const NAME: &'static str = "forwardMessages";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for ForwardMessages {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -3896,6 +4141,9 @@ impl crate::api::Method for GetAvailableGifts {
     type Response = Gifts;
     const NAME: &'static str = "getAvailableGifts";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetAvailableGifts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4000,6 +4248,9 @@ impl crate::api::Method for GetBusinessAccountGifts {
     type Response = OwnedGifts;
     const NAME: &'static str = "getBusinessAccountGifts";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetBusinessAccountGifts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4074,6 +4325,9 @@ impl crate::api::Method for GetBusinessAccountStarBalance {
     type Response = StarAmount;
     const NAME: &'static str = "getBusinessAccountStarBalance";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetBusinessAccountStarBalance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4108,6 +4362,9 @@ impl crate::api::Method for GetBusinessConnection {
     type Response = BusinessConnection;
     const NAME: &'static str = "getBusinessConnection";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetBusinessConnection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4142,6 +4399,9 @@ impl crate::api::Method for GetChat {
     type Response = ChatFullInfo;
     const NAME: &'static str = "getChat";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetChat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4183,6 +4443,9 @@ impl crate::api::Method for GetChatAdministrators {
     type Response = Vec<ChatMember>;
     const NAME: &'static str = "getChatAdministrators";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetChatAdministrators {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4291,6 +4554,9 @@ impl crate::api::Method for GetChatGifts {
     type Response = OwnedGifts;
     const NAME: &'static str = "getChatGifts";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetChatGifts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4367,6 +4633,9 @@ impl crate::api::Method for GetChatMember {
     type Response = ChatMember;
     const NAME: &'static str = "getChatMember";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetChatMember {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4401,6 +4670,9 @@ impl crate::api::Method for GetChatMemberCount {
     type Response = i64;
     const NAME: &'static str = "getChatMemberCount";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetChatMemberCount {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4443,6 +4715,9 @@ impl crate::api::Method for GetChatMenuButton {
     type Response = MenuButton;
     const NAME: &'static str = "getChatMenuButton";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetChatMenuButton {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4482,6 +4757,9 @@ impl crate::api::Method for GetChatShareThemeBackdrops {
     type Response = ChatShareThemeBackdrops;
     const NAME: &'static str = "getChatShareThemeBackdrops";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetChatShareThemeBackdrops {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4516,6 +4794,9 @@ impl crate::api::Method for GetCustomEmojiStickers {
     type Response = Vec<Sticker>;
     const NAME: &'static str = "getCustomEmojiStickers";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetCustomEmojiStickers {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4550,6 +4831,9 @@ impl crate::api::Method for GetFile {
     type Response = File;
     const NAME: &'static str = "getFile";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4585,6 +4869,9 @@ impl crate::api::Method for GetForumTopicIconStickers {
     type Response = Vec<Sticker>;
     const NAME: &'static str = "getForumTopicIconStickers";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetForumTopicIconStickers {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4640,6 +4927,9 @@ impl crate::api::Method for GetGameHighScores {
     type Response = Vec<GameHighScore>;
     const NAME: &'static str = "getGameHighScores";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetGameHighScores {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4686,6 +4976,9 @@ impl crate::api::Method for GetManagedBotAccessSettings {
     type Response = BotAccessSettings;
     const NAME: &'static str = "getManagedBotAccessSettings";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetManagedBotAccessSettings {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4720,6 +5013,9 @@ impl crate::api::Method for GetManagedBotToken {
     type Response = crate::api::SecretString;
     const NAME: &'static str = "getManagedBotToken";
     const EFFECT: crate::api::Effect = crate::api::Effect::CredentialRead;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetManagedBotToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4755,6 +5051,9 @@ impl crate::api::Method for GetMe {
     type Response = User;
     const NAME: &'static str = "getMe";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetMe {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4804,6 +5103,11 @@ impl crate::api::Method for GetMyCommands {
     type Response = Vec<BotCommand>;
     const NAME: &'static str = "getMyCommands";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.scope, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for GetMyCommands {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4854,6 +5158,9 @@ impl crate::api::Method for GetMyDefaultAdministratorRights {
     type Response = ChatAdministratorRights;
     const NAME: &'static str = "getMyDefaultAdministratorRights";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetMyDefaultAdministratorRights {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4900,6 +5207,9 @@ impl crate::api::Method for GetMyDescription {
     type Response = BotDescription;
     const NAME: &'static str = "getMyDescription";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetMyDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4946,6 +5256,9 @@ impl crate::api::Method for GetMyName {
     type Response = BotName;
     const NAME: &'static str = "getMyName";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetMyName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -4992,6 +5305,9 @@ impl crate::api::Method for GetMyShortDescription {
     type Response = BotShortDescription;
     const NAME: &'static str = "getMyShortDescription";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetMyShortDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5031,6 +5347,9 @@ impl crate::api::Method for GetMyStarBalance {
     type Response = StarAmount;
     const NAME: &'static str = "getMyStarBalance";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetMyStarBalance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5080,6 +5399,9 @@ impl crate::api::Method for GetStarTransactions {
     type Response = StarTransactions;
     const NAME: &'static str = "getStarTransactions";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetStarTransactions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5122,6 +5444,9 @@ impl crate::api::Method for GetStickerSet {
     type Response = StickerSet;
     const NAME: &'static str = "getStickerSet";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetStickerSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5156,6 +5481,9 @@ impl crate::api::Method for GetUniqueGift {
     type Response = UniqueGift;
     const NAME: &'static str = "getUniqueGift";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetUniqueGift {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5219,6 +5547,9 @@ impl crate::api::Method for GetUpdates {
     type Response = Vec<Update>;
     const NAME: &'static str = "getUpdates";
     const EFFECT: crate::api::Effect = crate::api::Effect::Acknowledge;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetUpdates {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5271,6 +5602,9 @@ impl crate::api::Method for GetUserChatBoosts {
     type Response = UserChatBoosts;
     const NAME: &'static str = "getUserChatBoosts";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetUserChatBoosts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5361,6 +5695,9 @@ impl crate::api::Method for GetUserGifts {
     type Response = OwnedGifts;
     const NAME: &'static str = "getUserGifts";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetUserGifts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5429,6 +5766,9 @@ impl crate::api::Method for GetUserPersonalChatMessages {
     type Response = Vec<Message>;
     const NAME: &'static str = "getUserPersonalChatMessages";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetUserPersonalChatMessages {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5477,6 +5817,9 @@ impl crate::api::Method for GetUserProfileAudios {
     type Response = UserProfileAudios;
     const NAME: &'static str = "getUserProfileAudios";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetUserProfileAudios {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5533,6 +5876,9 @@ impl crate::api::Method for GetUserProfilePhotos {
     type Response = UserProfilePhotos;
     const NAME: &'static str = "getUserProfilePhotos";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetUserProfilePhotos {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5576,6 +5922,9 @@ impl crate::api::Method for GetWebhookInfo {
     type Response = WebhookInfo;
     const NAME: &'static str = "getWebhookInfo";
     const EFFECT: crate::api::Effect = crate::api::Effect::Read;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for GetWebhookInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5635,6 +5984,11 @@ impl crate::api::Method for GiftPremiumSubscription {
     type Response = crate::api::True;
     const NAME: &'static str = "giftPremiumSubscription";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text_entities, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for GiftPremiumSubscription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5681,6 +6035,9 @@ impl crate::api::Method for HideGeneralForumTopic {
     type Response = crate::api::True;
     const NAME: &'static str = "hideGeneralForumTopic";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for HideGeneralForumTopic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5715,6 +6072,9 @@ impl crate::api::Method for LeaveChat {
     type Response = crate::api::True;
     const NAME: &'static str = "leaveChat";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for LeaveChat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5750,6 +6110,9 @@ impl crate::api::Method for LogOut {
     type Response = crate::api::True;
     const NAME: &'static str = "logOut";
     const EFFECT: crate::api::Effect = crate::api::Effect::SessionChange;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for LogOut {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5800,6 +6163,9 @@ impl crate::api::Method for PinChatMessage {
     type Response = crate::api::True;
     const NAME: &'static str = "pinChatMessage";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for PinChatMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5888,6 +6254,13 @@ impl crate::api::Method for PostStory {
     type Response = Story;
     const NAME: &'static str = "postStory";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.content, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.areas, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for PostStory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6074,6 +6447,9 @@ impl crate::api::Method for PromoteChatMember {
     type Response = crate::api::True;
     const NAME: &'static str = "promoteChatMember";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for PromoteChatMember {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6184,6 +6560,9 @@ impl crate::api::Method for ReadBusinessMessage {
     type Response = crate::api::True;
     const NAME: &'static str = "readBusinessMessage";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for ReadBusinessMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6220,6 +6599,9 @@ impl crate::api::Method for RefundStarPayment {
     type Response = crate::api::True;
     const NAME: &'static str = "refundStarPayment";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for RefundStarPayment {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6261,6 +6643,9 @@ impl crate::api::Method for RemoveBusinessAccountProfilePhoto {
     type Response = crate::api::True;
     const NAME: &'static str = "removeBusinessAccountProfilePhoto";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for RemoveBusinessAccountProfilePhoto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6299,6 +6684,9 @@ impl crate::api::Method for RemoveChatVerification {
     type Response = crate::api::True;
     const NAME: &'static str = "removeChatVerification";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for RemoveChatVerification {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6334,6 +6722,9 @@ impl crate::api::Method for RemoveMyProfilePhoto {
     type Response = crate::api::True;
     const NAME: &'static str = "removeMyProfilePhoto";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for RemoveMyProfilePhoto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6368,6 +6759,9 @@ impl crate::api::Method for RemoveUserVerification {
     type Response = crate::api::True;
     const NAME: &'static str = "removeUserVerification";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for RemoveUserVerification {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6404,6 +6798,9 @@ impl crate::api::Method for ReopenForumTopic {
     type Response = crate::api::True;
     const NAME: &'static str = "reopenForumTopic";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for ReopenForumTopic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6438,6 +6835,9 @@ impl crate::api::Method for ReopenGeneralForumTopic {
     type Response = crate::api::True;
     const NAME: &'static str = "reopenGeneralForumTopic";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for ReopenGeneralForumTopic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6472,6 +6872,9 @@ impl crate::api::Method for ReplaceManagedBotToken {
     type Response = crate::api::SecretString;
     const NAME: &'static str = "replaceManagedBotToken";
     const EFFECT: crate::api::Effect = crate::api::Effect::CredentialWrite;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for ReplaceManagedBotToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6512,6 +6915,11 @@ impl crate::api::Method for ReplaceStickerInSet {
     type Response = crate::api::True;
     const NAME: &'static str = "replaceStickerInSet";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sticker, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for ReplaceStickerInSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6566,6 +6974,9 @@ impl crate::api::Method for RepostStory {
     type Response = Story;
     const NAME: &'static str = "repostStory";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for RepostStory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6626,6 +7037,11 @@ impl crate::api::Method for RestrictChatMember {
     type Response = crate::api::True;
     const NAME: &'static str = "restrictChatMember";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.permissions, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for RestrictChatMember {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6670,6 +7086,9 @@ impl crate::api::Method for RevokeChatInviteLink {
     type Response = ChatInviteLink;
     const NAME: &'static str = "revokeChatInviteLink";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for RevokeChatInviteLink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6734,6 +7153,11 @@ impl crate::api::Method for SavePreparedInlineMessage {
     type Response = PreparedInlineMessage;
     const NAME: &'static str = "savePreparedInlineMessage";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.result, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SavePreparedInlineMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6786,6 +7210,11 @@ impl crate::api::Method for SavePreparedKeyboardButton {
     type Response = PreparedKeyboardButton;
     const NAME: &'static str = "savePreparedKeyboardButton";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.button, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SavePreparedKeyboardButton {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -6967,6 +7396,17 @@ impl crate::api::Method for SendAnimation {
     type Response = Message;
     const NAME: &'static str = "sendAnimation";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ephemeral_message_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.animation, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendAnimation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -7218,6 +7658,17 @@ impl crate::api::Method for SendAudio {
     type Response = Message;
     const NAME: &'static str = "sendAudio";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ephemeral_message_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.audio, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendAudio {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -7344,6 +7795,9 @@ impl crate::api::Method for SendChatAction {
     type Response = crate::api::True;
     const NAME: &'static str = "sendChatAction";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SendChatAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -7388,6 +7842,9 @@ impl crate::api::Method for SendChatJoinRequestWebApp {
     type Response = crate::api::True;
     const NAME: &'static str = "sendChatJoinRequestWebApp";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SendChatJoinRequestWebApp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -7461,6 +7918,13 @@ impl crate::api::Method for SendChecklist {
     type Response = Message;
     const NAME: &'static str = "sendChecklist";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.checklist, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendChecklist {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -7615,6 +8079,14 @@ impl crate::api::Method for SendContact {
     type Response = Message;
     const NAME: &'static str = "sendContact";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ephemeral_message_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendContact {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -7782,6 +8254,13 @@ impl crate::api::Method for SendDice {
     type Response = Message;
     const NAME: &'static str = "sendDice";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendDice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -7979,6 +8458,17 @@ impl crate::api::Method for SendDocument {
     type Response = Message;
     const NAME: &'static str = "sendDocument";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ephemeral_message_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.document, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendDocument {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -8139,6 +8629,12 @@ impl crate::api::Method for SendGame {
     type Response = Message;
     const NAME: &'static str = "sendGame";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendGame {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -8247,6 +8743,11 @@ impl crate::api::Method for SendGift {
     type Response = crate::api::True;
     const NAME: &'static str = "sendGift";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.text_entities, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendGift {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -8490,6 +8991,14 @@ impl crate::api::Method for SendInvoice {
     type Response = Message;
     const NAME: &'static str = "sendInvoice";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.prices, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendInvoice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -8745,6 +9254,17 @@ impl crate::api::Method for SendLivePhoto {
     type Response = Message;
     const NAME: &'static str = "sendLivePhoto";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ephemeral_message_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.live_photo, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendLivePhoto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -8961,6 +9481,14 @@ impl crate::api::Method for SendLocation {
     type Response = Message;
     const NAME: &'static str = "sendLocation";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ephemeral_message_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendLocation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -9117,6 +9645,12 @@ impl crate::api::Method for SendMediaGroup {
     type Response = Vec<Message>;
     const NAME: &'static str = "sendMediaGroup";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendMediaGroup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -9288,6 +9822,16 @@ impl crate::api::Method for SendMessage {
     type Response = Message;
     const NAME: &'static str = "sendMessage";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ephemeral_message_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.link_preview_options, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -9426,6 +9970,11 @@ impl crate::api::Method for SendMessageDraft {
     type Response = crate::api::True;
     const NAME: &'static str = "sendMessageDraft";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.entities, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendMessageDraft {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -9586,6 +10135,15 @@ impl crate::api::Method for SendPaidMedia {
     type Response = Message;
     const NAME: &'static str = "sendPaidMedia";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendPaidMedia {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -9795,6 +10353,16 @@ impl crate::api::Method for SendPhoto {
     type Response = Message;
     const NAME: &'static str = "sendPhoto";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ephemeral_message_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendPhoto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -10119,6 +10687,18 @@ impl crate::api::Method for SendPoll {
     type Response = Message;
     const NAME: &'static str = "sendPoll";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.question_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.options, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.explanation_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.explanation_media, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.description_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.media, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendPoll {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -10361,6 +10941,15 @@ impl crate::api::Method for SendRichMessage {
     type Response = Message;
     const NAME: &'static str = "sendRichMessage";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ephemeral_message_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.rich_message, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendRichMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -10468,6 +11057,11 @@ impl crate::api::Method for SendRichMessageDraft {
     type Response = crate::api::True;
     const NAME: &'static str = "sendRichMessageDraft";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.rich_message, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendRichMessageDraft {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -10600,6 +11194,13 @@ impl crate::api::Method for SendSharedWidget {
     type Response = Message;
     const NAME: &'static str = "sendSharedWidget";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendSharedWidget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -10773,6 +11374,15 @@ impl crate::api::Method for SendSticker {
     type Response = Message;
     const NAME: &'static str = "sendSticker";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ephemeral_message_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sticker, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendSticker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -10977,6 +11587,14 @@ impl crate::api::Method for SendVenue {
     type Response = Message;
     const NAME: &'static str = "sendVenue";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ephemeral_message_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendVenue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -11243,6 +11861,18 @@ impl crate::api::Method for SendVideo {
     type Response = Message;
     const NAME: &'static str = "sendVideo";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ephemeral_message_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.video, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.cover, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendVideo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -11478,6 +12108,16 @@ impl crate::api::Method for SendVideoNote {
     type Response = Message;
     const NAME: &'static str = "sendVideoNote";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ephemeral_message_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.video_note, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendVideoNote {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -11684,6 +12324,16 @@ impl crate::api::Method for SendVoice {
     type Response = Message;
     const NAME: &'static str = "sendVoice";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.ephemeral_message_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.voice, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.suggested_post_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendVoice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -11903,6 +12553,13 @@ impl crate::api::Method for SendWidget {
     type Response = Message;
     const NAME: &'static str = "sendWidget";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.caption_entities, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_parameters, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SendWidget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12012,6 +12669,9 @@ impl crate::api::Method for SetBusinessAccountBio {
     type Response = crate::api::True;
     const NAME: &'static str = "setBusinessAccountBio";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetBusinessAccountBio {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12054,6 +12714,11 @@ impl crate::api::Method for SetBusinessAccountGiftSettings {
     type Response = crate::api::True;
     const NAME: &'static str = "setBusinessAccountGiftSettings";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.accepted_gift_types, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SetBusinessAccountGiftSettings {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12097,6 +12762,9 @@ impl crate::api::Method for SetBusinessAccountName {
     type Response = crate::api::True;
     const NAME: &'static str = "setBusinessAccountName";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetBusinessAccountName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12144,6 +12812,11 @@ impl crate::api::Method for SetBusinessAccountProfilePhoto {
     type Response = crate::api::True;
     const NAME: &'static str = "setBusinessAccountProfilePhoto";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SetBusinessAccountProfilePhoto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12189,6 +12862,9 @@ impl crate::api::Method for SetBusinessAccountUsername {
     type Response = crate::api::True;
     const NAME: &'static str = "setBusinessAccountUsername";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetBusinessAccountUsername {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12231,6 +12907,9 @@ impl crate::api::Method for SetChatAdministratorCustomTitle {
     type Response = crate::api::True;
     const NAME: &'static str = "setChatAdministratorCustomTitle";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetChatAdministratorCustomTitle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12272,6 +12951,9 @@ impl crate::api::Method for SetChatDescription {
     type Response = crate::api::True;
     const NAME: &'static str = "setChatDescription";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetChatDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12319,6 +13001,9 @@ impl crate::api::Method for SetChatMemberTag {
     type Response = crate::api::True;
     const NAME: &'static str = "setChatMemberTag";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetChatMemberTag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12372,6 +13057,11 @@ impl crate::api::Method for SetChatMenuButton {
     type Response = crate::api::True;
     const NAME: &'static str = "setChatMenuButton";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.menu_button, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SetChatMenuButton {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12423,6 +13113,11 @@ impl crate::api::Method for SetChatPermissions {
     type Response = crate::api::True;
     const NAME: &'static str = "setChatPermissions";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.permissions, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SetChatPermissions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12463,6 +13158,11 @@ impl crate::api::Method for SetChatPhoto {
     type Response = crate::api::True;
     const NAME: &'static str = "setChatPhoto";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SetChatPhoto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12499,6 +13199,9 @@ impl crate::api::Method for SetChatStickerSet {
     type Response = crate::api::True;
     const NAME: &'static str = "setChatStickerSet";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetChatStickerSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12535,6 +13238,9 @@ impl crate::api::Method for SetChatTitle {
     type Response = crate::api::True;
     const NAME: &'static str = "setChatTitle";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetChatTitle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12576,6 +13282,9 @@ impl crate::api::Method for SetCustomEmojiStickerSetThumbnail {
     type Response = crate::api::True;
     const NAME: &'static str = "setCustomEmojiStickerSetThumbnail";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetCustomEmojiStickerSetThumbnail {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12651,6 +13360,9 @@ impl crate::api::Method for SetGameScore {
     type Response = SetGameScoreResult;
     const NAME: &'static str = "setGameScore";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetGameScore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12714,6 +13426,9 @@ impl crate::api::Method for SetManagedBotAccessSettings {
     type Response = crate::api::True;
     const NAME: &'static str = "setManagedBotAccessSettings";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetManagedBotAccessSettings {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12768,6 +13483,11 @@ impl crate::api::Method for SetMessageReaction {
     type Response = crate::api::True;
     const NAME: &'static str = "setMessageReaction";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reaction, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SetMessageReaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12824,6 +13544,12 @@ impl crate::api::Method for SetMyCommands {
     type Response = crate::api::True;
     const NAME: &'static str = "setMyCommands";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.commands, &mut references);
+        crate::typed_api::CollectAttachments::collect_attachments(&self.scope, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SetMyCommands {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12881,6 +13607,11 @@ impl crate::api::Method for SetMyDefaultAdministratorRights {
     type Response = crate::api::True;
     const NAME: &'static str = "setMyDefaultAdministratorRights";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.rights, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SetMyDefaultAdministratorRights {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12938,6 +13669,9 @@ impl crate::api::Method for SetMyDescription {
     type Response = crate::api::True;
     const NAME: &'static str = "setMyDescription";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetMyDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12995,6 +13729,9 @@ impl crate::api::Method for SetMyName {
     type Response = crate::api::True;
     const NAME: &'static str = "setMyName";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetMyName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13037,6 +13774,11 @@ impl crate::api::Method for SetMyProfilePhoto {
     type Response = crate::api::True;
     const NAME: &'static str = "setMyProfilePhoto";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.photo, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SetMyProfilePhoto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13086,6 +13828,9 @@ impl crate::api::Method for SetMyShortDescription {
     type Response = crate::api::True;
     const NAME: &'static str = "setMyShortDescription";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetMyShortDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13130,6 +13875,11 @@ impl crate::api::Method for SetPassportDataErrors {
     type Response = crate::api::True;
     const NAME: &'static str = "setPassportDataErrors";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.errors, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SetPassportDataErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13166,6 +13916,9 @@ impl crate::api::Method for SetStickerEmojiList {
     type Response = crate::api::True;
     const NAME: &'static str = "setStickerEmojiList";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetStickerEmojiList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13207,6 +13960,9 @@ impl crate::api::Method for SetStickerKeywords {
     type Response = crate::api::True;
     const NAME: &'static str = "setStickerKeywords";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetStickerKeywords {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13252,6 +14008,11 @@ impl crate::api::Method for SetStickerMaskPosition {
     type Response = crate::api::True;
     const NAME: &'static str = "setStickerMaskPosition";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.mask_position, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SetStickerMaskPosition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13292,6 +14053,9 @@ impl crate::api::Method for SetStickerPositionInSet {
     type Response = crate::api::True;
     const NAME: &'static str = "setStickerPositionInSet";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetStickerPositionInSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13337,6 +14101,11 @@ impl crate::api::Method for SetStickerSetThumbnail {
     type Response = crate::api::True;
     const NAME: &'static str = "setStickerSetThumbnail";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.thumbnail, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SetStickerSetThumbnail {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13377,6 +14146,9 @@ impl crate::api::Method for SetStickerSetTitle {
     type Response = crate::api::True;
     const NAME: &'static str = "setStickerSetTitle";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetStickerSetTitle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13425,6 +14197,9 @@ impl crate::api::Method for SetUserEmojiStatus {
     type Response = crate::api::True;
     const NAME: &'static str = "setUserEmojiStatus";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for SetUserEmojiStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13509,6 +14284,11 @@ impl crate::api::Method for SetWebhook {
     type Response = crate::api::True;
     const NAME: &'static str = "setWebhook";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.certificate, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for SetWebhook {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13603,6 +14383,11 @@ impl crate::api::Method for StopMessageLiveLocation {
     type Response = StopMessageLiveLocationResult;
     const NAME: &'static str = "stopMessageLiveLocation";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for StopMessageLiveLocation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13673,6 +14458,11 @@ impl crate::api::Method for StopPoll {
     type Response = Poll;
     const NAME: &'static str = "stopPoll";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.reply_markup, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for StopPoll {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13717,6 +14507,9 @@ impl crate::api::Method for TransferBusinessAccountStars {
     type Response = crate::api::True;
     const NAME: &'static str = "transferBusinessAccountStars";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for TransferBusinessAccountStars {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13762,6 +14555,9 @@ impl crate::api::Method for TransferGift {
     type Response = crate::api::True;
     const NAME: &'static str = "transferGift";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for TransferGift {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13809,6 +14605,9 @@ impl crate::api::Method for UnbanChatMember {
     type Response = crate::api::True;
     const NAME: &'static str = "unbanChatMember";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for UnbanChatMember {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13849,6 +14648,9 @@ impl crate::api::Method for UnbanChatSenderChat {
     type Response = crate::api::True;
     const NAME: &'static str = "unbanChatSenderChat";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for UnbanChatSenderChat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13883,6 +14685,9 @@ impl crate::api::Method for UnhideGeneralForumTopic {
     type Response = crate::api::True;
     const NAME: &'static str = "unhideGeneralForumTopic";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for UnhideGeneralForumTopic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13917,6 +14722,9 @@ impl crate::api::Method for UnpinAllChatMessages {
     type Response = crate::api::True;
     const NAME: &'static str = "unpinAllChatMessages";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for UnpinAllChatMessages {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13953,6 +14761,9 @@ impl crate::api::Method for UnpinAllForumTopicMessages {
     type Response = crate::api::True;
     const NAME: &'static str = "unpinAllForumTopicMessages";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for UnpinAllForumTopicMessages {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -13987,6 +14798,9 @@ impl crate::api::Method for UnpinAllGeneralForumTopicMessages {
     type Response = crate::api::True;
     const NAME: &'static str = "unpinAllGeneralForumTopicMessages";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for UnpinAllGeneralForumTopicMessages {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -14035,6 +14849,9 @@ impl crate::api::Method for UnpinChatMessage {
     type Response = crate::api::True;
     const NAME: &'static str = "unpinChatMessage";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for UnpinChatMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -14093,6 +14910,9 @@ impl crate::api::Method for UpgradeGift {
     type Response = crate::api::True;
     const NAME: &'static str = "upgradeGift";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
 }
 impl std::fmt::Debug for UpgradeGift {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -14139,6 +14959,11 @@ impl crate::api::Method for UploadStickerFile {
     type Response = File;
     const NAME: &'static str = "uploadStickerFile";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.sticker, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for UploadStickerFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -14194,6 +15019,11 @@ impl crate::api::Method for VerifyChat {
     type Response = crate::api::True;
     const NAME: &'static str = "verifyChat";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.custom_description_entities, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for VerifyChat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -14261,6 +15091,11 @@ impl crate::api::Method for VerifyUser {
     type Response = crate::api::True;
     const NAME: &'static str = "verifyUser";
     const EFFECT: crate::api::Effect = crate::api::Effect::Write;
+    fn attachment_references(&self) -> std::collections::BTreeSet<String> {
+        let mut references = std::collections::BTreeSet::new();
+        crate::typed_api::CollectAttachments::collect_attachments(&self.custom_description_entities, &mut references);
+        references
+    }
 }
 impl std::fmt::Debug for VerifyUser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -32,17 +32,26 @@ impl InputFile {
     }
 
     pub(crate) async fn attach(self, form: Form, max_bytes: u64) -> Result<Form> {
-        let part = match self.0 {
-            Source::FileId(id) => {
-                if id.is_empty() {
-                    return Err(Error::local(ErrorKind::Validation, "file_id"));
-                }
-                return Ok(form.text("document", id));
+        if let Source::FileId(id) = self.0 {
+            if id.is_empty() {
+                return Err(Error::local(ErrorKind::Validation, "file_id"));
+            }
+            return Ok(form.text("document", id));
+        }
+        let (part, _) = self.into_part(max_bytes).await?;
+        Ok(form.part("document", part))
+    }
+
+    pub(crate) async fn into_part(self, max_bytes: u64) -> Result<(Part, u64)> {
+        let (part, length) = match self.0 {
+            Source::FileId(_) => {
+                return Err(Error::local(ErrorKind::Validation, "attachment_file"));
             }
             Source::Bytes { name, bytes } => {
-                check_size(bytes.len() as u64, max_bytes)?;
+                let length = bytes.len() as u64;
+                check_size(length, max_bytes)?;
                 validate_name(&name)?;
-                Part::bytes(bytes).file_name(name)
+                (Part::bytes(bytes).file_name(name), length)
             }
             Source::Path(path) => {
                 let name = path
@@ -65,14 +74,17 @@ impl InputFile {
                 // take(length) also bounds a file that grows after metadata was read.
                 // https://docs.rs/tokio/latest/tokio/io/trait.AsyncReadExt.html#method.take
                 let stream = ReaderStream::new(file.take(length));
-                Part::stream_with_length(Body::wrap_stream(stream), length)
-                    .file_name(name.to_owned())
+                (
+                    Part::stream_with_length(Body::wrap_stream(stream), length)
+                        .file_name(name.to_owned()),
+                    length,
+                )
             }
         };
         let part = part
             .mime_str("application/octet-stream")
             .map_err(|_| Error::local(ErrorKind::Validation, "mime_type"))?;
-        Ok(form.part("document", part))
+        Ok((part, length))
     }
 }
 
