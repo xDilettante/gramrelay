@@ -5,7 +5,7 @@ See tasks/goal.md. The active goal includes every unchecked module below.
 ## Bot runtime
 
 - [x] R1: typed get_me/get_updates/get_webhook_info and preservation of nested unknown event fields. Verified: 3 update tests, all 26 unit/integration tests, 2 doctests and Clippy pass.
-- [ ] R2: Router<State>, typed contexts, exact commands/mentions and context-preserving replies. Depends R1. Verify: cargo test --locked --test routing.
+- [x] R2: Router<State>, typed contexts, exact commands/mentions and context-preserving replies. Verified: 4 routing tests, Clippy and client-only build pass; complete regression suite passed.
 - [ ] R3: one process-local poller, bounded per-chat batches, safe offset barrier, cancellation and handler failures. Depends R2. Verify: cargo test --locked --test polling.
 - [ ] R4: authenticated webhook ingestion and transport adapter, limits, overload and shutdown. Depends J2 for durable mode. Verify: localhost webhook/recovery tests.
 

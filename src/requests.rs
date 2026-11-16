@@ -1,5 +1,6 @@
 use crate::{
-    Bot, CallbackQueryId, ChatId, Error, ErrorKind, InlineKeyboardMarkup, Message, Result,
+    Bot, CallbackQueryId, ChatId, Error, ErrorKind, InlineKeyboardMarkup, Message, MessageId,
+    Result,
 };
 use serde::Serialize;
 use std::{
@@ -24,6 +25,17 @@ struct MessageParams {
     disable_notification: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     reply_markup: Option<InlineKeyboardMarkup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reply_parameters: Option<ReplyParams>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message_thread_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    business_connection_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ReplyParams {
+    message_id: MessageId,
 }
 
 impl<'a> SendMessage<'a> {
@@ -35,6 +47,9 @@ impl<'a> SendMessage<'a> {
                 text,
                 disable_notification: None,
                 reply_markup: None,
+                reply_parameters: None,
+                message_thread_id: None,
+                business_connection_id: None,
             },
         }
     }
@@ -44,6 +59,18 @@ impl<'a> SendMessage<'a> {
     }
     pub fn reply_markup(mut self, keyboard: InlineKeyboardMarkup) -> Self {
         self.params.reply_markup = Some(keyboard);
+        self
+    }
+    pub fn reply_to(mut self, id: MessageId) -> Self {
+        self.params.reply_parameters = Some(ReplyParams { message_id: id });
+        self
+    }
+    pub fn message_thread_id(mut self, id: i64) -> Self {
+        self.params.message_thread_id = Some(id);
+        self
+    }
+    pub fn business_connection_id(mut self, id: impl Into<String>) -> Self {
+        self.params.business_connection_id = Some(id.into());
         self
     }
 }

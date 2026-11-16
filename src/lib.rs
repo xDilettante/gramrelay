@@ -15,6 +15,8 @@ mod client;
 mod error;
 mod files;
 mod requests;
+#[cfg(feature = "bot")]
+mod routing;
 mod types;
 mod updates;
 
@@ -22,6 +24,8 @@ pub use client::{Bot, BotBuilder};
 pub use error::{EffectOutcome, Error, ErrorKind, Result};
 pub use files::InputFile;
 pub use requests::{AnswerCallbackQuery, RequestFuture, SendDocument, SendMessage};
+#[cfg(feature = "bot")]
+pub use routing::{CallbackContext, MessageContext, Router, UpdateContext};
 pub use types::{
     CallbackQuery, CallbackQueryId, Chat, ChatId, Document, FileId, InlineKeyboardButton,
     InlineKeyboardMarkup, Message, MessageId, Update, User, UserId, WebhookInfo,
