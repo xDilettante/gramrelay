@@ -295,12 +295,24 @@ impl<S> MessageContext<S> {
     }
     /// Reply with the original message scope. Guest messages require answer_guest.
     pub fn reply(&self, text: impl Into<crate::RichText>) -> SendMessage<'_> {
-        let request = contextual_reply(&self.bot, &self.message, text.into());
-        if self.event == MessageEvent::GuestMessage {
-            request.invalid_context("guest_query_id")
-        } else {
-            request
-        }
+        SendMessage::with_delivery(
+            &self.bot,
+            crate::delivery::Delivery::reply(
+                &self.message,
+                self.event == MessageEvent::GuestMessage,
+            ),
+            text.into(),
+        )
+    }
+    pub fn reply_document(&self, file: crate::InputFile) -> crate::SendDocument<'_> {
+        crate::SendDocument::with_delivery(
+            &self.bot,
+            crate::delivery::Delivery::reply(
+                &self.message,
+                self.event == MessageEvent::GuestMessage,
+            ),
+            file,
+        )
     }
     pub fn answer_guest(
         &self,
@@ -339,7 +351,40 @@ impl<S> CallbackContext<S> {
             .as_ref()
             .and_then(|message| message.accessible())
             .ok_or_else(|| Error::local(ErrorKind::Validation, "callback_message"))?;
-        Ok(contextual_reply(&self.bot, message, text.into()))
+        Ok(SendMessage::with_delivery(
+            &self.bot,
+            crate::delivery::Delivery::reply(message, false),
+            text.into(),
+        ))
+    }
+    pub fn reply_document(&self, file: crate::InputFile) -> Result<crate::SendDocument<'_>> {
+        let message = self
+            .query
+            .message
+            .as_ref()
+            .and_then(|message| message.accessible())
+            .ok_or_else(|| Error::local(ErrorKind::Validation, "callback_message"))?;
+        Ok(crate::SendDocument::with_delivery(
+            &self.bot,
+            crate::delivery::Delivery::reply(message, false),
+            file,
+        ))
+    }
+    pub fn ephemeral_reply_document(
+        &self,
+        file: crate::InputFile,
+    ) -> Result<crate::SendDocument<'_>> {
+        if self
+            .query
+            .message
+            .as_ref()
+            .is_some_and(|message| message.chat().is_direct_messages.is_some())
+        {
+            return Err(Error::local(ErrorKind::Validation, "ephemeral_chat"));
+        }
+        Ok(self
+            .bot
+            .reply_ephemeral_document(self.query.id.clone(), file))
     }
     /// Send to the callback's caller; answer() is still required separately.
     pub fn ephemeral_reply(&self, text: impl Into<crate::RichText>) -> Result<SendMessage<'_>> {
@@ -353,43 +398,6 @@ impl<S> CallbackContext<S> {
         }
         Ok(self.bot.reply_ephemeral(self.query.id.clone(), text))
     }
-}
-
-fn contextual_reply<'a>(bot: &'a Bot, message: &Message, text: crate::RichText) -> SendMessage<'a> {
-    let mut request = bot.send_message(message.chat.id, text);
-    if message
-        .guest_query_id
-        .as_ref()
-        .is_some_and(|id| !id.is_empty())
-    {
-        return request.invalid_context("guest_query_id");
-    }
-    if let Some(id) = message.ephemeral_message_id {
-        if message.chat.is_direct_messages.is_some() {
-            return request.invalid_context("ephemeral_chat");
-        }
-        let Some(receiver) = &message.receiver_user else {
-            return request.invalid_context("receiver_user_id");
-        };
-        request = request
-            .reply_to_ephemeral(id)
-            .ephemeral_parent_date(message.date)
-            .ephemeral_message_parameters(
-                crate::api::types::EphemeralMessageParameters::new().receiver_user_id(receiver.id),
-            );
-    } else {
-        request = request.reply_to(message.message_id);
-    }
-    if let Some(thread) = message.message_thread_id {
-        request = request.message_thread_id(thread);
-    }
-    if let Some(connection) = &message.business_connection_id {
-        request = request.business_connection_id(connection);
-    }
-    if let Some(topic) = &message.direct_messages_topic {
-        request = request.direct_messages_topic_id(topic.topic_id);
-    }
-    request
 }
 
 #[non_exhaustive]

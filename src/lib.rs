@@ -12,6 +12,7 @@
 //! ```
 
 mod client;
+mod delivery;
 mod error;
 mod events;
 mod files;

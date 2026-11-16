@@ -90,6 +90,13 @@ impl Bot {
     pub fn send_document(&self, chat: ChatId, file: InputFile) -> SendDocument<'_> {
         SendDocument::new(self, chat, file)
     }
+    pub fn reply_ephemeral_document(
+        &self,
+        id: CallbackQueryId,
+        file: InputFile,
+    ) -> SendDocument<'_> {
+        SendDocument::with_delivery(self, crate::delivery::Delivery::callback(id), file)
+    }
 
     pub(crate) fn upload_limit(&self) -> u64 {
         self.inner.max_upload_bytes
@@ -125,6 +132,14 @@ impl Bot {
     pub(crate) async fn perform<T: DeserializeOwned>(
         &self,
         prepare: impl Future<Output = Result<RequestBuilder>>,
+    ) -> Result<T> {
+        self.perform_with_timeout(prepare, None).await
+    }
+
+    pub(crate) async fn perform_with_timeout<T: DeserializeOwned>(
+        &self,
+        prepare: impl Future<Output = Result<RequestBuilder>>,
+        timeout: Option<Duration>,
     ) -> Result<T> {
         let _permit = self
             .inner
@@ -196,7 +211,12 @@ impl Bot {
             }
             Err(error)
         };
-        match tokio::time::timeout(self.inner.timeout, work).await {
+        match tokio::time::timeout(
+            timeout.map_or(self.inner.timeout, |limit| limit.min(self.inner.timeout)),
+            work,
+        )
+        .await
+        {
             Ok(result) => result,
             Err(_) => Err(Error::new(
                 ErrorKind::Timeout,

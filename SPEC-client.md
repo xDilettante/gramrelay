@@ -24,6 +24,8 @@ send_message, MessageContext.reply and send_document.caption accept Into<RichTex
 
 ## Remaining C1 gates
 
+Contextual documents share the same delivery descriptor and validation as text replies: chat/thread/business/direct-message topic, ephemeral receiver, parent ID and expiry. Expose MessageContext.reply_document, CallbackContext.reply_document and ephemeral_reply_document; inaccessible/guest/unsupported scopes never fall back to another send. The remaining ephemeral reply window caps preparation/upload/response time as well as being checked before dispatch. No file opens before await, including a request rejected by scope validation.
+
 - Rich text/entity helpers use UTF-16 offsets and validate boundaries, nesting and Telegram limits; plain text stays the default.
 - Runtime uses the complete generated Update/Message model without erasing unknown fields. Contextual replies preserve chat, thread, business and applicable direct-message/ephemeral scope.
 - Downloads validate Telegram file paths and enforce streaming/time/byte limits. Destination ownership and partial-output behavior are explicit.
