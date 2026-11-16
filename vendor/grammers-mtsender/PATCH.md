@@ -26,6 +26,10 @@ configuration.rs and the normalized Cargo.toml:
   TL consumption. Malformed update/control input emits a loss marker. The
   separately pinned mtproto/TL patches enforce bounds and strict primitive
   decoding before remote control/error/update objects are constructed.
+- RPC diagnostics retain only a bounded numeric code. Retry logs do not format
+  remote errors. The production Sender error-path regression captures verbose
+  tracing over a synthetic local instance, including out-of-range numeric input;
+  no RPC description, phone code or request secret is logged.
 
 The recorded tg-safety.patch is checked against the hash-verified archive with
 `python tools/verify_grammers.py check` (cached archive), or add `--download` to

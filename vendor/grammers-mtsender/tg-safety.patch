@@ -204,7 +204,19 @@
              Ok(u) => updates.push(u),
              Err(e) => {
                  // These are to be treated as a gap.
-@@ -522,6 +577,12 @@
+@@ -418,7 +473,10 @@
+ 
+     fn process_error(&mut self, error: mtp::RpcResultError) {
+         if let Some(req) = self.pop_request(error.msg_id) {
+-            debug!(error = ?error.error, "got rpc error");
++            let rpc_code = (100..600)
++                .contains(&error.error.error_code)
++                .then_some(error.error.error_code);
++            debug!(?rpc_code, "got rpc error");
+             let x = req.body.as_slice();
+             drop(
+                 req.result.send(Err(InvocationError::Rpc(
+@@ -522,6 +580,12 @@
  }
  
  impl<T: Transport> Sender<T, mtp::Encrypted> {
@@ -217,7 +229,7 @@
      pub fn auth_key(&self) -> [u8; 256] {
          self.state.mtp.auth_key()
      }
-@@ -563,6 +624,7 @@
+@@ -563,6 +627,7 @@
          state: sender.state.into_encrypted(auth),
          requests: sender.requests,
          next_ping: Instant::now() + PING_DELAY,
@@ -225,7 +237,7 @@
      })
  }
  
-@@ -574,3 +636,7 @@
+@@ -574,3 +639,7 @@
  ) -> Result<Sender<T, mtp::Encrypted>, io::Error> {
      Sender::connect(transport, mtp::Encrypted::build().finish(auth_key), addr).await
  }
@@ -355,7 +367,36 @@
      }
  
      /// do [`Self::raw_invoke_in_dc`] with [`Self::check_retry`]
-@@ -213,6 +242,9 @@
+@@ -188,19 +217,16 @@
+         loop {
+             match self.raw_invoke_in_dc(dc_id, request_body.clone()).await {
+                 Ok(response) => break Ok(response),
+-                Err(e) => {
+-                    let error_info = format!("{}", e);
+-                    match self.check_retry(e, fail_count, slept_so_far).await {
+-                        ControlFlow::Continue(delay) => {
+-                            info!(?delay, "sleeping on {} before retrying", error_info);
+-                            sleep(delay).await;
+-                            fail_count = fail_count.saturating_add(1);
+-                            slept_so_far += delay;
+-                            continue;
+-                        }
+-                        ControlFlow::Break(final_error) => break Err(final_error),
++                Err(e) => match self.check_retry(e, fail_count, slept_so_far).await {
++                    ControlFlow::Continue(delay) => {
++                        info!(?delay, "sleeping before retrying request");
++                        sleep(delay).await;
++                        fail_count = fail_count.saturating_add(1);
++                        slept_so_far += delay;
++                        continue;
+                     }
+-                }
++                    ControlFlow::Break(final_error) => break Err(final_error),
++                },
+             }
+         }
+     }
+@@ -213,6 +239,9 @@
          fail_count: NonZeroU32,
          slept_so_far: Duration,
      ) -> ControlFlow<InvocationError, Duration> {
@@ -365,7 +406,7 @@
          let (tx, rx) = oneshot::channel();
          if self
              .0
-@@ -269,6 +301,8 @@
+@@ -269,6 +298,8 @@
          let (request_tx, request_rx) = mpsc::unbounded_channel();
          let (updates_tx, updates_rx) =
              mpsc::channel(connection_params.updates_channel_capacity.get());
@@ -374,7 +415,7 @@
  
          Self {
              runner: SenderPoolRunner {
-@@ -279,9 +313,19 @@
+@@ -279,9 +310,19 @@
                  updates_tx,
                  connections: Vec::new(),
                  connection_pool: JoinSet::new(),
@@ -395,7 +436,7 @@
                  session: Arc::clone(&session),
                  api_id,
              },
-@@ -291,13 +335,18 @@
+@@ -291,13 +332,18 @@
  }
  
  impl SenderPoolRunner {
@@ -415,7 +456,7 @@
                  completion = self.connection_pool.join_next(), if !self.connection_pool.is_empty() => {
                      if let Err(err) = completion.unwrap()
                          && let Ok(reason) = err.try_into_panic()
-@@ -308,10 +357,11 @@
+@@ -308,10 +354,11 @@
                          .retain(|connection| !connection.abort_handle.is_finished());
                  }
                  request = self.request_rx.recv() => {
@@ -431,7 +472,7 @@
                      };
                      match flow {
                          ControlFlow::Continue(_) => continue,
-@@ -320,14 +370,36 @@
+@@ -320,14 +367,36 @@
                  }
              }
          }
@@ -471,7 +512,7 @@
                  let connection = match self
                      .connections
                      .iter()
-@@ -378,7 +450,6 @@
+@@ -378,7 +447,6 @@
                  });
                  ControlFlow::Continue(())
              }
@@ -479,7 +520,7 @@
          }
      }
  
-@@ -398,6 +469,7 @@
+@@ -398,6 +466,7 @@
              sender,
              rpc_rx,
              self.updates_tx.clone(),
@@ -487,7 +528,7 @@
              dc_option.id == self.session.home_dc_id()?,
          ));
          self.connections.push(ConnectionInfo {
-@@ -452,13 +524,31 @@
+@@ -452,13 +521,31 @@
                  .await
                  .map_err(InvocationError::Io)?
          } else {
@@ -521,7 +562,7 @@
                  sender.invoke(&init_connection).await?
              }
              Err(e) => return Err(e),
-@@ -525,6 +615,7 @@
+@@ -525,6 +612,7 @@
      mut sender: Sender<Box<dyn transport::Transport + Send>, grammers_mtproto::mtp::Encrypted>,
      mut rpc_rx: mpsc::UnboundedReceiver<Rpc>,
      updates: mpsc::Sender<UpdatesLike>,
@@ -529,7 +570,7 @@
      home_sender: bool,
  ) -> Result<(), ReadError> {
      let mut dropped: usize = 0;
-@@ -539,9 +630,9 @@
+@@ -539,9 +627,9 @@
                          continue;
                      }
                      for new_updates in all_new_updates {
@@ -541,7 +582,7 @@
                                      dropped += 1;
                                      if last_update_limit_warn.elapsed() >= UPDATES_DROPPED_LOG_COOLDOWN {
                                          warn!(
-@@ -554,7 +645,7 @@
+@@ -554,7 +642,7 @@
                                          last_update_limit_warn = Instant::now();
                                      }
                                  }
@@ -550,7 +591,7 @@
                                      debug!("updates channel closed, stopping update forwarding");
                                      updates_closed = true;
                                      break;
-@@ -565,7 +656,7 @@
+@@ -565,7 +653,7 @@
                  },
                  Err(err) => {
                      if home_sender {
@@ -559,7 +600,7 @@
                      }
                      break Err(err)
                  },
-@@ -608,7 +699,34 @@
+@@ -608,7 +696,34 @@
              Self::Disconnect { dc_id } => {
                  f.debug_struct("Disconnect").field("dc_id", dc_id).finish()
              }

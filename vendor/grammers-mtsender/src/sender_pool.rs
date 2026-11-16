@@ -217,19 +217,16 @@ impl SenderPoolHandle {
         loop {
             match self.raw_invoke_in_dc(dc_id, request_body.clone()).await {
                 Ok(response) => break Ok(response),
-                Err(e) => {
-                    let error_info = format!("{}", e);
-                    match self.check_retry(e, fail_count, slept_so_far).await {
-                        ControlFlow::Continue(delay) => {
-                            info!(?delay, "sleeping on {} before retrying", error_info);
-                            sleep(delay).await;
-                            fail_count = fail_count.saturating_add(1);
-                            slept_so_far += delay;
-                            continue;
-                        }
-                        ControlFlow::Break(final_error) => break Err(final_error),
+                Err(e) => match self.check_retry(e, fail_count, slept_so_far).await {
+                    ControlFlow::Continue(delay) => {
+                        info!(?delay, "sleeping before retrying request");
+                        sleep(delay).await;
+                        fail_count = fail_count.saturating_add(1);
+                        slept_so_far += delay;
+                        continue;
                     }
-                }
+                    ControlFlow::Break(final_error) => break Err(final_error),
+                },
             }
         }
     }

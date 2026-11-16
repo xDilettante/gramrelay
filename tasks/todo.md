@@ -47,7 +47,7 @@ See tasks/goal.md. The active goal includes every unchecked module below.
 - [ ] Q4: final correctness/security/simplicity review; all scope implemented and verification evidence recorded.
   - Fuzz pinned TL vector allocation and recursive generated types as well as encoded byte limits. Establish decoded heap/stack bounds; arbitrary host-provided Rust deserializers remain outside that guarantee.
   - Exercise inherited receive-side arithmetic and wrong-session-ID panic paths under malformed authenticated frames; public failure normalization and joined shutdown do not prove the underlying parser panic-free.
-  - Remove inherited SDK RPC-description logging (sender.rs::process_error) and verify verbose logging cannot leak auth/server-reflected secrets. Static public errors do not by themselves sanitize dependency tracing.
+  - SDK RPC-description logging is sanitized before interactive auth: bounded numeric code only, no remote retry formatting. A production Sender error-path tracing test failed on a reflected code before the fix and passes afterward, including an out-of-range numeric code. Static public errors alone were insufficient; the pinned SDK diff now carries this privacy change.
 
 ## Completed prototype
 

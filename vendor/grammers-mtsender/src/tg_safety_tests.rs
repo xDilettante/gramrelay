@@ -2,6 +2,7 @@
 use super::*;
 use grammers_session::{SessionData, storages::MemorySession};
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "tg-test-kit")]
 use tl::Deserializable;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;

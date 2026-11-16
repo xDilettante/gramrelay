@@ -473,7 +473,10 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
 
     fn process_error(&mut self, error: mtp::RpcResultError) {
         if let Some(req) = self.pop_request(error.msg_id) {
-            debug!(error = ?error.error, "got rpc error");
+            let rpc_code = (100..600)
+                .contains(&error.error.error_code)
+                .then_some(error.error.error_code);
+            debug!(?rpc_code, "got rpc error");
             let x = req.body.as_slice();
             drop(
                 req.result.send(Err(InvocationError::Rpc(
