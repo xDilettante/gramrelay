@@ -1,5 +1,15 @@
 use tg_mtproto::{Session, SessionBinding, SessionErrorKind, SessionKey, SessionOptions};
 
+struct ChildGuard(std::process::Child);
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if matches!(self.0.try_wait(), Ok(None)) {
+            let _ = self.0.kill();
+        }
+        let _ = self.0.wait();
+    }
+}
+
 async fn open(path: &std::path::Path) -> Result<Session, tg_mtproto::SessionError> {
     Session::open(
         path,
@@ -249,19 +259,19 @@ async fn a_killed_process_keeps_ownership_until_lease_expiry_then_reopens() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("session.sqlite");
     let marker = directory.path().join("ready");
-    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--ignored", "--exact", "lease_holder"])
-        .env("TG_MTPROTO_TEST_SESSION", &path)
-        .env("TG_MTPROTO_TEST_READY", &marker)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = ChildGuard(
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "lease_holder"])
+            .env("TG_MTPROTO_TEST_SESSION", &path)
+            .env("TG_MTPROTO_TEST_READY", &marker)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
     let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while !marker.exists() {
-        if child.try_wait().unwrap().is_some() || std::time::Instant::now() >= until {
-            let _ = child.kill();
-            let _ = child.wait();
+        if child.0.try_wait().unwrap().is_some() || std::time::Instant::now() >= until {
             panic!("fixture did not acquire the synthetic session");
         }
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -270,8 +280,8 @@ async fn a_killed_process_keeps_ownership_until_lease_expiry_then_reopens() {
         open(&path).await.unwrap_err().kind(),
         SessionErrorKind::Owned
     );
-    child.kill().unwrap();
-    child.wait().unwrap();
+    child.0.kill().unwrap();
+    child.0.wait().unwrap();
     assert_eq!(
         open(&path).await.unwrap_err().kind(),
         SessionErrorKind::Owned

@@ -37,3 +37,12 @@ An owning adapter must call quit and await run. Externally aborting or dropping
 the run future still cannot join children; no asynchronous destructor can do so.
 This patch alone does not provide application acknowledgement, gap recovery,
 bounded RPC admission or safe reconnect. Those belong to tg-mtproto.
+
+The optional downstream `tg-test-kit` feature adds `SenderPool::with_test_rpc`
+and `SenderPoolHandle::test_push_update` for synthetic tests. RPC callbacks run
+concurrently in the same owned child tree; fixed NoRetries and ordinary SDK
+serialization/typed response decoding remain in use. The callback factory must
+construct its future without blocking. A weak update capability preserves queue
+EOF when the runner closes. The production Client does not select this mode;
+tg-mtproto currently enables the feature only in dev-dependencies. The local
+tg_rpc_fixture.rs file is opt-in support, with no upstream crypto changes.

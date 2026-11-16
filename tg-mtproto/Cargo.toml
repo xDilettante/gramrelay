@@ -18,6 +18,7 @@ tokio = { version = "1", features = ["rt", "sync", "time"] }
 zeroize = "1"
 
 [dev-dependencies]
+grammers-mtsender = { version = "=0.12.0", default-features = false, features = ["tg-test-kit"] }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 

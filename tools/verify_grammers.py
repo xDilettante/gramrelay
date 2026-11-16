@@ -18,7 +18,7 @@ URL = f"https://static.crates.io/crates/grammers-mtsender/{PREFIX}.crate"
 LIMIT = 4 * 1024 * 1024
 COPIED = {"Cargo.toml", "Cargo.toml.orig", "DEPS.md", "README.md", ".cargo_vcs_info.json"}
 PATCHED = {"Cargo.toml", "src/sender_pool.rs"}
-LOCAL = {"Cargo.lock", "src/tg_safety_tests.rs", "PATCH.md", "tg-safety.patch", "LICENSE-APACHE"}
+LOCAL = {"Cargo.lock", "src/tg_safety_tests.rs", "src/tg_rpc_fixture.rs", "PATCH.md", "tg-safety.patch", "LICENSE-APACHE"}
 
 
 def upstream(data: bytes) -> dict[str, bytes]:

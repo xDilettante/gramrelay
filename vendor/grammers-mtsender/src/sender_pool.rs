@@ -37,6 +37,10 @@ const UPDATES_DROPPED_LOG_COOLDOWN: Duration = Duration::from_secs(300);
 
 type InvokeResponse = Vec<u8>;
 
+#[cfg(feature = "tg-test-kit")]
+#[path = "tg_rpc_fixture.rs"]
+mod tg_rpc_fixture;
+
 enum Request {
     Invoke {
         dc_id: i32,
@@ -89,6 +93,7 @@ pub struct SenderPoolHandle(
     mpsc::UnboundedSender<Request>,
     watch::Sender<bool>,
     watch::Receiver<bool>,
+    #[cfg(feature = "tg-test-kit")] std::sync::Weak<tg_rpc_fixture::TestUpdates>,
 );
 
 /// Builder to configure the runner to drive I/O and linked handles.
@@ -123,6 +128,8 @@ pub struct SenderPoolRunner {
     connection_pool: JoinSet<Result<(), ReadError>>,
     shutdown: watch::Receiver<bool>,
     update_loss: watch::Sender<bool>,
+    #[cfg(feature = "tg-test-kit")]
+    test_rpc: Option<tg_rpc_fixture::TestRpc>,
 }
 
 impl Deref for SenderPoolFatHandle {
@@ -308,9 +315,17 @@ impl SenderPool {
                 connection_pool: JoinSet::new(),
                 shutdown,
                 update_loss,
+                #[cfg(feature = "tg-test-kit")]
+                test_rpc: None,
             },
             handle: SenderPoolFatHandle {
-                thin: SenderPoolHandle(request_tx, shutdown_tx, loss_rx),
+                thin: SenderPoolHandle(
+                    request_tx,
+                    shutdown_tx,
+                    loss_rx,
+                    #[cfg(feature = "tg-test-kit")]
+                    Default::default(),
+                ),
                 session: Arc::clone(&session),
                 api_id,
             },
@@ -376,6 +391,15 @@ impl SenderPoolRunner {
     async fn process_request(&mut self, request: Request) -> ControlFlow<()> {
         match request {
             Request::Invoke { dc_id, body, tx } => {
+                #[cfg(feature = "tg-test-kit")]
+                if let Some(fixture) = &self.test_rpc {
+                    let response = (fixture.invoke)(dc_id, body);
+                    self.connection_pool.spawn(async move {
+                        let _ = tx.send(response.await);
+                        Ok(())
+                    });
+                    return ControlFlow::Continue(());
+                }
                 let connection = match self
                     .connections
                     .iter()

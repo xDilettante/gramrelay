@@ -42,6 +42,7 @@ repository = "https://codeberg.org/Lonami/grammers"
 resolver = "2"
 
 [features]
+tg-test-kit = []
 upstream-live-tests = []
 proxy = [
     "tokio-socks",

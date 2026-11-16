@@ -6,6 +6,135 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 use tokio::time::timeout;
 
+#[cfg(feature = "tg-test-kit")]
+#[tokio::test]
+async fn fixture_uses_real_tl_bytes_and_owned_concurrent_children_without_network() {
+    use tl::{Identifiable, Serializable};
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = calls.clone();
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let pool =
+        SenderPool::with_test_rpc(Arc::new(MemorySession::default()), 1, move |dc, bytes| {
+            let seen = seen.clone();
+            let barrier = barrier.clone();
+            async move {
+                assert_eq!(dc, 2);
+                assert_eq!(
+                    &bytes[..4],
+                    &tl::functions::Ping::CONSTRUCTOR_ID.to_le_bytes()
+                );
+                let request = tl::functions::Ping::from_bytes(&bytes[4..]).unwrap();
+                seen.fetch_add(1, Ordering::SeqCst);
+                barrier.wait().await;
+                Ok(tl::enums::Pong::Pong(tl::types::Pong {
+                    msg_id: 1,
+                    ping_id: request.ping_id,
+                })
+                .to_bytes())
+            }
+        });
+    let runner = tokio::spawn(pool.runner.run());
+    let first = pool
+        .handle
+        .invoke_in_dc(2, &tl::functions::Ping { ping_id: 11 });
+    let second = pool
+        .handle
+        .invoke_in_dc(2, &tl::functions::Ping { ping_id: 22 });
+    let (first, second) = timeout(Duration::from_secs(1), async {
+        tokio::join!(first, second)
+    })
+    .await
+    .unwrap();
+    assert!(matches!(first.unwrap(),tl::enums::Pong::Pong(pong) if pong.ping_id==11));
+    assert!(matches!(second.unwrap(),tl::enums::Pong::Pong(pong) if pong.ping_id==22));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    pool.handle.quit();
+    runner.await.unwrap();
+}
+
+#[cfg(feature = "tg-test-kit")]
+#[tokio::test]
+async fn fixture_update_loss_and_eof_match_the_real_runner() {
+    let mut pool = SenderPool::with_test_rpc(Arc::new(MemorySession::default()), 1, |_, _| async {
+        Err(InvocationError::InvalidDc)
+    });
+    for _ in 0..pool.updates.max_capacity() {
+        assert!(pool.handle.test_push_update(UpdatesLike::ConnectionClosed));
+    }
+    assert!(!pool.handle.test_push_update(UpdatesLike::ConnectionClosed));
+    assert!(*pool.handle.update_loss().borrow());
+    pool.handle.quit();
+    pool.runner.run().await;
+    while pool.updates.recv().await.is_some() {}
+    assert!(!pool.handle.test_push_update(UpdatesLike::ConnectionClosed));
+}
+
+#[cfg(feature = "tg-test-kit")]
+#[tokio::test]
+async fn fixture_quit_joins_pending_callbacks_and_releases_waiters() {
+    let started = Arc::new(tokio::sync::Notify::new());
+    let dropped = Arc::new(AtomicBool::new(false));
+    let observed = started.clone();
+    let finished = dropped.clone();
+    let pool = SenderPool::with_test_rpc(Arc::new(MemorySession::default()), 1, move |_, _| {
+        let observed = observed.clone();
+        let finished = finished.clone();
+        async move {
+            let _guard = Dropped(finished);
+            observed.notify_one();
+            std::future::pending().await
+        }
+    });
+    let controller = pool.handle.thin.clone();
+    let runner = tokio::spawn(pool.runner.run());
+    let call = tokio::spawn(async move {
+        pool.handle
+            .invoke_in_dc(2, &tl::functions::Ping { ping_id: 1 })
+            .await
+    });
+    timeout(Duration::from_secs(1), started.notified())
+        .await
+        .unwrap();
+    controller.quit();
+    timeout(Duration::from_secs(1), runner)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(dropped.load(Ordering::SeqCst));
+    assert!(
+        timeout(Duration::from_secs(1), call)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err()
+    );
+}
+
+#[cfg(feature = "tg-test-kit")]
+#[tokio::test]
+async fn fixture_preserves_no_retries_for_confirmed_rpc_refusals() {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = calls.clone();
+    let pool = SenderPool::with_test_rpc(Arc::new(MemorySession::default()), 1, move |_, _| {
+        count.fetch_add(1, Ordering::SeqCst);
+        async {
+            Err(InvocationError::Rpc(crate::RpcError {
+                code: 420,
+                name: "FLOOD_WAIT".into(),
+                value: Some(17),
+                caused_by: None,
+            }))
+        }
+    });
+    let runner = tokio::spawn(pool.runner.run());
+    assert!(
+        matches!(timeout(Duration::from_secs(1),pool.handle.invoke_in_dc(2,&tl::functions::Ping{ping_id:1})).await.unwrap(),Err(InvocationError::Rpc(error)) if error.value==Some(17))
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    pool.handle.quit();
+    runner.await.unwrap();
+}
+
 #[tokio::test]
 async fn no_retries_never_reconnects_after_encrypted_loopback_io_loss() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

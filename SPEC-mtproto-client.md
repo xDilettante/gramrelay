@@ -28,6 +28,50 @@ Agent grants/approvals, tool schema/CLI/MCP integration and durable agent action
 admission are M3, sharing this client and the existing operational semantics.
 Do not substitute mock-only execution for the production backend.
 
+## Client ownership increment
+
+Client construction validates host app credentials/options and claims one client
+per Session across clones. It starts no network activity. The first polled call
+starts a private supervisor and lazy grammers pool with NoRetries. App API hash,
+bot tokens, phone/code/password and challenge capabilities have redacted Debug;
+no challenge can be serialized or reused across client generations.
+Claim/close admission must be one atomic state transition. While attached to a
+Client, public Session::close refuses with an explicit owned/attached error;
+Client::close performs the private storage close only after the driver barrier.
+Dropping an unstarted Client may release its claim; a started unjoined generation
+must never release it merely because a waiting future or supervisor was dropped.
+
+A bounded command/active-job budget precedes the upstream unbounded channel.
+Once admitted, a job and its input remain owned until completion or joined
+shutdown even if the caller drops its future. Each job carries an absolute
+deadline covering identity verification and backend work. On deadline, storage
+fencing, shutdown or backend panic, close admission for the whole generation,
+return conservative outcomes, call quit, await the whole driver tree, then
+abort/join residual client jobs and drain Session. No successor may start before
+that barrier. A timeout can return Unknown while cleanup still owns capacity;
+close().await confirms completion. Dropping a handle never reports joined close.
+
+Common actions verify expected/stored account identity before account data or
+write effects. Login and logout serialize authorization transitions. A logout
+intent durably quarantines the session BEFORE dispatch; only confirmed remote
+completion plus local commit clears credentials. An uncertain outcome preserves
+quarantine for explicit host recovery, even across restart.
+
+The high-level SDK fs feature stays disabled: its concurrent downloader spawns
+workers and an unbounded chunk channel. Use owned bounded file iteration/writes
+instead. Raw typed TL access remains trusted Rust-only, shares admission,
+deadlines and conservative write classification, and is never a generic agent
+tool. Known RPC refusals are Rejected; ambiguous transport/decode/late completion
+and server failures remain Unknown. Only allowlisted flood-wait numbers survive
+error normalization; remote descriptions and raw source errors do not.
+
+Test RPC injection is a downstream opt-in test feature only. It replaces the
+network dispatch with owned runner children while preserving SDK request
+serialization, typed decoding, NoRetries, update-loss signaling and joined quit.
+It must never be enabled implicitly by the production Client, accept tool JSON,
+or use live Telegram credentials. Synthetic callbacks run concurrently and are
+cancelled/joined through the same runner child tree.
+
 ## Session API and storage increment
 
 Session::open takes an absolute protected path, SessionBinding(profile, app ID),

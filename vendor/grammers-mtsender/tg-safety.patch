@@ -8,15 +8,16 @@
  authors = ["Lonami Exo <totufals@hotmail.com>"]
  build = false
  autolib = false
-@@ -41,6 +42,7 @@
+@@ -41,6 +42,8 @@
  resolver = "2"
  
  [features]
++tg-test-kit = []
 +upstream-live-tests = []
  proxy = [
      "tokio-socks",
      "hickory-resolver",
-@@ -54,13 +56,20 @@
+@@ -54,13 +57,20 @@
  [[test]]
  name = "deps"
  path = "tests/deps.rs"
@@ -37,7 +38,7 @@
  
  [dependencies.grammers-mtproto]
  version = "0.12.0"
-@@ -113,6 +122,10 @@
+@@ -113,6 +123,10 @@
  [dev-dependencies.socks5-server]
  version = "0.10.1"
  
@@ -67,7 +68,18 @@
      task::JoinSet,
      time::sleep,
  };
-@@ -51,7 +52,6 @@
+@@ -35,6 +36,10 @@
+ const UPDATES_DROPPED_LOG_COOLDOWN: Duration = Duration::from_secs(300);
+ 
+ type InvokeResponse = Vec<u8>;
++
++#[cfg(feature = "tg-test-kit")]
++#[path = "tg_rpc_fixture.rs"]
++mod tg_rpc_fixture;
+ 
+ enum Request {
+     Invoke {
+@@ -51,7 +56,6 @@
      Disconnect {
          dc_id: i32,
      },
@@ -75,7 +87,7 @@
  }
  
  struct Rpc {
-@@ -85,7 +85,11 @@
+@@ -85,7 +89,12 @@
  
  /// Cheaply cloneable handle to interact with its [`SenderPoolRunner`].
  #[derive(Clone)]
@@ -84,20 +96,23 @@
 +    mpsc::UnboundedSender<Request>,
 +    watch::Sender<bool>,
 +    watch::Receiver<bool>,
++    #[cfg(feature = "tg-test-kit")] std::sync::Weak<tg_rpc_fixture::TestUpdates>,
 +);
  
  /// Builder to configure the runner to drive I/O and linked handles.
  pub struct SenderPool {
-@@ -117,6 +121,8 @@
+@@ -117,6 +126,10 @@
      updates_tx: mpsc::Sender<UpdatesLike>,
      connections: Vec<ConnectionInfo>,
      connection_pool: JoinSet<Result<(), ReadError>>,
 +    shutdown: watch::Receiver<bool>,
 +    update_loss: watch::Sender<bool>,
++    #[cfg(feature = "tg-test-kit")]
++    test_rpc: Option<tg_rpc_fixture::TestRpc>,
  }
  
  impl Deref for SenderPoolFatHandle {
-@@ -147,6 +153,9 @@
+@@ -147,6 +160,9 @@
          dc_id: i32,
          body: Vec<u8>,
      ) -> Result<InvokeResponse, InvocationError> {
@@ -107,7 +122,7 @@
          if body.len() > MAX_REQUEST_SIZE {
              return Err(InvocationError::Dropped("request body is too large"));
          }
-@@ -167,13 +176,26 @@
+@@ -167,13 +183,26 @@
      /// This is useful after datacenter migrations during sign in,
      /// when the old connection is known to not be needed anymore.
      pub fn disconnect_from_dc(&self, dc_id: i32) -> bool {
@@ -136,7 +151,7 @@
      }
  
      /// do [`Self::raw_invoke_in_dc`] with [`Self::check_retry`]
-@@ -213,6 +235,9 @@
+@@ -213,6 +242,9 @@
          fail_count: NonZeroU32,
          slept_so_far: Duration,
      ) -> ControlFlow<InvocationError, Duration> {
@@ -146,7 +161,7 @@
          let (tx, rx) = oneshot::channel();
          if self
              .0
-@@ -269,6 +294,8 @@
+@@ -269,6 +301,8 @@
          let (request_tx, request_rx) = mpsc::unbounded_channel();
          let (updates_tx, updates_rx) =
              mpsc::channel(connection_params.updates_channel_capacity.get());
@@ -155,20 +170,28 @@
  
          Self {
              runner: SenderPoolRunner {
-@@ -279,9 +306,11 @@
+@@ -279,9 +313,19 @@
                  updates_tx,
                  connections: Vec::new(),
                  connection_pool: JoinSet::new(),
 +                shutdown,
 +                update_loss,
++                #[cfg(feature = "tg-test-kit")]
++                test_rpc: None,
              },
              handle: SenderPoolFatHandle {
 -                thin: SenderPoolHandle(request_tx),
-+                thin: SenderPoolHandle(request_tx, shutdown_tx, loss_rx),
++                thin: SenderPoolHandle(
++                    request_tx,
++                    shutdown_tx,
++                    loss_rx,
++                    #[cfg(feature = "tg-test-kit")]
++                    Default::default(),
++                ),
                  session: Arc::clone(&session),
                  api_id,
              },
-@@ -291,13 +320,18 @@
+@@ -291,13 +335,18 @@
  }
  
  impl SenderPoolRunner {
@@ -188,7 +211,7 @@
                  completion = self.connection_pool.join_next(), if !self.connection_pool.is_empty() => {
                      if let Err(err) = completion.unwrap()
                          && let Ok(reason) = err.try_into_panic()
-@@ -308,10 +342,11 @@
+@@ -308,10 +357,11 @@
                          .retain(|connection| !connection.abort_handle.is_finished());
                  }
                  request = self.request_rx.recv() => {
@@ -204,7 +227,7 @@
                      };
                      match flow {
                          ControlFlow::Continue(_) => continue,
-@@ -320,9 +355,22 @@
+@@ -320,14 +370,36 @@
                  }
              }
          }
@@ -230,7 +253,21 @@
      }
  
      async fn process_request(&mut self, request: Request) -> ControlFlow<()> {
-@@ -378,7 +426,6 @@
+         match request {
+             Request::Invoke { dc_id, body, tx } => {
++                #[cfg(feature = "tg-test-kit")]
++                if let Some(fixture) = &self.test_rpc {
++                    let response = (fixture.invoke)(dc_id, body);
++                    self.connection_pool.spawn(async move {
++                        let _ = tx.send(response.await);
++                        Ok(())
++                    });
++                    return ControlFlow::Continue(());
++                }
+                 let connection = match self
+                     .connections
+                     .iter()
+@@ -378,7 +450,6 @@
                  });
                  ControlFlow::Continue(())
              }
@@ -238,7 +275,7 @@
          }
      }
  
-@@ -398,6 +445,7 @@
+@@ -398,6 +469,7 @@
              sender,
              rpc_rx,
              self.updates_tx.clone(),
@@ -246,7 +283,7 @@
              dc_option.id == self.session.home_dc_id()?,
          ));
          self.connections.push(ConnectionInfo {
-@@ -525,6 +573,7 @@
+@@ -525,6 +597,7 @@
      mut sender: Sender<Box<dyn transport::Transport + Send>, grammers_mtproto::mtp::Encrypted>,
      mut rpc_rx: mpsc::UnboundedReceiver<Rpc>,
      updates: mpsc::Sender<UpdatesLike>,
@@ -254,7 +291,7 @@
      home_sender: bool,
  ) -> Result<(), ReadError> {
      let mut dropped: usize = 0;
-@@ -539,9 +588,9 @@
+@@ -539,9 +612,9 @@
                          continue;
                      }
                      for new_updates in all_new_updates {
@@ -266,7 +303,7 @@
                                      dropped += 1;
                                      if last_update_limit_warn.elapsed() >= UPDATES_DROPPED_LOG_COOLDOWN {
                                          warn!(
-@@ -554,7 +603,7 @@
+@@ -554,7 +627,7 @@
                                          last_update_limit_warn = Instant::now();
                                      }
                                  }
@@ -275,7 +312,7 @@
                                      debug!("updates channel closed, stopping update forwarding");
                                      updates_closed = true;
                                      break;
-@@ -565,7 +614,7 @@
+@@ -565,7 +638,7 @@
                  },
                  Err(err) => {
                      if home_sender {
@@ -284,7 +321,7 @@
                      }
                      break Err(err)
                  },
-@@ -608,7 +657,34 @@
+@@ -608,7 +681,34 @@
              Self::Disconnect { dc_id } => {
                  f.debug_struct("Disconnect").field("dc_id", dc_id).finish()
              }
