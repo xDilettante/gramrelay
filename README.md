@@ -136,6 +136,18 @@ retry_after и migrate_to_chat_id доступны через Error как па�
 
 ## Настройки
 
+RichText собирает entities без HTML-экранирования переменных и считает UTF-16 offsets:
+
+```rust
+use tg::{EntityKind, RichText};
+let text = RichText::new("Отчёт: ")
+    .append(RichText::styled("готов 🦀", EntityKind::Bold)?);
+// bot.send_message(chat, text).await?;
+# Ok::<(), tg::Error>(())
+```
+
+entity(range, kind) принимает байтовый диапазон Rust-строки; try_from_entities проверяет готовые UTF-16 spans. Helper проверяет границы, вложенность и metadata; его Debug скрывает текст. text()/entities()/into_parts() позволяют использовать результат в api::methods. Для явной разметки есть parse_mode(ParseMode::Html/MarkdownV2/Markdown); смешивание parse_mode и entities даёт локальную ошибку. Длину отрисованной разметки проверяет Telegram. Это отдельный helper от дерева api::types::RichText для sendRichMessage.
+
 Bot::builder(token) поддерживает:
 
 | Настройка | Значение по умолчанию |
@@ -219,6 +231,6 @@ cargo run --example answer_callback -- "C:/path/update.json"
 cargo run --example polling
 ```
 
-Проверки выполнялись на Windows x86_64, Rust 1.98.0: 62 unit/integration-теста и 2 doctest, а также 21 тест инструментов схемы. Структурные fixtures охватывают все 425 типов и 193 метода, включая обязательные поля и запрет неизвестных параметров запроса. MSRV и работа на Linux/macOS пока не подтверждены. Проверяются JSON/multipart, callback, файлы, локальные отказы, 429, 5xx, неизвестные ответы, тайм-ауты, ограничения нагрузки, redirects, секреты в диагностике, маршрутизация, polling, порядок событий и остановка. Живые вызовы Telegram при разработке не выполнялись.
+Проверки выполнялись на Windows x86_64, Rust 1.98.0: 69 unit/integration-тестов и 3 doctest, а также 21 тест инструментов схемы. Структурные fixtures охватывают все 425 типов и 193 метода, включая обязательные поля и запрет неизвестных параметров запроса. MSRV и работа на Linux/macOS пока не подтверждены. Проверяются JSON/multipart, callback, файлы, локальные отказы, 429, 5xx, неизвестные ответы, тайм-ауты, ограничения нагрузки, redirects, секреты в диагностике, маршрутизация, polling, порядок событий и остановка. Живые вызовы Telegram при разработке не выполнялись.
 
-Следующие этапы: rich text, интеграция полного wire API с runtime, download/retry, постоянный журнал и webhook endpoint, CLI/MCP, затем отдельный MTProto-клиент. Полная цель остаётся активной. Источники контрактов: [docs/SOURCES.md](docs/SOURCES.md). План: [tasks/todo.md](tasks/todo.md).
+Следующие этапы: интеграция полного wire API с runtime, download/retry, постоянный журнал и webhook endpoint, CLI/MCP, затем отдельный MTProto-клиент. Полная цель остаётся активной. Источники контрактов: [docs/SOURCES.md](docs/SOURCES.md). План: [tasks/todo.md](tasks/todo.md).

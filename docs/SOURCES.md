@@ -20,5 +20,8 @@ The implementation uses reqwest 0.13.5, Tokio 1.54.1, tokio-util 0.7.20 and wire
 - Process signal handling: https://docs.rs/tokio/latest/tokio/signal/fn.ctrl_c.html
 - Serde enum representations and ordered matching of untagged variants: https://serde.rs/enum-representations.html
 - Serde preservation of additional fields: https://serde.rs/attr-flatten.html
+- Entity offsets and formatting rules: https://core.telegram.org/bots/api#messageentity and https://core.telegram.org/bots/api#formatting-options
+- Quote/code nesting exception and entity categories: https://github.com/tdlib/td/blob/master/td/telegram/MessageEntity.cpp
+- Code-point message/caption limits for bots: https://github.com/tdlib/td/blob/master/td/telegram/MessageContent.cpp (utf8_length checks, inspected 16 November 2026).
 
 Unknown effect handling is our conservative contract, not a Telegram idempotency guarantee. It intentionally treats connection and decode failures after dispatch as ambiguous.

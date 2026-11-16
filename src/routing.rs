@@ -252,7 +252,7 @@ impl<S> MessageContext<S> {
             .map(|(_, _, args)| args)
     }
     /// Reply in the originating message's chat, topic and business connection.
-    pub fn reply(&self, text: impl Into<String>) -> SendMessage<'_> {
+    pub fn reply(&self, text: impl Into<crate::RichText>) -> SendMessage<'_> {
         let mut request = self
             .bot
             .send_message(self.message.chat.id, text)

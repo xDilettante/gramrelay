@@ -19,6 +19,7 @@ mod polling;
 mod requests;
 #[cfg(feature = "bot")]
 mod routing;
+mod text;
 mod typed_api;
 mod types;
 mod updates;
@@ -35,6 +36,7 @@ pub use polling::PollingOptions;
 pub use requests::{AnswerCallbackQuery, RequestFuture, SendDocument, SendMessage};
 #[cfg(feature = "bot")]
 pub use routing::{CallbackContext, MessageContext, Router, UpdateContext};
+pub use text::{EntityKind, ParseMode, RichText};
 #[cfg(feature = "bot")]
 pub use tokio_util::sync::CancellationToken;
 pub use types::{

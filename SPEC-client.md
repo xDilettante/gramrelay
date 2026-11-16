@@ -12,6 +12,16 @@ Serialize non-file multipart parameters as Telegram expects: strings directly, o
 
 Verify bytes/path/nested multiple-file requests, ordinary attach:// message text, exact multipart fields, all binding failures, combined size limits and timeout/cancellation semantics using localhost mocks.
 
+## C1b: entity-based rich text
+
+Root RichText is an owned text/entities helper, distinct from the Bot API 10.3 rich-message tree in api::types::RichText. String inputs remain plain. RichText::entity accepts UTF-8 byte ranges on scalar boundaries, then converts to UTF-16 offsets. styled and append support composition without manual offsets. try_from_entities validates received/raw UTF-16 spans, including surrogate boundaries, known kinds and required/exclusive metadata. The helper exposes read-only text/entities and into_parts for generated methods.
+
+Validate positive, in-bounds lengths, complete containment on overlap, no duplicate same-kind nesting, no nested quotes, and no nested continuous entities (links/mentions/etc). Styles may surround or occur inside other entities except code/pre/date_time. Quotes may contain continuous entities and code/pre/date_time, following TDLib's explicit exception; they cannot occur inside continuous entities. Equal-span ordering puts block entities before inline entities. Validation uses sorting and a bounded kind stack, without a quadratic pair scan. Do not silently drop, trim, split or repair user entities.
+
+EntityKind covers every pinned MessageEntity kind; link/user/custom-emoji/date-time metadata is typed. Validate date-time format grammar r|w?[dD]?[tT]? and nonempty IDs/URLs. Telegram still decides eligibility (such as custom emoji permissions) and semantic parsing. Diagnostics contain field names, not text or metadata values.
+
+send_message, MessageContext.reply and send_document.caption accept Into<RichText>, omit empty entity arrays, and retain existing code-point limits for plain/entity text. Explicit ParseMode supports HTML, MarkdownV2 and legacy Markdown; reject parse_mode plus explicit entities before dispatch. Telegram validates rendered markup length: the raw markup source length cannot substitute for it. No implicit markup parsing or interpolation. Test exact JSON/multipart, UTF-16 conversion, composition, overlap rules, metadata, explicit parse modes and length failures with synthetic data.
+
 ## Remaining C1 gates
 
 - Rich text/entity helpers use UTF-16 offsets and validate boundaries, nesting and Telegram limits; plain text stays the default.

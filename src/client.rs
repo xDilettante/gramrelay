@@ -1,6 +1,6 @@
 use crate::{
     AnswerCallbackQuery, CallbackQueryId, ChatId, EffectOutcome, Error, ErrorKind, InputFile,
-    Result, SendDocument, SendMessage,
+    Result, RichText, SendDocument, SendMessage,
 };
 use reqwest::{Client, RequestBuilder, Url};
 use serde::{Deserialize, de::DeserializeOwned};
@@ -69,8 +69,8 @@ impl Bot {
         }
     }
 
-    /// Create a lazy plain-text request. Only awaiting it dispatches the request.
-    pub fn send_message(&self, chat: ChatId, text: impl Into<String>) -> SendMessage<'_> {
+    /// Create a lazy text request. Strings are plain text; await dispatches it.
+    pub fn send_message(&self, chat: ChatId, text: impl Into<RichText>) -> SendMessage<'_> {
         SendMessage::new(self, chat, text.into())
     }
 
