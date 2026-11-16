@@ -24,6 +24,7 @@ struct Inner {
     timeout: Duration,
     max_response_bytes: usize,
     max_upload_bytes: u64,
+    max_download_bytes: u64,
     in_flight: Semaphore,
 }
 
@@ -35,6 +36,7 @@ pub struct BotBuilder {
     timeout: Duration,
     max_response_bytes: usize,
     max_upload_bytes: u64,
+    max_download_bytes: u64,
     max_in_flight: usize,
 }
 
@@ -65,6 +67,7 @@ impl Bot {
             timeout: Duration::from_secs(30),
             max_response_bytes: 1024 * 1024,
             max_upload_bytes: 50_000_000,
+            max_download_bytes: 20_000_000,
             max_in_flight: 32,
         }
     }
@@ -100,6 +103,21 @@ impl Bot {
 
     pub(crate) fn upload_limit(&self) -> u64 {
         self.inner.max_upload_bytes
+    }
+    pub(crate) fn download_limit(&self) -> u64 {
+        self.inner.max_download_bytes
+    }
+
+    pub(crate) fn file_get(&self, path: &str) -> Result<RequestBuilder> {
+        crate::downloads::validate_path(path)?;
+        let mut url = self.inner.api_url.clone();
+        url.path_segments_mut()
+            .map_err(|_| Error::local(ErrorKind::Configuration, "api_url"))?
+            .pop_if_empty()
+            .push("file")
+            .push(&format!("bot{}", self.inner.token))
+            .extend(path.split('/'));
+        Ok(self.inner.http.get(url))
     }
 
     #[cfg(feature = "bot")]
@@ -141,6 +159,19 @@ impl Bot {
         prepare: impl Future<Output = Result<RequestBuilder>>,
         timeout: Option<Duration>,
     ) -> Result<T> {
+        let limit = self.inner.max_response_bytes;
+        self.exchange(prepare, timeout, move |response| {
+            decode_response(response, limit)
+        })
+        .await
+    }
+
+    pub(crate) async fn exchange<T, F: Future<Output = Result<T>>>(
+        &self,
+        prepare: impl Future<Output = Result<RequestBuilder>>,
+        timeout: Option<Duration>,
+        consume: impl FnOnce(reqwest::Response) -> F,
+    ) -> Result<T> {
         let _permit = self
             .inner
             .in_flight
@@ -152,71 +183,17 @@ impl Bot {
                 .await?
                 .build()
                 .map_err(|_| Error::local(ErrorKind::Validation, "request"))?;
-            // From this point onward, transport errors cannot prove the absence of an effect.
             dispatched = true;
-            let mut response = self
+            let response = self
                 .inner
                 .http
                 .execute(request)
                 .await
                 .map_err(transport_error)?;
-            let status = response.status();
-            let limit = self.inner.max_response_bytes;
-            if response.content_length().is_some_and(|n| n > limit as u64) {
-                return Err(Error::new(
-                    ErrorKind::ResponseTooLarge,
-                    EffectOutcome::Unknown,
-                ));
-            }
-            let mut body = Vec::new();
-            while let Some(chunk) = response.chunk().await.map_err(transport_error)? {
-                if chunk.len() > limit - body.len() {
-                    return Err(Error::new(
-                        ErrorKind::ResponseTooLarge,
-                        EffectOutcome::Unknown,
-                    ));
-                }
-                body.extend_from_slice(&chunk);
-            }
-            let envelope: Envelope<T> = serde_json::from_slice(&body)
-                .map_err(|_| Error::new(ErrorKind::Decode, EffectOutcome::Unknown))?;
-            if status.is_success() && envelope.ok {
-                return envelope
-                    .result
-                    .ok_or_else(|| Error::new(ErrorKind::Decode, EffectOutcome::Unknown));
-            }
-            let explicit_refusal = !envelope.ok
-                && !status.is_server_error()
-                && envelope
-                    .error_code
-                    .is_some_and(|code| (400..500).contains(&code))
-                && (status.is_success() || status.is_client_error());
-            let mut error = Error::new(
-                if explicit_refusal {
-                    ErrorKind::Telegram
-                } else {
-                    ErrorKind::Http
-                },
-                if explicit_refusal {
-                    EffectOutcome::Rejected
-                } else {
-                    EffectOutcome::Unknown
-                },
-            );
-            error.http_status = Some(status.as_u16());
-            error.api_error_code = envelope.error_code;
-            if let Some(parameters) = envelope.parameters {
-                error.retry_after = parameters.retry_after.map(Duration::from_secs);
-                error.migrate_to_chat_id = parameters.migrate_to_chat_id;
-            }
-            Err(error)
+            consume(response).await
         };
-        match tokio::time::timeout(
-            timeout.map_or(self.inner.timeout, |limit| limit.min(self.inner.timeout)),
-            work,
-        )
-        .await
-        {
+        let timeout = timeout.map_or(self.inner.timeout, |limit| limit.min(self.inner.timeout));
+        match tokio::time::timeout(timeout, work).await {
             Ok(result) => result,
             Err(_) => Err(Error::new(
                 ErrorKind::Timeout,
@@ -253,6 +230,10 @@ impl BotBuilder {
         self.max_upload_bytes = limit;
         self
     }
+    pub fn max_download_bytes(mut self, limit: u64) -> Self {
+        self.max_download_bytes = limit;
+        self
+    }
     /// Requests exceeding the limit fail immediately; no unbounded wait queue is created.
     pub fn max_in_flight(mut self, limit: usize) -> Self {
         self.max_in_flight = limit;
@@ -276,6 +257,7 @@ impl BotBuilder {
         }
         if self.max_response_bytes == 0
             || self.max_upload_bytes == 0
+            || self.max_download_bytes == 0
             || self.max_in_flight == 0
             || self.max_in_flight > Semaphore::MAX_PERMITS
         {
@@ -321,13 +303,69 @@ impl BotBuilder {
                 timeout: self.timeout,
                 max_response_bytes: self.max_response_bytes,
                 max_upload_bytes: self.max_upload_bytes,
+                max_download_bytes: self.max_download_bytes,
                 in_flight: Semaphore::new(self.max_in_flight),
             }),
         })
     }
 }
 
-fn transport_error(error: reqwest::Error) -> Error {
+async fn decode_response<T: DeserializeOwned>(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<T> {
+    let status = response.status();
+    if response.content_length().is_some_and(|n| n > limit as u64) {
+        return Err(Error::new(
+            ErrorKind::ResponseTooLarge,
+            EffectOutcome::Unknown,
+        ));
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(transport_error)? {
+        if chunk.len() > limit - body.len() {
+            return Err(Error::new(
+                ErrorKind::ResponseTooLarge,
+                EffectOutcome::Unknown,
+            ));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    let envelope: Envelope<T> = serde_json::from_slice(&body)
+        .map_err(|_| Error::new(ErrorKind::Decode, EffectOutcome::Unknown))?;
+    if status.is_success() && envelope.ok {
+        return envelope
+            .result
+            .ok_or_else(|| Error::new(ErrorKind::Decode, EffectOutcome::Unknown));
+    }
+    let explicit_refusal = !envelope.ok
+        && !status.is_server_error()
+        && envelope
+            .error_code
+            .is_some_and(|code| (400..500).contains(&code))
+        && (status.is_success() || status.is_client_error());
+    let mut error = Error::new(
+        if explicit_refusal {
+            ErrorKind::Telegram
+        } else {
+            ErrorKind::Http
+        },
+        if explicit_refusal {
+            EffectOutcome::Rejected
+        } else {
+            EffectOutcome::Unknown
+        },
+    );
+    error.http_status = Some(status.as_u16());
+    error.api_error_code = envelope.error_code;
+    if let Some(parameters) = envelope.parameters {
+        error.retry_after = parameters.retry_after.map(Duration::from_secs);
+        error.migrate_to_chat_id = parameters.migrate_to_chat_id;
+    }
+    Err(error)
+}
+
+pub(crate) fn transport_error(error: reqwest::Error) -> Error {
     Error::new(
         if error.is_timeout() {
             ErrorKind::Timeout

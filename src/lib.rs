@@ -13,6 +13,7 @@
 
 mod client;
 mod delivery;
+mod downloads;
 mod error;
 mod events;
 mod files;
@@ -31,6 +32,7 @@ mod wire;
 pub mod api;
 
 pub use client::{Bot, BotBuilder};
+pub use downloads::Download;
 pub use error::{EffectOutcome, Error, ErrorKind, Result};
 pub use files::InputFile;
 #[cfg(feature = "bot")]

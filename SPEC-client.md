@@ -22,6 +22,14 @@ EntityKind covers every pinned MessageEntity kind; link/user/custom-emoji/date-t
 
 send_message, MessageContext.reply and send_document.caption accept Into<RichText>, omit empty entity arrays, and retain existing code-point limits for plain/entity text. Explicit ParseMode supports HTML, MarkdownV2 and legacy Markdown; reject parse_mode plus explicit entities before dispatch. Telegram validates rendered markup length: the raw markup source length cannot substitute for it. No implicit markup parsing or interpolation. Test exact JSON/multipart, UTF-16 conversion, composition, overlap rules, metadata, explicit parse modes and length failures with synthetic data.
 
+## C1c: bounded downloads
+
+Bot::download_file(&api::types::File) creates a lazy descriptor. bytes() returns a bounded Vec; to_writer(&mut W) streams to a caller-owned AsyncWrite without opening a destination, flushing it, or choosing overwrite behavior. On error/cancellation a writer may retain a prefix; bytes() never returns a partial successful value. No automatic retry, especially after partial local writes.
+
+Default trusted BotBuilder.max_download_bytes is 20,000,000. max_bytes on a download only tightens that cap. Reject zero caps, missing paths, negative/oversized advertised file sizes and noncanonical paths before dispatch. Accept relative UTF-8 slash-separated file paths, no empty/dot/parent segments, backslash, percent-encoded segments, URI delimiters or control characters. Encode path segments under the configured trusted API base's file/bot<token>/ prefix; never interpret an API-supplied path as a URL or local filesystem path. File credentials/paths never enter Debug/error chains. Redirect/proxy settings remain the client's existing settings.
+
+JSON calls and downloads share HTTP execution, the semaphore and the end-to-end timeout. Bound Content-Length and actual chunks independently; never write a chunk beyond the byte cap. HTTP failures, network/stream/write failures and timeouts after dispatch are Unknown; preparation failures are NotSent. Test exact endpoint/prefix, buffered/streamed output, missing/unsafe paths, advertised/chunked limits, writer errors, redirects, timeouts, cancellation and permit release.
+
 ## Remaining C1 gates
 
 Contextual documents share the same delivery descriptor and validation as text replies: chat/thread/business/direct-message topic, ephemeral receiver, parent ID and expiry. Expose MessageContext.reply_document, CallbackContext.reply_document and ephemeral_reply_document; inaccessible/guest/unsupported scopes never fall back to another send. The remaining ephemeral reply window caps preparation/upload/response time as well as being checked before dispatch. No file opens before await, including a request rejected by scope validation.
