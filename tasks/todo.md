@@ -27,7 +27,7 @@ See tasks/goal.md. The active goal includes every unchecked module below.
 
 ## MTProto
 
-- [ ] M1: backend spike/comparison and recorded decision; session secret/lifecycle contract.
+- [x] M1: both real backend probes and reviewed session/failure contract. Pinned grammers 0.12.0 typed/session tests, real encrypted loopback default-vs-NoRetries/caller-Drop probes and synthetic AEAD checks pass. Official TDLib 1.8.70 commit 03220f6b3043c6fd7785fbf0901d63f19ad19974 was built locally with hash-verified native inputs; actual C ABI entity/correlation/authorization-wait/close checks pass. Five preparation/FFI safety regressions, isolated Clippy/fmt and experiment audit (167 dependencies) pass. ADR 0016 chooses grammers for M2 with explicit required lifecycle/overflow patches and an observable receiver; unmodified defaults are not declared production-safe. SPEC-mtproto-session.md separates provisional and acknowledged state, encrypted session ownership, gaps and cancellation. No real session/login, performance or cross-platform claim. Production Client remains M2.
 - [ ] M2: separate client, authentication/session lifecycle, common actions, raw access, history and recovery. Depends M1. Verify: mock backend and restart/flood-wait cases.
 - [ ] M3: integrate agent profiles/policies and shared operational semantics. Depends M2/A3.
 
