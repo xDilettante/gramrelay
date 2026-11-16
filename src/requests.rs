@@ -121,10 +121,12 @@ impl<'a> SendMessage<'a> {
         self.params.business_connection_id = Some(id.into());
         self
     }
+    #[cfg(feature = "bot")]
     pub(crate) fn invalid_context(mut self, field: &'static str) -> Self {
         self.context_error = Some(field);
         self
     }
+    #[cfg(feature = "bot")]
     pub(crate) fn ephemeral_parent_date(mut self, date: i64) -> Self {
         self.ephemeral_parent_date = Some(date);
         self
