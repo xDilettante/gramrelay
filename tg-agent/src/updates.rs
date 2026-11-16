@@ -1,11 +1,15 @@
 //! Durable incoming updates. Storage capabilities do not grant permission to read Telegram data.
 mod consumer;
 mod poll;
+#[cfg(feature = "executor")]
+mod receipts;
 mod types;
 use crate::journal::{
     Journal, JournalError, JournalErrorKind, JournalOptions, Result, deadline, now, storage,
     types::{canonical_json, millis, valid_id},
 };
+#[cfg(feature = "executor")]
+pub(crate) use receipts::ReceiptTracker;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fmt, sync::Arc};
@@ -169,6 +173,8 @@ impl UpdateFeed {
         lease: &SourceLease,
         update: tg::Update,
     ) -> Result<AppendReceipt> {
+        #[cfg(feature = "executor")]
+        let observed = std::time::Instant::now();
         self.check_scope(lease)?;
         if lease.mode != SourceMode::Webhook {
             return Err(lost());
@@ -191,6 +197,12 @@ impl UpdateFeed {
                     limits,
                 )?;
                 transaction.commit().map_err(|_| storage())?;
+                #[cfg(feature = "executor")]
+                feed.journal.callback_receipts.record(
+                    &feed.profile,
+                    &stored.callback_positions,
+                    observed,
+                );
                 Ok(AppendReceipt {
                     inserted: stored.inserted == 1,
                     cursor: UpdateCursor {
@@ -331,6 +343,10 @@ fn read_page_bounded(
             },
             update,
             received_at_ms: row.get(4).map_err(|_| storage())?,
+            #[cfg(feature = "executor")]
+            origin: feed.journal.origin_token(),
+            #[cfg(feature = "executor")]
+            callback_received: feed.journal.callback_receipts.get(&feed.profile, sequence),
         });
     }
     Ok(UpdatePage {
@@ -347,6 +363,8 @@ struct EncodedUpdate {
     payload: Vec<u8>,
     hash: [u8; 32],
     chat_id: Option<i64>,
+    #[cfg(feature = "executor")]
+    callback: bool,
 }
 fn encode_update(update: tg::Update, policy: &UpdateOptions) -> Result<EncodedUpdate> {
     if update.update_id < 0 || update.known_event_count() > 1 {
@@ -357,12 +375,16 @@ fn encode_update(update: tg::Update, policy: &UpdateOptions) -> Result<EncodedUp
         id: update.update_id,
         hash: Sha256::digest(&payload).into(),
         chat_id: update.chat_id().map(i64::from),
+        #[cfg(feature = "executor")]
+        callback: update.callback_query.is_some(),
         payload,
     })
 }
 struct Persisted {
     inserted: usize,
     positions: Vec<i64>,
+    #[cfg(feature = "executor")]
+    callback_positions: Vec<i64>,
 }
 fn persist_updates(
     connection: &Connection,
@@ -371,6 +393,8 @@ fn persist_updates(
     time: i64,
     limits: &JournalOptions,
 ) -> Result<Persisted> {
+    #[cfg(feature = "executor")]
+    let mut callback_positions = Vec::new();
     let mut positions = vec![0; events.len()];
     let mut fresh = Vec::new();
     let mut new_bytes = 0usize;
@@ -422,12 +446,18 @@ fn persist_updates(
             sequence = sequence.checked_add(1).ok_or_else(storage)?;
             connection.execute("INSERT INTO updates(profile,sequence,update_id,payload,payload_hash,chat_id,received_at_ms,expires_at_ms) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![feed.profile,sequence,event.id,&event.payload,event.hash.as_slice(),event.chat_id,received,expires]).map_err(|_|storage())?;
             positions[*index] = sequence;
+            #[cfg(feature = "executor")]
+            if event.callback {
+                callback_positions.push(sequence);
+            }
         }
         connection.execute("UPDATE update_feeds SET last_sequence=?1,last_received_at_ms=?2,entry_count=entry_count+?3,byte_count=byte_count+?4 WHERE profile=?5",params![sequence,received,fresh.len() as i64,new_bytes as i64,feed.profile]).map_err(|_|storage())?;
     }
     Ok(Persisted {
         inserted: fresh.len(),
         positions,
+        #[cfg(feature = "executor")]
+        callback_positions,
     })
 }
 fn lost() -> JournalError {

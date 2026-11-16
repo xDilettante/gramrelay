@@ -24,6 +24,8 @@ pub enum ExecutorErrorKind {
     NotFound,
     Remote,
     CursorExpired,
+    ReferenceExpired,
+    ReferenceUnavailable,
 }
 #[derive(Debug)]
 pub struct ExecutorError {
@@ -65,6 +67,8 @@ impl ExecutorError {
             ExecutorErrorKind::NotFound => "executor_not_found",
             ExecutorErrorKind::Remote => "executor_remote",
             ExecutorErrorKind::CursorExpired => "executor_cursor_expired",
+            ExecutorErrorKind::ReferenceExpired => "executor_reference_expired",
+            ExecutorErrorKind::ReferenceUnavailable => "executor_reference_unavailable",
         }
     }
 }

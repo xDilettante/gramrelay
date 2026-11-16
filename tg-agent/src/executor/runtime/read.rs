@@ -87,7 +87,7 @@ impl ReadEvent {
     pub fn received_at_ms(&self) -> i64 {
         self.received_at_ms
     }
-    fn new(event: StoredUpdate, scope: ReadEventScope) -> Self {
+    fn new(event: StoredUpdate, scope: ReadEventScope, callback_query_id: Option<String>) -> Self {
         let cursor = event.cursor().clone();
         let received_at_ms = event.received_at_ms();
         let update = event.into_update();
@@ -118,17 +118,6 @@ impl ReadEvent {
                         .and_then(|v| v.message_thread_id)
                 })
                 .and_then(|v| MessageId::new(v).ok())
-        } else {
-            None
-        };
-        let callback_query_id = if update.known_event_count() == 1
-            && update.unknown_fields().is_empty()
-            && !ambiguous_callback(&update)
-        {
-            update
-                .callback_query
-                .as_ref()
-                .map(|v| v.id.as_str().to_owned())
         } else {
             None
         };
@@ -195,14 +184,25 @@ impl Executor {
     ) -> Result<Approval> {
         supported(request)?;
         let profile = self.profile_for(request)?;
-        let scope = self.resolve_scope(&profile, principal, request).await?;
+        let auth = self
+            .read_authorization(&profile, principal, request, None)
+            .await?;
+        if let Some(reference) = &auth.reference {
+            let time = now()?;
+            let remaining = reference.remaining(time)?;
+            if expires_at_ms > reference.expires_at_ms
+                || expires_at_ms.saturating_sub(time) > remaining.as_millis() as i64
+            {
+                return Err(ExecutorError::new(ExecutorErrorKind::InvalidPolicy));
+            }
+        }
         self.policy.approve_with_scope(
             principal,
             request,
             profile.bot_id,
             now()?,
             expires_at_ms,
-            scope.as_ref(),
+            auth.scope.as_ref(),
         )
     }
     async fn resolve_scope(
@@ -233,20 +233,27 @@ impl Executor {
             .map(Some)
             .ok_or_else(|| ExecutorError::new(ExecutorErrorKind::NotFound))
     }
-    async fn read_authorization(
+    pub(super) async fn read_authorization(
         &self,
         profile: &Profile,
         principal: &Principal,
         request: &Request,
         approval: Option<&Approval>,
     ) -> Result<Authorization> {
+        let (scope, reference) = if request.action() == Action::AnswerCallbackQuery {
+            let (scope, reference) = self.callback_context(profile, principal, request)?;
+            (Some(scope), Some(reference))
+        } else {
+            (self.resolve_scope(profile, principal, request).await?, None)
+        };
         Ok(Authorization {
             policy: self.policy.clone(),
             principal: principal.clone(),
             request: request.clone(),
             approval: approval.cloned(),
             bot_id: profile.bot_id,
-            scope: self.resolve_scope(profile, principal, request).await?,
+            scope,
+            reference,
         })
     }
     pub(super) async fn verified<'a>(
@@ -374,16 +381,43 @@ impl Executor {
                 let page_has_more = page.has_more();
                 let count = page.events().len();
                 let mut considered = 0usize;
-                let mut events = Vec::new();
+                let mut selected = Vec::new();
                 for event in page.into_events() {
                     let scope = event_scope(event.update());
                     considered += 1;
                     next_cursor = event.cursor().clone();
                     if permits(&grant, scope, event.update()) {
-                        events.push(ReadEvent::new(event, scope));
-                        if events.len() == args.limit as usize {
+                        selected.push((event, scope));
+                        if selected.len() == args.limit as usize {
                             break;
                         }
+                    }
+                }
+                let mut events = Vec::with_capacity(selected.len());
+                {
+                    let mut registry = self
+                        .callback_references
+                        .lock()
+                        .map_err(|_| ExecutorError::new(ExecutorErrorKind::InvalidPolicy))?;
+                    let time = now()?;
+                    registry.prune(time);
+                    for (event, scope) in selected {
+                        let id = if event.update().callback_query.is_some() {
+                            registry
+                                .register_event(
+                                    profile,
+                                    principal,
+                                    request.profile(),
+                                    &event,
+                                    &self.options,
+                                    time,
+                                )
+                                .ok()
+                                .map(|reference| reference.callback_query_id().to_owned())
+                        } else {
+                            None
+                        };
+                        events.push(ReadEvent::new(event, scope, id));
                     }
                 }
                 let (current, _) = auth.checked(now()?)?;
@@ -470,7 +504,7 @@ fn event_scope(update: &tg::Update) -> ReadEventScope {
         .and_then(|raw| ChatId::new(i64::from(raw)).ok())
         .map_or(ReadEventScope::Unscoped, ReadEventScope::Chat)
 }
-fn ambiguous_callback(update: &tg::Update) -> bool {
+pub(super) fn ambiguous_callback(update: &tg::Update) -> bool {
     update
         .callback_query
         .as_ref()

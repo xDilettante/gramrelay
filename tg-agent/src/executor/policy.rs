@@ -302,6 +302,36 @@ pub struct DryRun {
     pub grant_revision: u64,
 }
 impl PolicyStore {
+    #[cfg(test)]
+    pub(crate) fn with_exclusive_test_lock(&self, hold: impl FnOnce()) {
+        let _guard = self.inner.write().expect("test policy lock");
+        hold();
+    }
+    pub(super) fn check_callback_observation(
+        &self,
+        principal: &Principal,
+        profile: &str,
+        bot_id: i64,
+        chat: Option<ChatId>,
+        time: i64,
+    ) -> Result<()> {
+        let state = self.inner.read().map_err(|_| invalid_policy())?;
+        let entry = state
+            .grants
+            .get(&(principal.clone(), profile.to_owned()))
+            .ok_or_else(denied)?;
+        let grant = &entry.grant;
+        if time < 0
+            || grant.bot_id != bot_id
+            || grant.expires_at_ms.is_some_and(|expiry| time >= expiry)
+            || !(grant.actions.contains(&Action::ReadUpdates)
+                || grant.actions.contains(&Action::AnswerCallbackQuery))
+            || chat.map_or(!grant.unscoped_updates, |chat| !grant.permits_chat(chat))
+        {
+            return Err(denied());
+        }
+        Ok(())
+    }
     pub fn replace(&self, principal: &Principal, profile: &str, grant: Grant) -> Result<()> {
         valid_id(profile)?;
         grant.validate()?;

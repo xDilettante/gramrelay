@@ -18,6 +18,8 @@ pub use types::*;
 #[derive(Clone)]
 pub struct Journal {
     inner: Arc<worker::Database>,
+    #[cfg(feature = "executor")]
+    pub(crate) callback_receipts: Arc<crate::updates::ReceiptTracker>,
 }
 impl fmt::Debug for Journal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -25,6 +27,10 @@ impl fmt::Debug for Journal {
     }
 }
 impl Journal {
+    #[cfg(feature = "executor")]
+    pub(crate) fn origin_token(&self) -> Arc<str> {
+        self.inner.origin_token()
+    }
     /// The executor must keep its network deadline and receipt margin within this lease.
     pub fn lease_duration(&self) -> Duration {
         self.inner.options.lease
@@ -37,8 +43,14 @@ impl Journal {
         if !path.is_absolute() {
             return Err(JournalError::new(JournalErrorKind::Validation));
         }
+        #[cfg(feature = "executor")]
+        let receipts = Arc::new(crate::updates::ReceiptTracker::new(
+            options.max_update_entries.min(65536),
+        ));
         Ok(Self {
             inner: Arc::new(worker::Database::open(path, options).await?),
+            #[cfg(feature = "executor")]
+            callback_receipts: receipts,
         })
     }
 

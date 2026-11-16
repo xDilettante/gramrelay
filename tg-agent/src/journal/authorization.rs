@@ -91,6 +91,10 @@ impl Journal {
         self.prepare_checked(request, move |connection, request, created| {
             let bot: Option<i64> = connection.query_row("SELECT bot_id FROM update_feeds WHERE profile=?1", [&request.profile], |row| row.get(0)).optional().map_err(|_| storage())?;
             if bot != Some(scope.bot_id) || scope.action.name() != request.action { return Err(JournalError::new(JournalErrorKind::Denied)); }
+            if let Some(hash)=&scope.reference_hash {
+                let claimed:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM executor_operation_scopes WHERE profile=?1 AND reference_hash=?2 AND admitted=1 AND operation_id!=?3)",params![request.profile,hash.as_slice(),request.id],|row|row.get(0)).map_err(|_|storage())?;
+                if claimed { return Err(JournalError::new(JournalErrorKind::Conflict)); }
+            }
             if !created {
                 let stored = load_scope(connection, &request.profile, &request.id)?.ok_or_else(|| JournalError::new(JournalErrorKind::Denied))?;
                 if stored != scope { return Err(JournalError::new(JournalErrorKind::Conflict)); }

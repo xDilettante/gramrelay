@@ -211,8 +211,22 @@ pub struct StoredUpdate {
     pub(super) cursor: UpdateCursor,
     pub(super) update: tg::Update,
     pub(super) received_at_ms: i64,
+    #[cfg(feature = "executor")]
+    #[serde(skip)]
+    pub(super) origin: std::sync::Arc<str>,
+    #[cfg(feature = "executor")]
+    #[serde(skip)]
+    pub(super) callback_received: Option<std::time::Instant>,
 }
 impl StoredUpdate {
+    #[cfg(feature = "executor")]
+    pub(crate) fn is_from(&self, journal: &crate::journal::Journal) -> bool {
+        std::sync::Arc::ptr_eq(&self.origin, &journal.origin_token())
+    }
+    #[cfg(feature = "executor")]
+    pub(crate) fn callback_received(&self) -> Option<std::time::Instant> {
+        self.callback_received
+    }
     /// Original journal receipt time; rereading never refreshes ephemeral references.
     pub fn received_at_ms(&self) -> i64 {
         self.received_at_ms

@@ -19,7 +19,11 @@ use tokio::{
     sync::{OnceCell, Semaphore},
     time::{Instant, timeout, timeout_at},
 };
+mod callbacks;
 mod read;
+mod write;
+pub use callbacks::{CallbackClockPolicy, CallbackReference};
+use callbacks::{CallbackRegistry, ReferenceDeadline};
 pub use read::{BotInfo, ChatInfo, ReadEvent, ReadEventScope, ReadPage};
 
 #[derive(Debug, Clone)]
@@ -28,6 +32,9 @@ pub struct ExecutorOptions {
     request_budget: Duration,
     receipt_margin: Duration,
     max_read_bytes: usize,
+    callback_ttl: Duration,
+    max_callback_references: usize,
+    callback_clock_policy: CallbackClockPolicy,
 }
 impl Default for ExecutorOptions {
     fn default() -> Self {
@@ -36,10 +43,25 @@ impl Default for ExecutorOptions {
             request_budget: Duration::from_secs(30),
             receipt_margin: Duration::from_secs(5),
             max_read_bytes: 1024 * 1024,
+            callback_ttl: Duration::from_secs(10),
+            max_callback_references: 1024,
+            callback_clock_policy: CallbackClockPolicy::JournalMonotonic,
         }
     }
 }
 impl ExecutorOptions {
+    pub fn callback_ttl(mut self, value: Duration) -> Self {
+        self.callback_ttl = value;
+        self
+    }
+    pub fn max_callback_references(mut self, value: usize) -> Self {
+        self.max_callback_references = value;
+        self
+    }
+    pub fn callback_clock_policy(mut self, value: CallbackClockPolicy) -> Self {
+        self.callback_clock_policy = value;
+        self
+    }
     pub fn max_in_flight(mut self, value: usize) -> Self {
         self.max_in_flight = value;
         self
@@ -63,6 +85,10 @@ impl ExecutorOptions {
             || self.receipt_margin.is_zero()
             || self.max_read_bytes == 0
             || self.max_read_bytes > 64 * 1024 * 1024
+            || self.callback_ttl < Duration::from_millis(1)
+            || self.callback_ttl > Duration::from_secs(60)
+            || self.max_callback_references == 0
+            || self.max_callback_references > 65536
             || self
                 .request_budget
                 .checked_add(self.receipt_margin)
@@ -88,6 +114,7 @@ pub struct Executor {
     profiles: Arc<RwLock<BTreeMap<String, Arc<Profile>>>>,
     slots: Arc<Semaphore>,
     options: ExecutorOptions,
+    callback_references: Arc<std::sync::Mutex<CallbackRegistry>>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -103,6 +130,8 @@ pub struct OperationReceipt {
     result_availability: ResultAvailability,
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<MessageReceipt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    acknowledged: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     failure: Option<FailureReceipt>,
 }
@@ -164,6 +193,9 @@ impl FailureReceipt {
     }
 }
 impl OperationReceipt {
+    pub fn acknowledged(&self) -> Option<bool> {
+        self.acknowledged
+    }
     pub fn state(&self) -> OperationState {
         self.state
     }
@@ -228,6 +260,7 @@ impl Executor {
             profiles: Arc::default(),
             slots: Arc::new(Semaphore::new(options.max_in_flight)),
             options,
+            callback_references: Arc::default(),
         })
     }
     /// Immutable registration. UpdateFeed permanently binds the profile's bot ID
@@ -275,7 +308,11 @@ impl Executor {
         let result = self.execute_inner(principal, request, approval).await;
         result.map_err(|error| {
             if request.action().is_write() && error.outcome().is_none() {
-                error.with_outcome(EffectOutcome::NotSent)
+                error.with_outcome(if request.action() == Action::AnswerCallbackQuery {
+                    EffectOutcome::Unknown
+                } else {
+                    EffectOutcome::NotSent
+                })
             } else {
                 error
             }
@@ -294,148 +331,13 @@ impl Executor {
             .try_acquire_owned()
             .map_err(|_| ExecutorError::new(ExecutorErrorKind::Capacity))?;
         let profile = self.profile_for(request)?;
-        let ActionCall::SendMessage(args) = request.call() else {
-            return self
-                .execute_read(&profile, principal, request, approval)
-                .await;
-        };
-        self.policy
-            .authorized(principal, request, profile.bot_id, now()?, approval)?;
-        let invocation = Authorization {
-            policy: self.policy.clone(),
-            principal: principal.clone(),
-            request: request.clone(),
-            approval: approval.cloned(),
-            bot_id: profile.bot_id,
-            scope: None,
-        };
-        let admission = invocation.clone();
-        profile
-            .journal
-            .charge_authorized_invocation(move |time| Ok((invocation.budget_at(time)?, 0)))
-            .await
-            .map_err(storage_error)?;
-        self.policy
-            .dry_run(principal, request, profile.bot_id, now()?, approval)?;
-        let scope = OperationScope {
-            bot_id: profile.bot_id,
-            action: Action::SendMessage,
-            chat: Some(args.chat_id),
-            file: None,
-            reference_hash: None,
-        };
-        let intent = OperationRequest::new(
-            request.profile(),
-            principal.as_str(),
-            request.operation_id().expect("validated write ID"),
-            request.action().name(),
-            &serde_json::to_value(request)
-                .map_err(|_| ExecutorError::new(ExecutorErrorKind::InvalidInput))?,
-        )
-        .map_err(storage_error)?;
-        let prepared = match profile
-            .journal
-            .prepare_scoped(intent, scope.clone())
-            .await
-            .map_err(storage_error)?
-        {
-            Preparation::Ready(value) => value,
-            Preparation::Existing(_) => {
-                return self
-                    .cached(&profile, principal, request, approval, &scope)
-                    .await
-                    .map_err(|error| error.with_outcome(EffectOutcome::Unknown));
-            }
-        };
-        let identity = self.verified(&profile, &admission).await;
-        if let Err(error) = identity {
-            let _ = profile.journal.release_prepared(prepared).await;
-            return Err(error);
+        if request.action().is_write() {
+            self.execute_write(&profile, principal, request, approval)
+                .await
+        } else {
+            self.execute_read(&profile, principal, request, approval)
+                .await
         }
-        let proof = prepared.clone();
-        let flight = profile
-            .journal
-            .begin_authorized(prepared, move |time| admission.budget_at(time))
-            .await;
-        let flight = match flight {
-            Ok(value) => value,
-            Err(error) => {
-                let _ = profile.journal.release_prepared(proof).await;
-                return Err(storage_error(error));
-            }
-        };
-        let remaining = flight
-            .lease_until_ms()
-            .checked_sub(now()?)
-            .and_then(|v| u64::try_from(v).ok())
-            .map(Duration::from_millis)
-            .unwrap_or_default();
-        let rpc_budget = remaining
-            .checked_sub(self.options.receipt_margin)
-            .filter(|v| !v.is_zero())
-            .map(|v| v.min(self.options.request_budget));
-        if let Err(error) =
-            self.policy
-                .dry_run(principal, request, profile.bot_id, now()?, approval)
-        {
-            let _ = profile
-                .journal
-                .complete_fenced(flight, Completion::executor_not_started())
-                .await;
-            return Err(error.with_outcome(EffectOutcome::NotSent));
-        }
-        let Some(rpc_budget) = rpc_budget else {
-            let _ = profile
-                .journal
-                .complete_fenced(flight, Completion::executor_not_started())
-                .await;
-            return Err(ExecutorError::new(ExecutorErrorKind::Capacity)
-                .with_outcome(EffectOutcome::NotSent));
-        };
-        let Some(end) = Instant::now().checked_add(rpc_budget + self.options.receipt_margin) else {
-            let _ = profile
-                .journal
-                .complete_fenced(flight, Completion::executor_not_started())
-                .await;
-            return Err(ExecutorError::new(ExecutorErrorKind::InvalidPolicy)
-                .with_outcome(EffectOutcome::NotSent));
-        };
-        let mut params = tg::api::methods::SendMessage::new(args.text.clone())
-            .chat_id(tg::ChatId::from(args.chat_id.get()).into());
-        if let Some(id) = args.message_thread_id {
-            params = params.message_thread_id(id.get());
-        }
-        if let Some(value) = args.disable_notification {
-            params = params.disable_notification(value);
-        }
-        let completion = match timeout(
-            rpc_budget,
-            profile.bot.call(params).retry_policy(
-                tg::RetryPolicy::default()
-                    .max_attempts(1)
-                    .max_elapsed(rpc_budget),
-            ),
-        )
-        .await
-        {
-            Ok(Ok(message))
-                if i64::from(message.chat.id) == args.chat_id.get()
-                    && i64::from(message.message_id) > 0 =>
-            {
-                Completion::succeeded(
-                    serde_json::json!({"chat_id":args.chat_id,"message_id":i64::from(message.message_id).to_string()}),
-                )
-            }
-            Ok(Err(error)) => Completion::from_error(&error),
-            _ => Completion::executor_uncertain(),
-        };
-        timeout_at(end, profile.journal.complete_fenced(flight, completion))
-            .await
-            .map_err(|_| uncertain())?
-            .map_err(|_| uncertain())?;
-        self.cached(&profile, principal, request, approval, &scope)
-            .await
-            .map_err(|error| error.with_outcome(EffectOutcome::Unknown))
     }
     fn profile_for(&self, request: &Request) -> Result<Arc<Profile>> {
         self.profiles
@@ -448,11 +350,10 @@ impl Executor {
     async fn cached(
         &self,
         profile: &Profile,
-        principal: &Principal,
-        request: &Request,
-        approval: Option<&Approval>,
+        auth: &Authorization,
         expected: &OperationScope,
     ) -> Result<ExecutionResult> {
+        let (principal, request) = (&auth.principal, &auth.request);
         let (operation, scope) = profile
             .journal
             .get_scoped(
@@ -463,8 +364,7 @@ impl Executor {
             .await
             .map_err(storage_error)?
             .ok_or_else(uncertain)?;
-        self.policy
-            .dry_run(principal, request, profile.bot_id, now()?, approval)?;
+        auth.checked(now()?)?;
         if scope != *expected {
             return Err(ExecutorError::new(ExecutorErrorKind::Denied));
         }
@@ -479,9 +379,17 @@ struct Authorization {
     approval: Option<Approval>,
     bot_id: i64,
     scope: Option<OperationScope>,
+    reference: Option<ReferenceDeadline>,
 }
 impl Authorization {
     fn checked(&self, time: i64) -> Result<(DryRun, Grant)> {
+        let result = self.policy_checked(time)?;
+        if let Some(reference) = &self.reference {
+            reference.remaining(time)?;
+        }
+        Ok(result)
+    }
+    fn policy_checked(&self, time: i64) -> Result<(DryRun, Grant)> {
         self.policy.authorized_with_scope(
             &self.principal,
             &self.request,
@@ -524,12 +432,35 @@ fn uncertain() -> ExecutorError {
     ExecutorError::new(ExecutorErrorKind::Uncertain).with_outcome(EffectOutcome::Unknown)
 }
 fn project(operation: Operation, scope: &OperationScope) -> Result<ExecutionResult> {
-    let message = operation
-        .result()
-        .map(|value| {
-            serde_json::from_value::<MessageReceipt>(value.clone()).map_err(|_| uncertain())
-        })
-        .transpose()?;
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Acknowledgement {
+        acknowledged: tg::api::True,
+    }
+    let (message, acknowledged) = if scope.action == Action::AnswerCallbackQuery {
+        let acknowledged = operation
+            .result()
+            .map(|value| {
+                serde_json::from_value::<Acknowledgement>(value.clone())
+                    .map(|value| {
+                        let _ = value.acknowledged;
+                        true
+                    })
+                    .map_err(|_| uncertain())
+            })
+            .transpose()?;
+        (None, acknowledged)
+    } else {
+        (
+            operation
+                .result()
+                .map(|value| {
+                    serde_json::from_value::<MessageReceipt>(value.clone()).map_err(|_| uncertain())
+                })
+                .transpose()?,
+            None,
+        )
+    };
     if message
         .as_ref()
         .is_some_and(|v| Some(v.chat_id) != scope.chat)
@@ -545,6 +476,7 @@ fn project(operation: Operation, scope: &OperationScope) -> Result<ExecutionResu
                 state: operation.state(),
                 result_availability: operation.result_availability(),
                 message,
+                acknowledged,
                 failure: operation.failure().map(FailureReceipt::project),
             },
         },
@@ -558,6 +490,8 @@ fn supported(request: &Request) -> Result<()> {
             | Action::ReadUpdates
             | Action::GetOperation
             | Action::SendMessage
+            | Action::EditMessageText
+            | Action::AnswerCallbackQuery
     ) {
         Ok(())
     } else {

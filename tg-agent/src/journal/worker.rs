@@ -22,6 +22,10 @@ pub(super) struct Database {
     stopped: watch::Receiver<Exit>,
 }
 impl Database {
+    #[cfg(feature = "executor")]
+    pub(super) fn origin_token(&self) -> Arc<str> {
+        self.worker_id.clone()
+    }
     pub(super) async fn open(path: PathBuf, options: JournalOptions) -> Result<Self> {
         let options = Arc::new(options);
         let config = options.clone();

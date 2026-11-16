@@ -59,6 +59,54 @@ to inspect its receipt; confirmation on get_operation itself still applies.
 
 Callbacks are ephemeral references bound to trusted observed input and caller/profile/scope, not self-attested chat_id arguments. Registration uses the original event receipt time; rereading cannot refresh an old callback indefinitely. The canonical (principal, profile, callback_query_id) reference is reused when the same observed event is reread; aliases cannot create independent admission rights. One callback reference cannot be rebound to a different operation after an admitted attempt; NotSent can retry the same key, while Unknown cannot be bypassed with a new key. References and their metadata are bounded/expired explicitly. Current get_operation access can inspect an authorized retained receipt independently of whether an old callback can still be answered.
 
+The callback implementation uses a bounded per-executor registry (1024 entries,
+configurable up to 65536). Authorized read_updates registers usable callbacks;
+if expired, invalid or full it omits action metadata while preserving the
+authorized untrusted event. A host may explicitly observe a StoredUpdate from
+the same journal instance/profile; private, non-serialized origin proof prevents
+accidentally binding an unrelated feed's snapshot. Only one known callback event
+without unknown root fields or mixed message/inline targets can issue a reference;
+composite extended scopes never collapse into chat-only/global-only references.
+Observation requires current
+read or answer authority for the actual chat/global scope; it is not confirmation.
+
+Local callback TTL defaults to 10 seconds (positive, at most 60 seconds). It is
+operator policy, not a guarantee that Telegram will still accept the query.
+Wall-clock expiry anchors to original received_at_ms. The default
+CallbackClockPolicy::JournalMonotonic additionally requires private monotonic
+ingestion provenance captured before the append job and published only after a
+fresh commit. Duplicate updates never refresh it. Its bounded per-journal cache
+holds at most min(max_update_entries, 65536) callback receipts, pruning entries
+aged 60 seconds on the next fresh callback commit;
+full/absent provenance omits action metadata without failing ingestion or reads.
+It is lost on journal restart and not shared with other journal instances.
+Default observation then fails closed; get_operation remains available for old
+receipts. A host needing cross-process/historical callback observation can
+explicitly choose TrustedWallClock, taking responsibility for a correct UTC clock
+across restarts. This policy is never a tool argument. It still uses original
+receipt time, a per-reference monotonic deadline and a registry wall high-water
+mark; it does not claim rollback resistance across restart. No OS clock/boot
+dependency or unsafe platform code is added.
+
+Reobserving an existing ID with different scope or receipt time fails. Pruning
+removes expired references; original ingestion deadlines cannot be recreated by
+pruning/rereading in the default mode. No live entry is silently evicted.
+The durable dedup identity is profile + SHA-256(domain separator and exact raw
+callback_query_id), independent of principal, timestamps, expiry, registry and
+process identity. admitted=1 is permanent through NotSent/Rejected/Unknown and
+cleanup; references from different principals cannot claim a second operation.
+
+Dry-run/approval only looks up registered references, never creates one. Host
+approval cannot outlive the callback reference. The immutable reference time and
+expiry join the write intent fingerprint, with a single RPC bounded by the
+remaining reference window and operation lease. Expiry before dispatch records
+NotSent; cancellation/timeout after begin remains conservative. When a reference
+has expired or is unavailable after restart, get_operation reads its persisted
+scope/status without needing a live reference. Callback errors never authorize
+replacing an operation key. answer_callback_query stores only acknowledged=true;
+edit_message_text accepts only normal chat/message targets and confirms both
+returned IDs. Boolean-only success for a normal edit target is Unknown.
+
 ## Durable execution and quota contract
 
 Use J1 prepare/begin/complete with its immutable (profile, operation_id), principal, action and canonical payload hash. All writes require a stable caller-created operation_id. Bind minimal authorization scope metadata transactionally to the row; never reconstruct scope from arbitrary cached JSON or fresh tool claims. Legacy unscoped journal rows fail closed at the executor boundary. Store bot/action/chat/file/reference scope, not message text or credentials. Current scope/owner checks precede cached-result or get_operation disclosure. Revoking chat/file access prevents disclosure of its old results.
@@ -86,16 +134,19 @@ Include handle and immutable content metadata in the canonical operation fingerp
 
 Commands: cargo test --locked --workspace --all-targets --all-features; cargo test --locked --workspace --doc --all-features; cargo fmt --all -- --check; cargo clippy --locked --workspace --all-targets --all-features -- -D warnings; cargo audit. Run schema/migration and isolated feature checks appropriate to each increment. A1 completion requires all actions and abuse/recovery invariants, not just a passing send-message slice. A2/A3 publish the same typed schemas/semantics through CLI and official rmcp.
 
-Current implementation: increments 1 and 2 plus the four reads of increment 3
-are integrated. execute supports get_me/get_chat/read_updates/get_operation and
-send_message; callback/edit/document writes explicitly return UnsupportedAction
-until their remaining integration. Policy-only dry-run remains local; executor
-dry-run/approval resolves immutable owner-checked operation scopes and cursor
+Current implementation: increments 1 through 3 are integrated. execute supports
+get_me/get_chat/read_updates/get_operation/send_message/edit_message_text and
+answer_callback_query; send_document explicitly returns UnsupportedAction until
+increment 4. Policy-only dry-run remains local; executor dry-run/approval resolves
+registered callback references, immutable owner-checked operation scopes and cursor
 position metadata without state refresh, RPC or quota. Schema v4 freezes authorization.sql; later durable file
 registration metadata will require a subsequent reviewed migration, not an edit
 of v4. The current ledger capacity is configurable (4096 by default). Default
 executor concurrency/RPC/receipt budgets are 16/30 seconds/5 seconds. Tests cover
 ten policy, eight admission/storage, eleven end-to-end send/recovery, seventeen
-read/boundary and five migration cases. Offline authorized_send makes one identity
-read and one send for two invocations; authorized_read performs no RPC at all.
+read/boundary, twelve callback, three edit and five migration cases, plus bounded
+receipt-provenance and post-begin deadline regressions. Offline authorized_send
+makes one identity read and one send for two invocations; authorized_read performs
+no RPC at all. authorized_callback observes a fresh local event and acknowledges
+twice under one key with only one callback RPC.
 Full A1 and the architecture goal remain open.

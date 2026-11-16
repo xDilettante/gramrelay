@@ -27,6 +27,8 @@ impl UpdateFeed {
         checkpoint: &PollCheckpoint,
         updates: Vec<tg::Update>,
     ) -> Result<PollReceipt> {
+        #[cfg(feature = "executor")]
+        let observed = std::time::Instant::now();
         self.check_scope(lease)?;
         if lease.mode != SourceMode::Polling
             || checkpoint.profile != self.profile
@@ -81,6 +83,8 @@ impl UpdateFeed {
                 transaction.execute("UPDATE update_feeds SET poll_offset=?1,poll_revision=?2,poll_updated_at_ms=?3 WHERE profile=?4",params![next,revision,time,feed.profile]).map_err(|_|storage())?;
             }
             transaction.commit().map_err(|_|storage())?;
+            #[cfg(feature = "executor")]
+            feed.journal.callback_receipts.record(&feed.profile,&stored.callback_positions,observed);
             Ok(PollReceipt{inserted:stored.inserted,duplicates:events.len()-stored.inserted,next_offset:next.or(checkpoint.offset)})
         }).await
     }
