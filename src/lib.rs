@@ -22,6 +22,9 @@ mod routing;
 mod types;
 mod updates;
 
+#[path = "generated/mod.rs"]
+pub mod api;
+
 pub use client::{Bot, BotBuilder};
 pub use error::{EffectOutcome, Error, ErrorKind, Result};
 pub use files::InputFile;
