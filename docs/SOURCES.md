@@ -7,6 +7,9 @@ The implementation uses reqwest 0.13.5, Tokio 1.54.1, tokio-util 0.7.20 and wire
 - Callback button byte limit: https://core.telegram.org/bots/api#inlinekeyboardbutton
 - Document upload: https://core.telegram.org/bots/api#senddocument
 - Error parameters: https://core.telegram.org/bots/api#responseparameters
+- Polling parameters and acknowledgement: https://core.telegram.org/bots/api#getupdates
+- Bot identity: https://core.telegram.org/bots/api#getme
+- Webhook status: https://core.telegram.org/bots/api#getwebhookinfo
 - Explicitly disable transport retries: https://docs.rs/reqwest/0.13.5/reqwest/retry/fn.never.html
 - Multipart streaming with known length: https://docs.rs/reqwest/0.13.5/reqwest/multipart/struct.Part.html#method.stream_with_length
 - Pool reuse: https://docs.rs/reqwest/0.13.5/reqwest/#making-a-get-request

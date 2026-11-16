@@ -1,9 +1,14 @@
-# Prototype implementation plan
+# Full implementation plan
 
-1. Create a private tg crate and copy the architecture into repository documentation.
-2. Specify JSON send_message, validation and ambiguous timeout as failing localhost mock tests; implement the shared request path and typed errors.
-3. Add callback buttons, callback Update decoding and answer_callback_query with mock tests.
-4. Add streaming send_document from paths, bytes and file IDs; test multipart bytes and local size/I/O failures.
-5. Review the security boundary, add failure-path regressions, runnable examples and documentation; run formatting, Clippy, tests, rustdoc and dependency audit.
+See tasks/goal.md for completion gates and docs/ARCHITECTURE.md for module boundaries.
 
-The shared request path is the main risk: no transport or application retry, no raw error leakage, deadline includes response consumption, and body allocation is bounded. Each feature builds on this path. Keep only the main library package until another executable is implemented.
+1. bot-runtime: getMe/getUpdates/webhook info, typed contexts/router, bounded per-chat polling, graceful stop and failure recovery.
+2. protocol: snapshot official API documentation, build a reproducible schema importer/generator, classify method effects and verify all types/methods.
+3. client: full request surface, rich text/entities, upload/download variants, safe retry metadata, limits and observation hooks.
+4. journal: SQLite operation/update records, atomic claims, payload hashes, authorization ownership, durable acknowledgement and retention.
+5. bot-runtime: authenticated webhooks, durable ingestion, duplicate handling and multiple-executor safety.
+6. agent-runtime: shared authorized executor, CLI JSON and MCP stdio, file handles, scoped grants and cost/quantity limits.
+7. mtproto: evaluate maintained backend, implement separate client/session facade, common operations, raw access and recovery.
+8. release: checked examples, recipes/migration guide, agent-task evaluation, comparable benchmarks, compatibility matrix, audit and packaging.
+
+Each module has a concrete spec before its implementation. Use small verified commits, keep the shared request path conservative, and update tasks/todo.md with evidence. The full goal remains active across milestones.

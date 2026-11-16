@@ -41,17 +41,24 @@ impl From<i64> for UserId {
         Self(value)
     }
 }
+impl From<UserId> for i64 {
+    fn from(value: UserId) -> Self {
+        value.0
+    }
+}
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Chat {
     pub id: ChatId,
     #[serde(rename = "type")]
     pub kind: String,
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// The supported subset of a Telegram message. New response fields are tolerated.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Message {
     #[serde(rename = "message_id")]
@@ -60,6 +67,10 @@ pub struct Message {
     pub chat: Chat,
     pub text: Option<String>,
     pub document: Option<Document>,
+    pub message_thread_id: Option<i64>,
+    pub business_connection_id: Option<String>,
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,7 +82,7 @@ impl FileId {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Document {
     pub file_id: FileId,
@@ -79,6 +90,8 @@ pub struct Document {
     pub file_name: Option<String>,
     pub mime_type: Option<String>,
     pub file_size: Option<u64>,
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// An opaque identifier supplied by Telegram for a callback query.
@@ -101,15 +114,18 @@ impl CallbackQueryId {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct User {
     pub id: UserId,
     pub is_bot: bool,
     pub first_name: String,
+    pub username: Option<String>,
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct CallbackQuery {
     pub id: CallbackQueryId,
@@ -118,16 +134,28 @@ pub struct CallbackQuery {
     pub data: Option<String>,
     pub message: Option<Message>,
     pub inline_message_id: Option<String>,
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// Decode an update received by the host. This type does not start a receiver.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Update {
     pub update_id: i64,
     pub message: Option<Message>,
     pub callback_query: Option<CallbackQuery>,
     /// Preserve update fields not yet modeled by this prototype.
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct WebhookInfo {
+    pub url: String,
+    pub has_custom_certificate: bool,
+    pub pending_update_count: u64,
     #[serde(flatten)]
     pub unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
 }

@@ -16,6 +16,7 @@ mod error;
 mod files;
 mod requests;
 mod types;
+mod updates;
 
 pub use client::{Bot, BotBuilder};
 pub use error::{EffectOutcome, Error, ErrorKind, Result};
@@ -23,5 +24,6 @@ pub use files::InputFile;
 pub use requests::{AnswerCallbackQuery, RequestFuture, SendDocument, SendMessage};
 pub use types::{
     CallbackQuery, CallbackQueryId, Chat, ChatId, Document, FileId, InlineKeyboardButton,
-    InlineKeyboardMarkup, Message, MessageId, Update, User, UserId,
+    InlineKeyboardMarkup, Message, MessageId, Update, User, UserId, WebhookInfo,
 };
+pub use updates::GetUpdates;

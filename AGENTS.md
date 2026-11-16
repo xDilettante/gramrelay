@@ -1,8 +1,8 @@
 # Telegram Rust
 
-This repository is a private Bot API prototype; crate name tg is provisional. Project name for reports: Telegram Rust.
+This repository is developing the full Telegram library described in docs/ARCHITECTURE.md; crate name tg is provisional. Project name for reports: Telegram Rust.
 
-- Read SPEC-prototype.md before changing behavior; docs/ARCHITECTURE.md describes the longer-term design.
+- Read the active module spec and tasks/todo.md before changing behavior; SPEC-prototype.md records the completed initial slice.
 - Keep lazy request builders and one shared request/response path. Do not add automatic retries for ambiguous writes.
 - Preserve NotSent, Rejected and Unknown semantics. Cancellation after polling a future can leave an unknown remote effect.
 - Never retain raw reqwest errors, credential-bearing URLs or remote descriptions in public diagnostic chains.
