@@ -9,6 +9,7 @@ description = "Durable and authorized Telegram actions for agents"
 executor = ["tokio/time"]
 host = ["executor", "tokio/io-util", "tokio/fs"]
 cli = ["host", "tokio/io-std", "tokio/rt-multi-thread"]
+mcp = ["cli", "dep:rmcp", "dep:tokio-util"]
 bot = ["tg/bot", "tokio/macros", "tokio/time"]
 webhook = ["bot", "tg/webhook", "tokio/net"]
 tracing = ["tg/tracing"]
@@ -18,13 +19,16 @@ metrics = ["tg/metrics"]
 base64 = "0.23"
 getrandom = "0.4"
 rusqlite = { version = "0.43", default-features = false, features = ["bundled"] }
+rmcp = { version = "=3.10.0", default-features = false, features = ["server"], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = { version = "0.11", default-features = false }
 tg = { path = "..", default-features = false }
 tokio = { version = "1", features = ["rt", "sync"] }
+tokio-util = { version = "0.7", features = ["rt"], optional = true }
 
 [dev-dependencies]
+rmcp = { version = "=3.10.0", default-features = false, features = ["client", "server"] }
 jsonschema = { version = "0.61.2", default-features = false }
 wiremock = "0.6"
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
@@ -67,3 +71,7 @@ required-features = ["executor"]
 [[example]]
 name = "agent_json"
 required-features = ["cli"]
+
+[[example]]
+name = "mcp_fixture"
+required-features = ["mcp"]

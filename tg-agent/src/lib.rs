@@ -8,6 +8,8 @@ pub mod executor;
 #[cfg(feature = "host")]
 pub mod host;
 pub mod journal;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 #[cfg(feature = "bot")]
 pub mod runtime;
 #[cfg(feature = "executor")]

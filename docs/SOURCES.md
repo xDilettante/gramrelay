@@ -57,3 +57,7 @@ Unknown effect handling is our conservative contract, not a Telegram idempotency
 - Agent JSON framing: Tokio 1.54.1 installed source src/io/util/async_buf_read_ext.rs (fill_buf/consume, EOF and cancel safety), canonical https://docs.rs/tokio/1.54.1/tokio/io/trait.AsyncBufReadExt.html#method.fill_buf (web fetch unavailable; pinned source checked).
 - Independent agent schema validation: jsonschema 0.61.2 installed source src/lib.rs validator_for / Validator::new; dev-only, default external HTTP/file resolving disabled. https://docs.rs/jsonschema/0.61.2/jsonschema/fn.validator_for.html (web fetch unavailable; pinned source checked).
 - JSON Schema draft 2020-12 validation keywords, Unicode string length and non-anchored pattern semantics: https://json-schema.org/draft/2020-12/json-schema-validation
+
+- MCP tool schemas, structured/text output, hints and tool errors: https://modelcontextprotocol.io/specification/2026-07-28/server/tools
+- MCP stdio/current and legacy lifecycle: https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio
+- Official Rust MCP SDK pinned to rmcp 3.10.0: https://docs.rs/rmcp/3.10.0/rmcp/ and https://github.com/modelcontextprotocol/rust-sdk . Exact APIs, default/optional features, SDK raw map parsing, bounded AsyncRwTransport, send/cancel/drain behavior and per-request metadata were checked in the downloaded crates.io 3.10.0 source, rather than assuming main-branch compatibility.

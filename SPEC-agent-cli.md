@@ -4,7 +4,7 @@
 
 Implement A2 from tasks/todo.md over the completed A1 executor. Preserve all eight
 actions, stable order, current policy, quota, journal and Unknown semantics. A3
-will adapt the same interface/catalog through official rmcp, not another executor.
+adapts the same interface/catalog through official rmcp; see SPEC-agent-mcp.md.
 No live Telegram calls, publication or remote push are part of verification.
 
 Tool content is the existing version-1 Request only. The authenticated principal,

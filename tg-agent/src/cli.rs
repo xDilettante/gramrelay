@@ -142,6 +142,15 @@ fn io_error() -> ToolError {
 /// Thin executable shell; discovery is independent of credentials and storage.
 pub fn entrypoint() -> ExitCode {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if args.first().is_some_and(|arg| arg == "mcp") {
+        #[cfg(feature = "mcp")]
+        return crate::mcp::entrypoint(&args[1..]);
+        #[cfg(not(feature = "mcp"))]
+        {
+            eprintln!("agent_mcp_feature_required");
+            return ExitCode::from(2);
+        }
+    }
     if let Some((serve, path, mode)) = execution_args(&args) {
         return launch(serve, path, mode);
     }
@@ -152,7 +161,7 @@ pub fn entrypoint() -> ExitCode {
     let value = match args.as_deref() {
         Some(["--help"] | ["help"]) => {
             println!(
-                "tg-agent tools\ntg-agent schema [request|response|catalog]\ntg-agent run --config ABSOLUTE_PATH [--dry-run]\ntg-agent serve --config ABSOLUTE_PATH [--dry-run]\n\nDiscovery requires no credentials. Execution uses protected host configuration and environment-only tokens."
+                "tg-agent tools\ntg-agent schema [request|response|catalog]\ntg-agent run --config ABSOLUTE_PATH [--dry-run]\ntg-agent serve --config ABSOLUTE_PATH [--dry-run]\ntg-agent mcp --config ABSOLUTE_PATH [--dry-run] (feature mcp)\n\nDiscovery requires no credentials. Execution uses protected host configuration and environment-only tokens."
             );
             return ExitCode::SUCCESS;
         }
