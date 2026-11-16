@@ -149,8 +149,11 @@ impl<'a> IntoFuture for AnswerCallbackQuery<'a> {
                 validate_text(text, "text", 0, 200)?;
             }
             self.bot
-                .perform(async { Ok(self.bot.post("answerCallbackQuery")?.json(&self.params)) })
+                .perform::<crate::api::True>(async {
+                    Ok(self.bot.post("answerCallbackQuery")?.json(&self.params))
+                })
                 .await
+                .map(|_| true)
         })
     }
 }

@@ -91,7 +91,8 @@ async fn offsets_wait_for_the_batch_and_chats_execute_in_order_with_a_bound() {
             calls.push(request.body_json().unwrap());
             if calls.len() == 1 {
                 ResponseTemplate::new(200).set_body_json(json!({"ok":true,"result":[
-                    event(10,1,"first"),event(11,1,"second"),event(20,2,"other")
+                    {"update_id":10,"edited_message":{"message_id":10,"date":1,"chat":{"id":1,"type":"private"},"text":"first"}},
+                    event(11,1,"second"),event(20,2,"other")
                 ]}))
             } else {
                 signal_stop.cancel();
@@ -104,10 +105,16 @@ async fn offsets_wait_for_the_batch_and_chats_execute_in_order_with_a_bound() {
     let state = Arc::new(State::default());
     let shared = state.clone();
     let router =
-        Router::with_state(shared).on_message(|ctx: MessageContext<Arc<State>>| async move {
+        Router::with_state(shared).on_update(|ctx: tg::UpdateContext<Arc<State>>| async move {
             let active = ctx.state().active.fetch_add(1, Ordering::SeqCst) + 1;
             ctx.state().peak.fetch_max(active, Ordering::SeqCst);
-            let text = ctx.message.text.as_deref().unwrap();
+            let message = ctx
+                .update
+                .message
+                .as_deref()
+                .or(ctx.update.edited_message.as_deref())
+                .unwrap();
+            let text = message.text.as_deref().unwrap();
             if text == "first" {
                 ctx.state().first_started.notify_one();
                 ctx.state().release.notified().await;
@@ -120,7 +127,14 @@ async fn offsets_wait_for_the_batch_and_chats_execute_in_order_with_a_bound() {
             Ok(())
         });
     let bot = fixture.bot.clone();
-    let task = tokio::spawn(async move { bot.run_polling_until(router, options(), stop).await });
+    let task = tokio::spawn(async move {
+        bot.run_polling_until(
+            router,
+            options().allowed_updates(["message", "edited_message"]),
+            stop,
+        )
+        .await
+    });
     tokio::time::timeout(Duration::from_secs(2), async {
         state.first_started.notified().await;
         state.other_done.notified().await;

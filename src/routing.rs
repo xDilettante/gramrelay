@@ -134,12 +134,15 @@ impl<S: Send + Sync + 'static> Router<S> {
     /// Unmatched events are intentionally ignored.
     pub async fn dispatch(&self, bot: &Bot, mut update: Update) -> Result<()> {
         self.validate()?;
+        if update.known_event_count() > 1 {
+            return Err(Error::local(ErrorKind::Validation, "update_kind"));
+        }
         for route in &self.routes {
             match route {
                 Route::Command(name, handler) if self.matches_command(&update, name) => {
                     if let Some(message) = update.message.take() {
                         return handler(MessageContext {
-                            message,
+                            message: *message,
                             bot: bot.clone(),
                             state: self.state.clone(),
                         })
@@ -149,7 +152,7 @@ impl<S: Send + Sync + 'static> Router<S> {
                 Route::Message(handler) => {
                     if let Some(message) = update.message.take() {
                         return handler(MessageContext {
-                            message,
+                            message: *message,
                             bot: bot.clone(),
                             state: self.state.clone(),
                         })
@@ -164,7 +167,7 @@ impl<S: Send + Sync + 'static> Router<S> {
                 {
                     if let Some(query) = update.callback_query.take() {
                         return handler(CallbackContext {
-                            query,
+                            query: *query,
                             bot: bot.clone(),
                             state: self.state.clone(),
                         })
@@ -174,7 +177,7 @@ impl<S: Send + Sync + 'static> Router<S> {
                 Route::AnyCallback(handler) => {
                     if let Some(query) = update.callback_query.take() {
                         return handler(CallbackContext {
-                            query,
+                            query: *query,
                             bot: bot.clone(),
                             state: self.state.clone(),
                         })
@@ -256,7 +259,7 @@ impl<S> MessageContext<S> {
         let mut request = self
             .bot
             .send_message(self.message.chat.id, text)
-            .reply_to(self.message.id);
+            .reply_to(self.message.message_id);
         if let Some(thread) = self.message.message_thread_id {
             request = request.message_thread_id(thread);
         }

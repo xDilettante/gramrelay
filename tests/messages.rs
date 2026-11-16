@@ -29,7 +29,7 @@ async fn sends_plain_text_and_decodes_a_typed_message() {
         .disable_notification(true)
         .await
         .unwrap();
-    assert_eq!(i64::from(result.id), 42);
+    assert_eq!(i64::from(result.message_id), 42);
     assert_eq!(result.chat.id, ChatId::from(-100123));
     assert_eq!(result.text.as_deref(), Some("Привет 👋"));
 }

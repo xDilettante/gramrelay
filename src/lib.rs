@@ -6,13 +6,14 @@
 //! # async fn example() -> tg::Result<()> {
 //! let bot = Bot::from_env("TELEGRAM_BOT_TOKEN")?;
 //! let sent = bot.send_message(ChatId::from(123456789), "Hello").await?;
-//! println!("message_id={}", i64::from(sent.id));
+//! println!("message_id={}", i64::from(sent.message_id));
 //! # Ok(())
 //! # }
 //! ```
 
 mod client;
 mod error;
+mod events;
 mod files;
 #[cfg(feature = "bot")]
 mod polling;

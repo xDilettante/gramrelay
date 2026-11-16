@@ -26,8 +26,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sent = bot
         .send_message(ChatId::from(1), "Hello from a local mock")
         .await?;
-    assert_eq!(i64::from(sent.id), 42);
+    assert_eq!(i64::from(sent.message_id), 42);
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
-    println!("Local mock passed: message_id={}", i64::from(sent.id));
+    println!(
+        "Local mock passed: message_id={}",
+        i64::from(sent.message_id)
+    );
     Ok(())
 }

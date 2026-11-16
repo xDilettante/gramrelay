@@ -25,7 +25,7 @@ async fn main() -> tg::Result<()> {
         .send_message(ChatId::from(-1001234567890), "Привет!")
         .disable_notification(true)
         .await?;
-    println!("message_id={}", i64::from(sent.id));
+    println!("message_id={}", i64::from(sent.message_id));
     Ok(())
 }
 ```
@@ -119,7 +119,7 @@ use tg::{Bot, ChatId, EffectOutcome};
 
 async fn example(bot: &Bot, chat: ChatId) -> tg::Result<()> {
     match bot.send_message(chat, "Отчёт").await {
-        Ok(sent) => println!("message_id={}", i64::from(sent.id)),
+        Ok(sent) => println!("message_id={}", i64::from(sent.message_id)),
         Err(error) if error.outcome() == EffectOutcome::Unknown => {
             // Сохранить неопределённую попытку в приложении; не отправлять заново вслепую.
             return Err(error);
@@ -164,7 +164,7 @@ Bot::builder(token) поддерживает:
 
 ## Закреплённая схема API
 
-В schema/bot-api.json сохранена структура Bot API 10.4: 193 метода, 425 типов и SHA-256 официального источника. Все методы доступны через bot.api(), структуры запросов — в api::methods, полные wire-типы — в api::types, каталог — в api::catalog. Корневые DTO пока остаются компактными проекциями для удобных методов и runtime. Необязательные объекты и варианты union используют Box для ограничения размера значений; конструкторы, setters и From принимают обычные значения.
+В schema/bot-api.json сохранена структура Bot API 10.4: 193 метода, 425 типов и SHA-256 официального источника. Все методы доступны через bot.api(), структуры запросов — в api::methods, полные wire-типы — в api::types, каталог — в api::catalog. Корневые Message/Update/User/Chat и результаты удобных методов используют эти же полные типы. Необязательные объекты и варианты union используют Box для ограничения размера значений; конструкторы, setters и From принимают обычные значения. Изменения API прототипа перечислены в [руководстве миграции](docs/MIGRATION.md).
 
 ```rust
 use tg::{Bot, ChatId, api::methods};
@@ -231,6 +231,6 @@ cargo run --example answer_callback -- "C:/path/update.json"
 cargo run --example polling
 ```
 
-Проверки выполнялись на Windows x86_64, Rust 1.98.0: 69 unit/integration-тестов и 3 doctest, а также 21 тест инструментов схемы. Структурные fixtures охватывают все 425 типов и 193 метода, включая обязательные поля и запрет неизвестных параметров запроса. MSRV и работа на Linux/macOS пока не подтверждены. Проверяются JSON/multipart, callback, файлы, локальные отказы, 429, 5xx, неизвестные ответы, тайм-ауты, ограничения нагрузки, redirects, секреты в диагностике, маршрутизация, polling, порядок событий и остановка. Живые вызовы Telegram при разработке не выполнялись.
+Проверки выполнялись на Windows x86_64, Rust 1.98.0: 75 unit/integration-тестов и 3 doctest, а также 21 тест инструментов схемы. Структурные fixtures охватывают все 425 типов и 193 метода, включая обязательные поля, запрет неизвестных параметров запроса и chat scope каждого известного события. MSRV и работа на Linux/macOS пока не подтверждены. Проверяются JSON/multipart, callback, файлы, локальные отказы, 429, 5xx, неизвестные ответы, тайм-ауты, ограничения нагрузки, redirects, секреты в диагностике, маршрутизация, polling, порядок событий и остановка. Живые вызовы Telegram при разработке не выполнялись.
 
-Следующие этапы: интеграция полного wire API с runtime, download/retry, постоянный журнал и webhook endpoint, CLI/MCP, затем отдельный MTProto-клиент. Полная цель остаётся активной. Источники контрактов: [docs/SOURCES.md](docs/SOURCES.md). План: [tasks/todo.md](tasks/todo.md).
+Следующие этапы: полный reply context, download/retry, постоянный журнал и webhook endpoint, CLI/MCP, затем отдельный MTProto-клиент. Полная цель остаётся активной. Источники контрактов: [docs/SOURCES.md](docs/SOURCES.md). План: [tasks/todo.md](tasks/todo.md).

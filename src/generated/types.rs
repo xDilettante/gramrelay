@@ -22626,6 +22626,40 @@ impl Update {
     pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {
         self.unknown_fields.as_map()
     }
+    /// The number of known event payloads. A valid update has at most one.
+    pub fn known_event_count(&self) -> usize {
+        [
+            self.message.is_some(),
+            self.edited_message.is_some(),
+            self.channel_post.is_some(),
+            self.edited_channel_post.is_some(),
+            self.business_connection.is_some(),
+            self.business_message.is_some(),
+            self.edited_business_message.is_some(),
+            self.deleted_business_messages.is_some(),
+            self.guest_message.is_some(),
+            self.message_reaction.is_some(),
+            self.message_reaction_count.is_some(),
+            self.inline_query.is_some(),
+            self.chosen_inline_result.is_some(),
+            self.callback_query.is_some(),
+            self.widget_query.is_some(),
+            self.shared_widget_query.is_some(),
+            self.shipping_query.is_some(),
+            self.pre_checkout_query.is_some(),
+            self.purchased_paid_media.is_some(),
+            self.poll.is_some(),
+            self.poll_answer.is_some(),
+            self.my_chat_member.is_some(),
+            self.chat_member.is_some(),
+            self.chat_join_request.is_some(),
+            self.chat_boost.is_some(),
+            self.removed_chat_boost.is_some(),
+            self.managed_bot.is_some(),
+            self.subscription.is_some(),
+            self.stopped_message_generation.is_some(),
+        ].into_iter().filter(|present| *present).count()
+    }
     pub fn message(mut self, value: Message) -> Self {
         self.message = Some(Box::new(value));
         self

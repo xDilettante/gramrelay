@@ -89,11 +89,29 @@ async fn invalid_callback_reply_is_not_sent() {
 fn unknown_update_fields_survive_but_malformed_callbacks_are_rejected() {
     let future = json!({"update_id":10,"future_event":{"value":42}});
     let update: Update = serde_json::from_value(future).unwrap();
-    assert_eq!(update.unknown_fields["future_event"]["value"], 42);
+    assert_eq!(update.unknown_fields()["future_event"]["value"], 42);
     assert!(
         serde_json::from_value::<Update>(
             json!({"update_id":11,"callback_query":{"id":"missing-required-fields"}})
         )
         .is_err()
     );
+}
+
+#[tokio::test]
+async fn a_false_callback_result_is_not_a_confirmed_success() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"ok": true, "result": false})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let error = bot(&server)
+        .answer_callback_query("cb".into())
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Decode);
+    assert_eq!(error.outcome(), EffectOutcome::Unknown);
 }

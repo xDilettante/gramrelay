@@ -215,17 +215,7 @@ enum Key {
 }
 
 fn key(update: &Update) -> Key {
-    if let Some(message) = &update.message {
-        return Key::Chat(message.chat.id);
-    }
-    if let Some(query) = &update.callback_query {
-        return query
-            .message
-            .as_ref()
-            .map_or(Key::Global, |m| Key::Chat(m.chat.id));
-    }
-    // No chat identifier is available for this event.
-    Key::Global
+    update.chat_id().map_or(Key::Global, Key::Chat)
 }
 
 async fn process_batch<S: Send + Sync + 'static>(

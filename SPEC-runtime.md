@@ -20,6 +20,14 @@ Module ID: bot-runtime. Depends on the existing client/protocol slice.
 
 Local mocks prove exact getUpdates JSON and typed decoding, context replies, bot-mention filtering, state and callbacks, per-chat order, bounded concurrency, offset barriers and gaps, no ack after failure, single ownership, webhook conflict and graceful cancellation. Malformed known events must still fail decoding; unknown nested fields survive.
 
+## Complete wire-model integration (C1)
+
+Root Message/Update/User/Chat/Document/CallbackQuery/WebhookInfo re-export the canonical generated DTOs. Remove the prototype projections. Preserve strong IDs; callers use message_id and read-only unknown_fields(). Optional nested objects are boxed. CallbackQuery.message distinguishes accessible and inaccessible messages. Document this pre-release source change and migrate every example/test.
+
+All known Update event fields participate in ambiguity checks, including typed Update values supplied directly to Router::dispatch. Malformed known events fail decoding instead of falling into unknown JSON. Unknown events remain lossless. known_event_count() is generated from the pinned event fields.
+
+Update::chat_id returns a reliable chat scope for typed message, callback (including inaccessible messages), reaction, membership, join, boost, widget and message-generation events. Account/global/inline events without a single chat scope return None; the existing global batch barrier remains. The managed poller's default subscriptions remain explicit message/callback; callers opt into additional kinds through allowed_updates. Full types must not silently change intake subscriptions or acknowledgement rules.
+
 ## Deferred integration
 
 Durable storage, webhook endpoint authentication and retry/backoff follow in subsequent tasks. They must be integrated before full-goal completion. This module does not claim exactly-once processing.

@@ -1,3 +1,4 @@
+pub use crate::api::types::{CallbackQuery, Chat, Document, Message, Update, User, WebhookInfo};
 use serde::{Deserialize, Serialize};
 
 /// A Telegram chat identifier, including negative group identifiers.
@@ -52,32 +53,6 @@ impl From<UserId> for i64 {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Chat {
-    pub id: ChatId,
-    #[serde(rename = "type")]
-    pub kind: String,
-    #[serde(flatten)]
-    pub unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
-}
-
-/// The supported subset of a Telegram message. New response fields are tolerated.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Message {
-    #[serde(rename = "message_id")]
-    pub id: MessageId,
-    pub date: i64,
-    pub chat: Chat,
-    pub text: Option<String>,
-    pub document: Option<Document>,
-    pub message_thread_id: Option<i64>,
-    pub business_connection_id: Option<String>,
-    #[serde(flatten)]
-    pub unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct FileId(String);
@@ -95,18 +70,6 @@ impl FileId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Document {
-    pub file_id: FileId,
-    pub file_unique_id: String,
-    pub file_name: Option<String>,
-    pub mime_type: Option<String>,
-    pub file_size: Option<u64>,
-    #[serde(flatten)]
-    pub unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// An opaque identifier supplied by Telegram for a callback query.
@@ -127,77 +90,6 @@ impl CallbackQueryId {
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct User {
-    pub id: UserId,
-    pub is_bot: bool,
-    pub first_name: String,
-    pub username: Option<String>,
-    #[serde(flatten)]
-    pub unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct CallbackQuery {
-    pub id: CallbackQueryId,
-    pub from: User,
-    pub chat_instance: String,
-    pub data: Option<String>,
-    pub message: Option<Message>,
-    pub inline_message_id: Option<String>,
-    #[serde(flatten)]
-    pub unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
-}
-
-/// Decode an update received by the host. This type does not start a receiver.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(try_from = "UpdateWire")]
-#[non_exhaustive]
-pub struct Update {
-    pub update_id: i64,
-    pub message: Option<Message>,
-    pub callback_query: Option<CallbackQuery>,
-    /// Preserve update fields not yet modeled by this prototype.
-    #[serde(flatten)]
-    pub unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
-}
-
-#[derive(Deserialize)]
-struct UpdateWire {
-    update_id: i64,
-    message: Option<Message>,
-    callback_query: Option<CallbackQuery>,
-    #[serde(flatten)]
-    unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
-}
-
-impl TryFrom<UpdateWire> for Update {
-    type Error = &'static str;
-    fn try_from(wire: UpdateWire) -> std::result::Result<Self, Self::Error> {
-        if wire.message.is_some() && wire.callback_query.is_some() {
-            return Err("an update cannot contain multiple known event kinds");
-        }
-        Ok(Self {
-            update_id: wire.update_id,
-            message: wire.message,
-            callback_query: wire.callback_query,
-            unknown_fields: wire.unknown_fields,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct WebhookInfo {
-    pub url: String,
-    pub has_custom_certificate: bool,
-    pub pending_update_count: u64,
-    #[serde(flatten)]
-    pub unknown_fields: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]

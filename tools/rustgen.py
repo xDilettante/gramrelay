@@ -214,6 +214,12 @@ class Model:
         lines += ['            unknown_fields: Default::default(),', '        }', '    }',
                   '    pub fn unknown_fields(&self) -> &std::collections::BTreeMap<String, serde_json::Value> {',
                   '        self.unknown_fields.as_map()', '    }']
+        if name == 'Update':
+            lines += ['    /// The number of known event payloads. A valid update has at most one.',
+                      '    pub fn known_event_count(&self) -> usize {', '        [']
+            lines += [f'            self.{field_name(f["name"])}.is_some(),'
+                      for f in fields if not f['required']]
+            lines += ['        ].into_iter().filter(|present| *present).count()', '    }']
         for f in fields:
             if not f['required']:
                 key = field_name(f['name'])
@@ -513,6 +519,21 @@ def generate_type_fixtures(schema):
         required = ', '.join(quoted(f['name']) for f in item.get('fields', []) if f['required'])
         lines.append(f'    check::<{name}>({quoted(name)}, {quoted(value)}, &[{required}]);')
     lines += ['}', '']
+    update = schema['types'].get('Update')
+    if update:
+        lines += ['#[test]', 'fn every_known_update_has_a_reviewed_single_chat_or_global_scope() {']
+        for field in update['fields']:
+            if field['required']:
+                continue
+            payload = fixture_value(schema, field['type'])
+            event = json.dumps({'update_id': 1, field['name']: payload}, ensure_ascii=False)
+            fields = schema['types'][field['type']['name']]['fields']
+            scoped = any(f['name'] == 'chat' and f['required'] and f['type'] == {'kind': 'named', 'name': 'Chat'} for f in fields)
+            expected = 'Some(crate::ChatId::from(1))' if scoped else 'None'
+            lines += [f'    let event: Update = serde_json::from_str({quoted(event)}).unwrap();',
+                      f'    assert_eq!(event.known_event_count(), 1, {quoted(field["name"])});',
+                      f'    assert_eq!(event.chat_id(), {expected}, {quoted(field["name"])});']
+        lines += ['}', '']
     return '\n'.join(lines)
 
 

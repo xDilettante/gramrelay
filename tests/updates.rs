@@ -34,8 +34,8 @@ async fn fetches_typed_updates_with_explicit_parameters() {
         .unwrap();
     assert_eq!(updates[0].update_id, 42);
     let message = updates[0].message.as_ref().unwrap();
-    assert_eq!(message.unknown_fields["future_message"]["value"], 1);
-    assert_eq!(message.chat.unknown_fields["future_chat"], "retained");
+    assert_eq!(message.unknown_fields()["future_message"]["value"], 1);
+    assert_eq!(message.chat.unknown_fields()["future_chat"], "retained");
     let saved = serde_json::to_value(&updates[0]).unwrap();
     assert_eq!(saved["message"]["future_message"]["value"], 1);
 }
