@@ -52,3 +52,4 @@ Unknown effect handling is our conservative contract, not a Telegram idempotency
 - Webhook secret header, accepted secret characters and non-2xx redelivery: https://core.telegram.org/bots/api#setwebhook
 - Optional HTTP adapter: https://docs.rs/axum/0.8.9/axum/; Router<Request<B>> and the recommendation to use Hyper for connection configuration verified in the installed 0.8.9 source.
 - Secret comparison uses the existing pinned subtle 2.6.1 implementation: https://docs.rs/subtle/2.6.1/subtle/trait.ConstantTimeEq.html
+- Configured HTTP/1 parser and graceful connection shutdown: Hyper 1.12.0 installed source src/server/conn/http1.rs (Builder timer/header_read_timeout/max_headers/max_buf_size, Connection::graceful_shutdown), canonical https://docs.rs/hyper/1.12.0/hyper/server/conn/http1/struct.Builder.html

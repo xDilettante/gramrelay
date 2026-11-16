@@ -15,7 +15,7 @@ const SECRET: &str = "SYNTHETIC_WEBHOOK_SECRET";
 const HEADER: &str = "x-telegram-bot-api-secret-token";
 struct Sink(Arc<AtomicUsize>);
 impl tg::webhook::WebhookSink for Sink {
-    fn ingest(&self, update: Update) -> WebhookFuture<'_> {
+    fn ingest(&self, update: Update, _deadline: tokio::time::Instant) -> WebhookFuture<'_> {
         Box::pin(async move {
             assert_eq!(update.update_id, 1);
             self.0.fetch_add(1, Ordering::SeqCst);

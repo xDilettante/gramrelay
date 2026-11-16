@@ -86,7 +86,8 @@ pub type WebhookFuture<'a> =
 /// Trusted host integration. Success must mean processed or durably committed, never just queued.
 /// The host coordinates sources, identity, deduplication and any separately owned worker tasks.
 pub trait WebhookSink: Send + Sync + 'static {
-    fn ingest(&self, update: Update) -> WebhookFuture<'_>;
+    /// Any backend-owned queue/worker must retain this original admission deadline.
+    fn ingest(&self, update: Update, deadline: tokio::time::Instant) -> WebhookFuture<'_>;
 }
 
 #[derive(Clone)]

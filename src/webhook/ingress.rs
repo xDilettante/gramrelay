@@ -167,8 +167,9 @@ impl WebhookRequest {
         }
         self.remaining()?;
         let sink = self.inner.sink.clone();
-        let work =
-            std::panic::AssertUnwindSafe(async move { sink.ingest(update).await }).catch_unwind();
+        let deadline = self.deadline;
+        let work = std::panic::AssertUnwindSafe(async move { sink.ingest(update, deadline).await })
+            .catch_unwind();
         tokio::select! {
             _=self.cancelled()=>Err(WebhookError::Unavailable),
             result=tokio::time::timeout_at(self.deadline,work)=>result.map_err(|_|WebhookError::Timeout)?.map_err(|_|WebhookError::Handler)?,

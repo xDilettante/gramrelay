@@ -15,7 +15,7 @@ use tg::{
 
 struct Sink(Arc<AtomicUsize>);
 impl WebhookSink for Sink {
-    fn ingest(&self, update: Update) -> WebhookFuture<'_> {
+    fn ingest(&self, update: Update, _deadline: tokio::time::Instant) -> WebhookFuture<'_> {
         Box::pin(async move {
             assert_eq!(update.update_id, 1);
             assert_eq!(update.unknown_fields()["future_event"]["private"], "keep");
@@ -40,7 +40,7 @@ async fn backend_completion_is_required_and_panics_or_cancellation_release_capac
         }
     }
     impl WebhookSink for Waiting {
-        fn ingest(&self, _: Update) -> WebhookFuture<'_> {
+        fn ingest(&self, _: Update, _deadline: tokio::time::Instant) -> WebhookFuture<'_> {
             Box::pin(async move {
                 self.active.fetch_add(1, Ordering::SeqCst);
                 let _active = Active(self.active.clone());
@@ -92,7 +92,7 @@ async fn backend_completion_is_required_and_panics_or_cancellation_release_capac
     ingress.begin(Some(secret().expose().as_bytes())).unwrap();
     struct Panicking;
     impl WebhookSink for Panicking {
-        fn ingest(&self, _: Update) -> WebhookFuture<'_> {
+        fn ingest(&self, _: Update, _deadline: tokio::time::Instant) -> WebhookFuture<'_> {
             panic!("synthetic private panic")
         }
     }
@@ -114,6 +114,37 @@ async fn backend_completion_is_required_and_panics_or_cancellation_release_capac
 }
 fn secret() -> WebhookSecret {
     WebhookSecret::new("SYNTHETIC_SECRET").unwrap()
+}
+
+#[tokio::test]
+async fn owned_backend_work_receives_the_original_deadline_after_body_wait() {
+    struct DeadlineSink(Arc<std::sync::Mutex<Option<tokio::time::Instant>>>);
+    impl WebhookSink for DeadlineSink {
+        fn ingest(&self, _: Update, deadline: tokio::time::Instant) -> WebhookFuture<'_> {
+            Box::pin(async move {
+                *self.0.lock().unwrap() = Some(deadline);
+                Ok(())
+            })
+        }
+    }
+    let observed = Arc::new(std::sync::Mutex::new(None));
+    let ingress = WebhookIngress::new(
+        secret(),
+        WebhookOptions::default().request_timeout(Duration::from_secs(1)),
+        DeadlineSink(observed.clone()),
+    )
+    .unwrap();
+    let before = tokio::time::Instant::now();
+    let request = ingress.begin(Some(secret().expose().as_bytes())).unwrap();
+    let after = tokio::time::Instant::now();
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    request.deliver(br#"{"update_id":1}"#).await.unwrap();
+    let deadline = observed.lock().unwrap().unwrap();
+    assert!(deadline >= before + Duration::from_secs(1));
+    assert!(
+        deadline <= after + Duration::from_secs(1),
+        "reading/queuing must not start a fresh backend deadline"
+    );
 }
 fn ingress(options: WebhookOptions) -> (WebhookIngress, Arc<AtomicUsize>) {
     let count = Arc::new(AtomicUsize::new(0));
