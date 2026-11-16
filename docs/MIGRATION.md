@@ -19,3 +19,9 @@ Polling subscriptions do not change implicitly. Add kinds explicitly with Pollin
 ## Rich text
 
 String inputs still send plain text. send_message, MessageContext.reply and SendDocument.caption accept Into<RichText>. Use EntityKind and byte ranges, styled fragments or try_from_entities; errors report safe field names. Explicit ParseMode delegates markup parsing and rendered length validation to Telegram, and cannot be combined with explicit entities.
+
+## Scoped replies
+
+MessageContext.event records provenance. Route other message variants explicitly with on_message_event(MessageEvent, handler) and opt into their polling subscriptions. Replies now preserve direct-message topics and ephemeral recipient/parent IDs in addition to chat, thread and business connection. Missing recipients and expired ephemeral parents fail locally; the expiry preflight uses the host UTC clock.
+
+CallbackContext.reply returns Result because inline and inaccessible callbacks do not provide readable message content. ephemeral_reply uses the callback ID without inventing a chat; answer() remains a separate required action. Guest contexts require answer_guest with a typed InlineQueryResult. Numeric guest chat IDs are not permission to send an ordinary bot message.

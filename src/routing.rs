@@ -8,10 +8,37 @@ type Handler<C> = Arc<dyn Fn(C) -> RequestFuture<'static, ()> + Send + Sync>;
 
 enum Route<S> {
     Command(String, Handler<MessageContext<S>>),
-    Message(Handler<MessageContext<S>>),
+    Message(MessageEvent, Handler<MessageContext<S>>),
     Callback(String, Handler<CallbackContext<S>>),
     AnyCallback(Handler<CallbackContext<S>>),
     Update(Handler<UpdateContext<S>>),
+}
+
+/// An explicit message-bearing update route. Polling subscriptions remain separately configured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MessageEvent {
+    Message,
+    EditedMessage,
+    ChannelPost,
+    EditedChannelPost,
+    BusinessMessage,
+    EditedBusinessMessage,
+    GuestMessage,
+}
+impl MessageEvent {
+    fn take(self, update: &mut Update) -> Option<Message> {
+        match self {
+            Self::Message => update.message.take(),
+            Self::EditedMessage => update.edited_message.take(),
+            Self::ChannelPost => update.channel_post.take(),
+            Self::EditedChannelPost => update.edited_channel_post.take(),
+            Self::BusinessMessage => update.business_message.take(),
+            Self::EditedBusinessMessage => update.edited_business_message.take(),
+            Self::GuestMessage => update.guest_message.take(),
+        }
+        .map(|message| *message)
+    }
 }
 
 /// Ordered routes with explicit shared state. Only the first matching handler runs.
@@ -59,13 +86,22 @@ impl<S: Send + Sync + 'static> Router<S> {
         ));
         self
     }
-    pub fn on_message<F, Fut>(mut self, handler: F) -> Self
+    pub fn on_message<F, Fut>(self, handler: F) -> Self
     where
         F: Fn(MessageContext<S>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<()>> + Send + 'static,
     {
-        self.routes
-            .push(Route::Message(Arc::new(move |ctx| Box::pin(handler(ctx)))));
+        self.on_message_event(MessageEvent::Message, handler)
+    }
+    pub fn on_message_event<F, Fut>(mut self, kind: MessageEvent, handler: F) -> Self
+    where
+        F: Fn(MessageContext<S>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<()>> + Send + 'static,
+    {
+        self.routes.push(Route::Message(
+            kind,
+            Arc::new(move |ctx| Box::pin(handler(ctx))),
+        ));
         self
     }
     pub fn callback<F, Fut>(mut self, data: impl Into<String>, handler: F) -> Self
@@ -143,16 +179,18 @@ impl<S: Send + Sync + 'static> Router<S> {
                     if let Some(message) = update.message.take() {
                         return handler(MessageContext {
                             message: *message,
+                            event: MessageEvent::Message,
                             bot: bot.clone(),
                             state: self.state.clone(),
                         })
                         .await;
                     }
                 }
-                Route::Message(handler) => {
-                    if let Some(message) = update.message.take() {
+                Route::Message(kind, handler) => {
+                    if let Some(message) = kind.take(&mut update) {
                         return handler(MessageContext {
-                            message: *message,
+                            message,
+                            event: *kind,
                             bot: bot.clone(),
                             state: self.state.clone(),
                         })
@@ -237,6 +275,7 @@ fn command(text: &str) -> Option<(&str, Option<&str>, &str)> {
 #[non_exhaustive]
 pub struct MessageContext<S = ()> {
     pub message: Message,
+    pub event: MessageEvent,
     bot: Bot,
     state: Arc<S>,
 }
@@ -254,19 +293,26 @@ impl<S> MessageContext<S> {
             .and_then(command)
             .map(|(_, _, args)| args)
     }
-    /// Reply in the originating message's chat, topic and business connection.
+    /// Reply with the original message scope. Guest messages require answer_guest.
     pub fn reply(&self, text: impl Into<crate::RichText>) -> SendMessage<'_> {
-        let mut request = self
-            .bot
-            .send_message(self.message.chat.id, text)
-            .reply_to(self.message.message_id);
-        if let Some(thread) = self.message.message_thread_id {
-            request = request.message_thread_id(thread);
+        let request = contextual_reply(&self.bot, &self.message, text.into());
+        if self.event == MessageEvent::GuestMessage {
+            request.invalid_context("guest_query_id")
+        } else {
+            request
         }
-        if let Some(connection) = &self.message.business_connection_id {
-            request = request.business_connection_id(connection);
-        }
-        request
+    }
+    pub fn answer_guest(
+        &self,
+        result: crate::api::types::InlineQueryResult,
+    ) -> Result<crate::api::Call<'_, crate::api::methods::AnswerGuestQuery>> {
+        let id = self
+            .message
+            .guest_query_id
+            .as_ref()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| Error::local(ErrorKind::Validation, "guest_query_id"))?;
+        Ok(self.bot.api().answer_guest_query(id.clone(), result))
     }
 }
 
@@ -286,6 +332,64 @@ impl<S> CallbackContext<S> {
     pub fn answer(&self) -> AnswerCallbackQuery<'_> {
         self.bot.answer_callback_query(self.query.id.clone())
     }
+    pub fn reply(&self, text: impl Into<crate::RichText>) -> Result<SendMessage<'_>> {
+        let message = self
+            .query
+            .message
+            .as_ref()
+            .and_then(|message| message.accessible())
+            .ok_or_else(|| Error::local(ErrorKind::Validation, "callback_message"))?;
+        Ok(contextual_reply(&self.bot, message, text.into()))
+    }
+    /// Send to the callback's caller; answer() is still required separately.
+    pub fn ephemeral_reply(&self, text: impl Into<crate::RichText>) -> Result<SendMessage<'_>> {
+        if self
+            .query
+            .message
+            .as_ref()
+            .is_some_and(|message| message.chat().is_direct_messages.is_some())
+        {
+            return Err(Error::local(ErrorKind::Validation, "ephemeral_chat"));
+        }
+        Ok(self.bot.reply_ephemeral(self.query.id.clone(), text))
+    }
+}
+
+fn contextual_reply<'a>(bot: &'a Bot, message: &Message, text: crate::RichText) -> SendMessage<'a> {
+    let mut request = bot.send_message(message.chat.id, text);
+    if message
+        .guest_query_id
+        .as_ref()
+        .is_some_and(|id| !id.is_empty())
+    {
+        return request.invalid_context("guest_query_id");
+    }
+    if let Some(id) = message.ephemeral_message_id {
+        if message.chat.is_direct_messages.is_some() {
+            return request.invalid_context("ephemeral_chat");
+        }
+        let Some(receiver) = &message.receiver_user else {
+            return request.invalid_context("receiver_user_id");
+        };
+        request = request
+            .reply_to_ephemeral(id)
+            .ephemeral_parent_date(message.date)
+            .ephemeral_message_parameters(
+                crate::api::types::EphemeralMessageParameters::new().receiver_user_id(receiver.id),
+            );
+    } else {
+        request = request.reply_to(message.message_id);
+    }
+    if let Some(thread) = message.message_thread_id {
+        request = request.message_thread_id(thread);
+    }
+    if let Some(connection) = &message.business_connection_id {
+        request = request.business_connection_id(connection);
+    }
+    if let Some(topic) = &message.direct_messages_topic {
+        request = request.direct_messages_topic_id(topic.topic_id);
+    }
+    request
 }
 
 #[non_exhaustive]

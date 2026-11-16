@@ -36,7 +36,7 @@ pub use files::InputFile;
 pub use polling::PollingOptions;
 pub use requests::{AnswerCallbackQuery, RequestFuture, SendDocument, SendMessage};
 #[cfg(feature = "bot")]
-pub use routing::{CallbackContext, MessageContext, Router, UpdateContext};
+pub use routing::{CallbackContext, MessageContext, MessageEvent, Router, UpdateContext};
 pub use text::{EntityKind, ParseMode, RichText};
 #[cfg(feature = "bot")]
 pub use tokio_util::sync::CancellationToken;

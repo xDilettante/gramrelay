@@ -28,6 +28,16 @@ All known Update event fields participate in ambiguity checks, including typed U
 
 Update::chat_id returns a reliable chat scope for typed message, callback (including inaccessible messages), reaction, membership, join, boost, widget and message-generation events. Account/global/inline events without a single chat scope return None; the existing global batch barrier remains. The managed poller's default subscriptions remain explicit message/callback; callers opt into additional kinds through allowed_updates. Full types must not silently change intake subscriptions or acknowledgement rules.
 
+## Complete reply context (C1)
+
+on_message_event(MessageEvent, handler) explicitly routes message variants, preserving their provenance in MessageContext.event. Commands/on_message retain their existing primary-message meaning. Replies copy chat, thread, business connection and direct-message topic; ephemeral parents use ReplyParameters.ephemeral_message_id instead of a placeholder message_id. The full ReplyParameters type is available to explicit callers.
+
+Replies to ephemeral parents must themselves remain ephemeral, retaining receiver_user_id; missing receiver information fails locally. At await, reject parent dates outside the documented 15-second reply window using the host UTC clock (including future dates). This prevents obvious stale-ID reuse; Telegram still decides delivery/expiry and there is no exactly-once or clock-synchronization guarantee. Never convert a failed ephemeral reply into a normal message.
+
+CallbackContext.reply returns an error for inline or inaccessible messages instead of guessing a chat. CallbackContext.ephemeral_reply uses its callback ID and no invented chat; known channel direct-message chats are rejected locally. Bot::reply_ephemeral exposes the same explicit callback-based operation. Both remain lazy and use the shared transport.
+
+Guest messages require answerGuestQuery, not an ordinary chat send. A guest MessageContext.reply fails locally; answer_guest accepts a typed InlineQueryResult and binds the guest query ID. No context failure may silently fall back to another chat or ordinary send.
+
 ## Deferred integration
 
 Durable storage, webhook endpoint authentication and retry/backoff follow in subsequent tasks. They must be integrated before full-goal completion. This module does not claim exactly-once processing.

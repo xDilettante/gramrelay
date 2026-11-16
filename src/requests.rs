@@ -1,6 +1,7 @@
 use crate::{
     Bot, CallbackQueryId, ChatId, Error, ErrorKind, InlineKeyboardMarkup, Message, MessageId,
-    ParseMode, Result, RichText, api::types::MessageEntity,
+    ParseMode, Result, RichText,
+    api::types::{EphemeralMessageParameters, MessageEntity, ReplyParameters},
 };
 use serde::Serialize;
 use std::{
@@ -15,11 +16,14 @@ pub type RequestFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 
 pub struct SendMessage<'a> {
     bot: &'a Bot,
     params: MessageParams,
+    context_error: Option<&'static str>,
+    ephemeral_parent_date: Option<i64>,
 }
 
 #[derive(Serialize)]
 struct MessageParams {
-    chat_id: ChatId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_id: Option<ChatId>,
     text: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     entities: Vec<MessageEntity>,
@@ -30,23 +34,37 @@ struct MessageParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     reply_markup: Option<InlineKeyboardMarkup>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    reply_parameters: Option<ReplyParams>,
+    reply_parameters: Option<Box<ReplyParameters>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     message_thread_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     business_connection_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    direct_messages_topic_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ephemeral_message_parameters: Option<Box<EphemeralMessageParameters>>,
 }
 
-#[derive(Serialize)]
-struct ReplyParams {
-    message_id: MessageId,
+impl std::fmt::Debug for SendMessage<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SendMessage").finish_non_exhaustive()
+    }
 }
 
 impl<'a> SendMessage<'a> {
     pub(crate) fn new(bot: &'a Bot, chat_id: ChatId, text: RichText) -> Self {
+        Self::with_target(bot, Some(chat_id), text)
+    }
+    pub(crate) fn for_callback(bot: &'a Bot, id: CallbackQueryId, text: RichText) -> Self {
+        Self::with_target(bot, None, text)
+            .ephemeral_message_parameters(EphemeralMessageParameters::new().callback_query_id(id))
+    }
+    fn with_target(bot: &'a Bot, chat_id: Option<ChatId>, text: RichText) -> Self {
         let (text, entities) = text.into_parts();
         Self {
             bot,
+            context_error: None,
+            ephemeral_parent_date: None,
             params: MessageParams {
                 chat_id,
                 text,
@@ -57,6 +75,8 @@ impl<'a> SendMessage<'a> {
                 reply_parameters: None,
                 message_thread_id: None,
                 business_connection_id: None,
+                direct_messages_topic_id: None,
+                ephemeral_message_parameters: None,
             },
         }
     }
@@ -73,7 +93,24 @@ impl<'a> SendMessage<'a> {
         self
     }
     pub fn reply_to(mut self, id: MessageId) -> Self {
-        self.params.reply_parameters = Some(ReplyParams { message_id: id });
+        self.params.reply_parameters = Some(Box::new(ReplyParameters::new().message_id(id)));
+        self
+    }
+    pub fn reply_to_ephemeral(mut self, id: i64) -> Self {
+        self.params.reply_parameters =
+            Some(Box::new(ReplyParameters::new().ephemeral_message_id(id)));
+        self
+    }
+    pub fn reply_parameters(mut self, params: ReplyParameters) -> Self {
+        self.params.reply_parameters = Some(Box::new(params));
+        self
+    }
+    pub fn direct_messages_topic_id(mut self, id: i64) -> Self {
+        self.params.direct_messages_topic_id = Some(id);
+        self
+    }
+    pub fn ephemeral_message_parameters(mut self, params: EphemeralMessageParameters) -> Self {
+        self.params.ephemeral_message_parameters = Some(Box::new(params));
         self
     }
     pub fn message_thread_id(mut self, id: i64) -> Self {
@@ -84,6 +121,14 @@ impl<'a> SendMessage<'a> {
         self.params.business_connection_id = Some(id.into());
         self
     }
+    pub(crate) fn invalid_context(mut self, field: &'static str) -> Self {
+        self.context_error = Some(field);
+        self
+    }
+    pub(crate) fn ephemeral_parent_date(mut self, date: i64) -> Self {
+        self.ephemeral_parent_date = Some(date);
+        self
+    }
 }
 
 impl<'a> IntoFuture for SendMessage<'a> {
@@ -91,6 +136,50 @@ impl<'a> IntoFuture for SendMessage<'a> {
     type IntoFuture = RequestFuture<'a, Message>;
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move {
+            if let Some(field) = self.context_error {
+                return Err(Error::local(ErrorKind::Validation, field));
+            }
+            if let Some(date) = self.ephemeral_parent_date {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|_| Error::local(ErrorKind::Configuration, "clock"))?
+                    .as_secs();
+                if date < 0 || now < date as u64 || now.saturating_sub(date as u64) >= 15 {
+                    return Err(Error::local(
+                        ErrorKind::Validation,
+                        "ephemeral_message_expired",
+                    ));
+                }
+            }
+            if let Some(params) = &self.params.ephemeral_message_parameters
+                && (params.receiver_user_id.is_none() && params.callback_query_id.is_none()
+                    || params.receiver_user_id.is_some_and(|id| i64::from(id) <= 0)
+                    || params
+                        .callback_query_id
+                        .as_ref()
+                        .is_some_and(CallbackQueryId::is_empty))
+            {
+                return Err(Error::local(
+                    ErrorKind::Validation,
+                    "ephemeral_message_parameters",
+                ));
+            }
+            if let Some(reply) = &self.params.reply_parameters
+                && (reply.message_id.is_some() == reply.ephemeral_message_id.is_some()
+                    || reply.ephemeral_message_id.is_some()
+                        && self.params.ephemeral_message_parameters.is_none())
+            {
+                return Err(Error::local(ErrorKind::Validation, "reply_parameters"));
+            }
+            if self.params.chat_id.is_none()
+                && self
+                    .params
+                    .ephemeral_message_parameters
+                    .as_ref()
+                    .is_none_or(|params| params.callback_query_id.is_none())
+            {
+                return Err(Error::local(ErrorKind::Validation, "chat_id"));
+            }
             validate_content(&self.params.text, "text", 1, 4096, self.params.parse_mode)?;
             validate_parse_mode(self.params.parse_mode, &self.params.entities)?;
             if let Some(keyboard) = &self.params.reply_markup {

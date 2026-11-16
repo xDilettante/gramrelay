@@ -4,7 +4,7 @@ See tasks/goal.md for completion gates and docs/ARCHITECTURE.md for module bound
 
 1. bot-runtime: getMe/getUpdates/webhook info, typed contexts/router, bounded per-chat polling, graceful stop and failure recovery.
 2. protocol: snapshot official API documentation, build a reproducible schema importer/generator, classify method effects and verify all types/methods.
-3. client: full request surface, rich text/entities, upload/download variants, safe retry metadata, limits and observation hooks.
+3. client and test-kit: full request surface, rich text/entities, upload/download variants, safe retry metadata, limits, observation hooks and the public in-memory scripted transport.
 4. journal: SQLite operation/update records, atomic claims, payload hashes, authorization ownership, durable acknowledgement and retention.
 5. bot-runtime: authenticated webhooks, durable ingestion, duplicate handling and multiple-executor safety.
 6. agent-runtime: shared authorized executor, CLI JSON and MCP stdio, file handles, scoped grants and cost/quantity limits.

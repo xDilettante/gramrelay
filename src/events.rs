@@ -22,7 +22,8 @@ impl MaybeInaccessibleMessage {
 }
 
 impl Update {
-    /// A reliable event chat scope. Account/inline/unknown or ambiguous events have no single scope.
+    /// A chat scope for ordering, not an access grant. Account/inline/unknown or ambiguous events have no single scope.
+    /// Guest chat identifiers must not be treated as membership in an ordinary bot chat.
     pub fn chat_id(&self) -> Option<ChatId> {
         if self.known_event_count() != 1 {
             return None;

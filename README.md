@@ -148,6 +148,8 @@ let text = RichText::new("Отчёт: ")
 
 entity(range, kind) принимает байтовый диапазон Rust-строки; try_from_entities проверяет готовые UTF-16 spans. Helper проверяет границы, вложенность и metadata; его Debug скрывает текст. text()/entities()/into_parts() позволяют использовать результат в api::methods. Для явной разметки есть parse_mode(ParseMode::Html/MarkdownV2/Markdown); смешивание parse_mode и entities даёт локальную ошибку. Длину отрисованной разметки проверяет Telegram. Это отдельный helper от дерева api::types::RichText для sendRichMessage.
 
+on_message_event(MessageEvent, handler) подключает business/edited/channel/guest-сообщения явно; polling-подписки задаются отдельно. ctx.reply сохраняет chat/thread/business/direct-message topic и эфемерного получателя. Для callback есть reply() с проверкой доступности сообщения и ephemeral_reply() по ID callback; answer() вызывается отдельно. Guest-сообщения требуют answer_guest(). Ошибки контекста не превращаются в обычную отправку в другой чат. Короткоживущие ephemeral ID проходят проверку 15-секундного окна по UTC-часам компьютера перед отправкой; доставка остаётся решением Telegram.
+
 Bot::builder(token) поддерживает:
 
 | Настройка | Значение по умолчанию |
@@ -231,6 +233,6 @@ cargo run --example answer_callback -- "C:/path/update.json"
 cargo run --example polling
 ```
 
-Проверки выполнялись на Windows x86_64, Rust 1.98.0: 75 unit/integration-тестов и 3 doctest, а также 21 тест инструментов схемы. Структурные fixtures охватывают все 425 типов и 193 метода, включая обязательные поля, запрет неизвестных параметров запроса и chat scope каждого известного события. MSRV и работа на Linux/macOS пока не подтверждены. Проверяются JSON/multipart, callback, файлы, локальные отказы, 429, 5xx, неизвестные ответы, тайм-ауты, ограничения нагрузки, redirects, секреты в диагностике, маршрутизация, polling, порядок событий и остановка. Живые вызовы Telegram при разработке не выполнялись.
+Проверки выполнялись на Windows x86_64, Rust 1.98.0: 82 unit/integration-теста и 3 doctest, а также 21 тест инструментов схемы. Структурные fixtures охватывают все 425 типов и 193 метода, включая обязательные поля, запрет неизвестных параметров запроса и chat scope каждого известного события. MSRV и работа на Linux/macOS пока не подтверждены. Проверяются JSON/multipart, callback, файлы, локальные отказы, 429, 5xx, неизвестные ответы, тайм-ауты, ограничения нагрузки, redirects, секреты в диагностике, маршрутизация, polling, порядок событий и остановка. Живые вызовы Telegram при разработке не выполнялись.
 
-Следующие этапы: полный reply context, download/retry, постоянный журнал и webhook endpoint, CLI/MCP, затем отдельный MTProto-клиент. Полная цель остаётся активной. Источники контрактов: [docs/SOURCES.md](docs/SOURCES.md). План: [tasks/todo.md](tasks/todo.md).
+Следующие этапы: контекстные файлы и download/retry, постоянный журнал и webhook endpoint, CLI/MCP, затем отдельный MTProto-клиент. Полная цель остаётся активной. Источники контрактов: [docs/SOURCES.md](docs/SOURCES.md). План: [tasks/todo.md](tasks/todo.md).

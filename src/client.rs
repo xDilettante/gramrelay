@@ -73,6 +73,14 @@ impl Bot {
     pub fn send_message(&self, chat: ChatId, text: impl Into<RichText>) -> SendMessage<'_> {
         SendMessage::new(self, chat, text.into())
     }
+    /// Send an ephemeral reply visible to the callback's caller. Answer the callback separately.
+    pub fn reply_ephemeral(
+        &self,
+        id: CallbackQueryId,
+        text: impl Into<RichText>,
+    ) -> SendMessage<'_> {
+        SendMessage::for_callback(self, id, text.into())
+    }
 
     /// Answer a callback from an update already received by the host.
     pub fn answer_callback_query(&self, id: CallbackQueryId) -> AnswerCallbackQuery<'_> {
