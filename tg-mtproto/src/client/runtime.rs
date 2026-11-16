@@ -14,7 +14,30 @@ pub(super) struct Context {
     deadline: tokio::time::Instant,
 }
 impl Context {
+    // The job state, rather than the action future, owns admission guards through
+    // final outcome classification. Releasing a writer can wake another thread.
+    pub async fn hold_authorization_read(&self, gate: Arc<tokio::sync::RwLock<()>>) {
+        let guard = AuthorizationGuard::Read {
+            _guard: gate.read_owned().await,
+        };
+        *self
+            .state
+            .authorization
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(guard);
+    }
+    pub async fn hold_authorization_write(&self, gate: Arc<tokio::sync::RwLock<()>>) {
+        let guard = AuthorizationGuard::Write {
+            _guard: gate.write_owned().await,
+        };
+        *self
+            .state
+            .authorization
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(guard);
+    }
     pub async fn invoke<R: tl::RemoteCall>(&self, body: Vec<u8>) -> Result<R::Return> {
+        let mut body = Zeroizing::new(body);
         let dc = self
             .handle
             .session
@@ -34,11 +57,12 @@ impl Context {
         {
             return Err(error(ClientErrorKind::Closed, Outcome::NotSent));
         }
-        let bytes = self
-            .handle
-            .raw_invoke_in_dc(dc, body)
-            .await
-            .map_err(super::error::invocation)?;
+        let bytes = Zeroizing::new(
+            self.handle
+                .raw_invoke_in_dc(dc, std::mem::take(&mut *body))
+                .await
+                .map_err(super::error::invocation)?,
+        );
         self.handle
             .session
             .home_dc_id()
@@ -57,14 +81,40 @@ impl Context {
 }
 type Reply = Arc<Mutex<Option<oneshot::Sender<Result<Value>>>>>;
 type Slot = Arc<Mutex<Option<OwnedSemaphorePermit>>>;
+enum AuthorizationGuard {
+    Read {
+        _guard: tokio::sync::OwnedRwLockReadGuard<()>,
+    },
+    Write {
+        _guard: tokio::sync::OwnedRwLockWriteGuard<()>,
+    },
+}
 #[derive(Default)]
 struct CallState {
     // Queue admission and sealing share one linearization point. Once backend
     // admission is attempted, only conservative outcomes may be reported.
     phase: std::sync::atomic::AtomicU8,
     done: AtomicBool,
+    authorization: Mutex<Option<AuthorizationGuard>>,
 }
 impl CallState {
+    fn authorization_transition(&self) -> bool {
+        matches!(
+            self.authorization
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref(),
+            Some(AuthorizationGuard::Write { .. })
+        )
+    }
+    fn release_authorization(&self) {
+        let guard = self
+            .authorization
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        drop(guard);
+    }
     fn seal(&self) -> Outcome {
         match self
             .phase
@@ -233,16 +283,21 @@ pub(super) async fn run(
                 let session_health=context.handle.session.clone();
                 #[cfg(test)]
                 let after_reply=options.after_reply;
+                #[cfg(test)]
+                let before_fence=options.before_fence;
                 jobs.spawn(async move {
                     let result=if tokio::time::Instant::now()>=call.deadline {Err(error(ClientErrorKind::Timeout,state.seal()))}
                         else if shared.closed.load(Ordering::Acquire) {Err(error(ClientErrorKind::Closed,state.seal()))}
                         else {(call.action)(context).await};
+                    #[cfg(test)]
+                    if let Some(delay)=before_fence {tokio::time::sleep(delay).await;}
                     let result=if session_health.home_dc_id().is_err() {Err(error(ClientErrorKind::Session,state.seal()))}else{result};
                     let result=if tokio::time::Instant::now()>=call.deadline {Err(error(ClientErrorKind::Timeout,state.seal()))}else{result};
                     state.done.store(true,Ordering::Release);
-                    let fence=result.as_ref().err().filter(|failure|failure.kind()==ClientErrorKind::Timeout || (failure.outcome()==Outcome::Unknown && matches!(failure.kind(),ClientErrorKind::Backend|ClientErrorKind::Session|ClientErrorKind::Decode|ClientErrorKind::Capacity))).map(ClientError::kind);
+                    let fence=result.as_ref().err().filter(|failure|failure.kind()==ClientErrorKind::Timeout || (failure.outcome()==Outcome::Unknown && (state.authorization_transition() || matches!(failure.kind(),ClientErrorKind::Backend|ClientErrorKind::Session|ClientErrorKind::Decode|ClientErrorKind::Capacity|ClientErrorKind::IdentityMismatch)))).map(ClientError::kind);
                     if fence.is_some() {shared.closed.store(true,Ordering::Release);}
-                    else {
+                    state.release_authorization();
+                    if fence.is_none() {
                         // The backend has completed. Free admission before the caller
                         // observes its receipt so sequential calls cannot spuriously
                         // fail capacity. Fenced work stays owned through driver join.

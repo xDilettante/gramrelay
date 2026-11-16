@@ -1,5 +1,7 @@
 use super::*;
 use tl::{Deserializable, Identifiable, Serializable};
+#[path = "auth_tests.rs"]
+mod auth;
 
 async fn session() -> (tempfile::TempDir, Session) {
     let directory = tempfile::tempdir().unwrap();

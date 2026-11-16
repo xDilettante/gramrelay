@@ -59,6 +59,33 @@ impl Session {
     pub fn binding(&self) -> &SessionBinding {
         &self.inner.database.binding
     }
+    pub(crate) async fn remember_verified(
+        &self,
+        identity: AccountIdentity,
+        peer: grammers_session::types::PeerInfo,
+    ) -> Result<()> {
+        use grammers_session::types::PeerInfo;
+        if !matches!(&peer, PeerInfo::User {id, bot:Some(bot), is_self:Some(true), ..} if *id==identity.id.get() && *bot==(identity.kind==AccountKind::Bot))
+        {
+            return Err(error(SessionErrorKind::InvalidInput));
+        }
+        self.inner.database.call(move |native| {
+            native.mutate(|snapshot| {
+                if snapshot.account.is_some_and(|stored| stored != identity)
+                    || snapshot.peers.iter().any(|peer| matches!(peer, PeerInfo::User {id, is_self:Some(true), ..} if *id!=identity.id.get()))
+                {
+                    return Err(error(SessionErrorKind::Authentication));
+                }
+                if let Some(stored) = snapshot.peers.iter_mut().find(|peer| matches!(peer, PeerInfo::User {id,..} if *id==identity.id.get())) {
+                    *stored = peer;
+                } else {
+                    snapshot.peers.push(peer);
+                }
+                snapshot.account = Some(identity);
+                Ok(())
+            })
+        }).await
+    }
     /// Stop admission on all clones, drain native jobs and release ownership.
     /// Returns `Owned` while attached to a Client; use `Client::close` instead.
     pub async fn close(&self) -> Result<()> {

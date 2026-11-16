@@ -1,8 +1,10 @@
+mod auth;
 mod error;
 mod runtime;
 #[cfg(test)]
 mod tests;
 use crate::{Session, session::ClientClaim};
+pub use auth::{AppCredentials, BotToken};
 pub use error::{ClientError, ClientErrorKind, Outcome};
 use error::{Result, error};
 use grammers_mtsender::{ConnectionParams, NoRetries, SenderPool};
@@ -19,11 +21,14 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch};
+use zeroize::Zeroizing;
 
 #[derive(Clone, Debug)]
 pub struct ClientOptions {
     #[cfg(test)]
     after_reply: Option<Duration>,
+    #[cfg(test)]
+    before_fence: Option<Duration>,
     max_pending: usize,
     timeout: Duration,
     max_request_bytes: usize,
@@ -34,6 +39,8 @@ impl Default for ClientOptions {
         Self {
             #[cfg(test)]
             after_reply: None,
+            #[cfg(test)]
+            before_fence: None,
             max_pending: 16,
             timeout: Duration::from_secs(30),
             max_request_bytes: grammers_mtproto::MAX_REQUEST_SIZE.min(1024 * 1024),
@@ -95,6 +102,7 @@ struct Shared {
 }
 struct Core {
     session: Session,
+    authorization: Arc<tokio::sync::RwLock<()>>,
     options: ClientOptions,
     startup: Mutex<Option<Startup>>,
     sender: mpsc::Sender<Call>,
@@ -187,6 +195,7 @@ impl Client {
         Ok(Self {
             inner: Arc::new(Core {
                 session,
+                authorization: Arc::new(tokio::sync::RwLock::new(())),
                 slots: Arc::new(Semaphore::new(options.max_pending)),
                 options,
                 startup: Mutex::new(Some(Startup {
@@ -207,25 +216,11 @@ impl Client {
         R::Return: Send + 'static,
     {
         let reservation = self.reserve()?;
-        let mut bytes = Vec::new();
-        let mut overflow = false;
-        request.serialize(&mut |part| {
-            if overflow
-                || bytes
-                    .len()
-                    .checked_add(part.len())
-                    .is_none_or(|len| len > self.inner.options.max_request_bytes)
-            {
-                overflow = true;
-                return;
-            }
-            bytes.extend_from_slice(part);
-        });
-        if overflow || bytes.len() < 4 || !bytes.len().is_multiple_of(4) {
-            return Err(error(ClientErrorKind::InvalidInput, Outcome::NotSent));
-        }
+        let mut bytes = encode_request(request, self.inner.options.max_request_bytes)?;
+        let authorization = self.inner.authorization.clone();
         self.submit(reservation, move |context| async move {
-            context.invoke::<R>(bytes).await
+            context.hold_authorization_read(authorization).await;
+            context.invoke::<R>(std::mem::take(&mut *bytes)).await
         })
         .await
     }
@@ -312,4 +307,25 @@ impl Client {
                 .map_err(|_| error(ClientErrorKind::Backend, Outcome::Unknown))?;
         }
     }
+}
+
+fn encode_request<R: tl::Serializable>(request: &R, limit: usize) -> Result<Zeroizing<Vec<u8>>> {
+    let mut bytes = Zeroizing::new(Vec::new());
+    let mut overflow = false;
+    request.serialize(&mut |part| {
+        if overflow
+            || bytes
+                .len()
+                .checked_add(part.len())
+                .is_none_or(|len| len > limit)
+        {
+            overflow = true;
+        } else {
+            bytes.extend_from_slice(part);
+        }
+    });
+    if overflow || bytes.len() < 4 || !bytes.len().is_multiple_of(4) {
+        return Err(error(ClientErrorKind::InvalidInput, Outcome::NotSent));
+    }
+    Ok(bytes)
 }

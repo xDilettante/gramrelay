@@ -2,7 +2,8 @@
 
 Separate MTProto package, currently implementing M2. Encrypted local session
 storage and the owned network Client with typed raw TL calls are implemented.
-Authentication, common actions, files and observable update recovery remain open.
+Bot login and live identity verification are also available. Interactive user
+authentication, common actions, files and observable update recovery remain open.
 This package does not route MTProto operations through the Bot API.
 
 ```rust,no_run
@@ -59,6 +60,17 @@ remains a release gate.
 Build this development package from the repository workspace. Its hardened
 grammers dependency graph currently uses workspace patch overrides; external
 distribution is still a release gate. Do not remove those overrides.
+
+`verify_account(expected)` queries the current self user and checks its ID/kind
+against the host expectation and remembered account. It commits matching identity
+and peer metadata together before returning. `sign_in_bot(credentials, token,
+expected)` accepts host-only `AppCredentials` and `BotToken`, checks the app
+binding/token prefix and validates the returned self identity. Credential Debug
+is redacted; no plaintext getter or serialization is provided. Authorization
+transitions exclude raw/identity jobs until their final outcome is classified.
+An unknown transition fences the generation before waking waiting jobs. The
+phone/code, 2FA, DC migration and quarantined logout flows remain in development;
+see SPEC-mtproto-auth.md. Agent tools cannot initiate login.
 
 Snapshots use full-round XChaCha20Poly1305 with a fresh OS nonce and authenticated
 profile, application ID, storage ID and revision. A native SQLite worker commits

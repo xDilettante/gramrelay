@@ -22,6 +22,7 @@ pub enum ClientErrorKind {
     Rpc,
     FloodWait,
     Decode,
+    IdentityMismatch,
 }
 
 /// Static diagnostic metadata. No upstream error or remote description is retained.
@@ -57,6 +58,7 @@ impl ClientError {
             ClientErrorKind::Rpc => "mtproto_rpc",
             ClientErrorKind::FloodWait => "mtproto_flood_wait",
             ClientErrorKind::Decode => "mtproto_decode",
+            ClientErrorKind::IdentityMismatch => "mtproto_identity_mismatch",
         }
     }
 }
