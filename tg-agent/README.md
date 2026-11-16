@@ -38,7 +38,24 @@ cargo run --locked --offline -p tg-agent --features executor --example authorize
 cargo run --locked --offline -p tg-agent --features executor --example authorized_document
 ```
 
-Офлайн-пример:
+## Общий JSON-интерфейс (A2 в работе)
+
+tools::ToolSession создаётся доверенным Rust-хостом из Executor и Principal. execute_for дополнительно связывает выбранное имя инструмента с Request.call.tool до допуска; входной JSON не получает прав задавать principal, grant или approval. Host-only approve хранит точное подтверждение запроса; clear_approvals удаляет сохранённые подтверждения для последующих вызовов. Для отзыва capability, уже переданного выполняющемуся вызову, нужно изменить/отозвать grant в PolicyStore; допущенный удалённый эффект нельзя отменить. Текущие права и ревизия политики проверяются исполнителем и при чтении кеша.
+
+Ответ имеет schema_version=1, ok и result/dry_run/error. ok=true означает получение результата исполнителя: для записи нужно проверить operation.state и result_availability. Ошибки содержат статический code/message и automatic_retry_allowed=false; ошибки проверенной записи сохраняют operation_id и next_action=get_operation. Сбой вывода после действия также сохраняет ключ и unknown; Debug/Display не показывают payload или идентификаторы.
+
+Опция cli включает встроенные cli::run_json/serve_jsonl и бинарный tg-agent для tools/schema. NDJSON обрабатывается последовательно; кадр до 65536 байтов, output по умолчанию до 8 MiB. Слишком большой кадр закрывает поток, обычный некорректный кадр получает ошибку без выполнения. Самостоятельные команды run/serve с конфигурацией хоста ещё не реализованы; A2 остаётся открытым, MCP — следующий модуль.
+
+```powershell
+cargo run --locked --offline -p tg-agent --features cli --bin tg-agent -- tools
+cargo run --locked --offline -p tg-agent --features cli --bin tg-agent -- schema request
+cargo run --locked --offline -p tg-agent --features cli --example agent_json
+python tools/agent_schema.py check
+```
+
+Каталог содержит все восемь инструментов, JSON Schema draft 2020-12, эффекты/правила повторов и примеры. Схемы schemas/v1 воспроизводятся командой python tools/agent_schema.py generate через тот же бинарник. JSON Schema проверяет структуру и точные границы строковых i64 ID; байтовые лимиты, дубликаты JSON-полей, доступность references и grants окончательно проверяются в runtime. Discovery не читает токены/БД и не выполняет RPC. Пример agent_json использует синтетический транспорт и выводит два JSON-ответа с одной отправкой.
+
+## Использование журнала
 
 ```powershell
 cargo run --locked --offline -p tg-agent --example journal

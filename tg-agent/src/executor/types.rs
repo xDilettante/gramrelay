@@ -459,7 +459,7 @@ impl Request {
         }
         Ok(())
     }
-    pub(super) fn fingerprint(&self) -> [u8; 32] {
+    pub(crate) fn fingerprint(&self) -> [u8; 32] {
         // Fixed struct/variant ordering, validated immutable fields and normalized defaults.
         // Includes operation_id so one approval cannot authorize another write key.
         Sha256::digest(serde_json::to_vec(self).expect("validated request serialization")).into()

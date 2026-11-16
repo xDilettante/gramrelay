@@ -53,3 +53,7 @@ Unknown effect handling is our conservative contract, not a Telegram idempotency
 - Optional HTTP adapter: https://docs.rs/axum/0.8.9/axum/; Router<Request<B>> and the recommendation to use Hyper for connection configuration verified in the installed 0.8.9 source.
 - Secret comparison uses the existing pinned subtle 2.6.1 implementation: https://docs.rs/subtle/2.6.1/subtle/trait.ConstantTimeEq.html
 - Configured HTTP/1 parser and graceful connection shutdown: Hyper 1.12.0 installed source src/server/conn/http1.rs (Builder timer/header_read_timeout/max_headers/max_buf_size, Connection::graceful_shutdown), canonical https://docs.rs/hyper/1.12.0/hyper/server/conn/http1/struct.Builder.html
+
+- Agent JSON framing: Tokio 1.54.1 installed source src/io/util/async_buf_read_ext.rs (fill_buf/consume, EOF and cancel safety), canonical https://docs.rs/tokio/1.54.1/tokio/io/trait.AsyncBufReadExt.html#method.fill_buf (web fetch unavailable; pinned source checked).
+- Independent agent schema validation: jsonschema 0.61.2 installed source src/lib.rs validator_for / Validator::new; dev-only, default external HTTP/file resolving disabled. https://docs.rs/jsonschema/0.61.2/jsonschema/fn.validator_for.html (web fetch unavailable; pinned source checked).
+- JSON Schema draft 2020-12 validation keywords, Unicode string length and non-anchored pattern semantics: https://json-schema.org/draft/2020-12/json-schema-validation
