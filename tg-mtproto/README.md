@@ -69,8 +69,19 @@ binding/token prefix and validates the returned self identity. Credential Debug
 is redacted; no plaintext getter or serialization is provided. Authorization
 transitions exclude raw/identity jobs until their final outcome is classified.
 An unknown transition fences the generation before waking waiting jobs. The
-phone/code, 2FA, DC migration and quarantined logout flows remain in development;
-see SPEC-mtproto-auth.md. Agent tools cannot initiate login.
+phone/code, 2FA and DC migration flows remain in development; see
+SPEC-mtproto-auth.md. Agent tools cannot initiate login.
+
+`sign_out(expected)` verifies the live account, durably quarantines the session
+before LogOut and ends the generation. Success waits for joined network jobs,
+all admitted storage writes and final credential clearing. Unknown/refused or
+timed-out logout leaves durable quarantine. `Session::is_quarantined` reports
+that local policy state; ordinary Client construction/admission then refuses.
+After closing/reopening, a trusted host may explicitly call
+`forget_quarantined_authorization` to discard local keys and checkpoints. This
+does not revoke unresolved remote authorizations and never replays logout.
+See SPEC-mtproto-logout.md. Snapshot payload v2 requires quarantine state; old v1
+payloads migrate strictly while the encrypted envelope/SQLite format stays v1.
 
 Snapshots use full-round XChaCha20Poly1305 with a fresh OS nonce and authenticated
 profile, application ID, storage ID and revision. A native SQLite worker commits

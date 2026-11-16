@@ -198,6 +198,202 @@ fn self_peer() -> PeerInfo {
 }
 
 #[tokio::test]
+async fn quarantine_survives_restart_and_explicit_discard_clears_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.sqlite");
+    let session = open(&path, SessionOptions::default()).await;
+    let identity = AccountIdentity {
+        id: AccountId::new(42).unwrap(),
+        kind: AccountKind::User,
+    };
+    session
+        .remember_verified(identity, self_peer())
+        .await
+        .unwrap();
+    let mut dc = session.inner.dc_option(1).unwrap().unwrap();
+    dc.auth_key = Some([0xa5; 256]);
+    session.inner.set_dc_option(&dc).await.unwrap();
+    session.quarantine_authorization().await.unwrap();
+    assert!(session.is_quarantined().unwrap());
+    assert_eq!(
+        crate::Client::new(session.clone(), crate::ClientOptions::default())
+            .unwrap_err()
+            .kind(),
+        crate::ClientErrorKind::Quarantined
+    );
+    session.close().await.unwrap();
+    let restored = open(&path, SessionOptions::default()).await;
+    assert!(restored.is_quarantined().unwrap());
+    assert_eq!(restored.remembered_account().unwrap(), Some(identity));
+    restored.forget_quarantined_authorization().await.unwrap();
+    assert!(!restored.is_quarantined().unwrap());
+    assert!(restored.remembered_account().unwrap().is_none());
+    assert!(
+        restored
+            .inner
+            .dc_option(1)
+            .unwrap()
+            .unwrap()
+            .auth_key
+            .is_none()
+    );
+    assert!(
+        restored
+            .inner
+            .peer(PeerId::self_user())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(restored.forget_quarantined_authorization().await.is_err());
+    crate::Client::new(restored, crate::ClientOptions::default())
+        .unwrap()
+        .close()
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn native_close_clears_credentials_after_every_already_admitted_mutation() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.sqlite");
+    let session = open(&path, SessionOptions::default()).await;
+    session.quarantine_authorization().await.unwrap();
+    let (entered, waiting) = tokio::sync::oneshot::channel();
+    let (release, blocked) = std::sync::mpsc::channel();
+    let worker = session.clone();
+    let mutation = tokio::spawn(async move {
+        worker
+            .inner
+            .database
+            .call(move |native| {
+                let _ = entered.send(());
+                blocked.recv().unwrap();
+                native.mutate(|snapshot| {
+                    snapshot.datacenters[0].auth_key = Some([0xa5; 256]);
+                    Ok(())
+                })
+            })
+            .await
+    });
+    waiting.await.unwrap();
+    session.inner.database.request_credential_clear();
+    let closing = tokio::spawn({
+        let session = session.clone();
+        async move { session.close().await }
+    });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while session.inner.database.shared.health() != Health::Closing {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    release.send(()).unwrap();
+    mutation.await.unwrap().unwrap();
+    closing.await.unwrap().unwrap();
+    let restored = open(&path, SessionOptions::default()).await;
+    assert!(!restored.is_quarantined().unwrap());
+    assert!(
+        restored
+            .inner
+            .dc_option(1)
+            .unwrap()
+            .unwrap()
+            .auth_key
+            .is_none()
+    );
+    restored.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn cancelled_discard_keeps_unique_ownership_until_its_native_job_finishes() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(
+        &dir.path().join("session.sqlite"),
+        SessionOptions::default(),
+    )
+    .await;
+    session.quarantine_authorization().await.unwrap();
+    let (entered, waiting) = tokio::sync::oneshot::channel();
+    let (release, blocked) = std::sync::mpsc::channel();
+    let worker = session.clone();
+    let blocker = tokio::spawn(async move {
+        worker
+            .inner
+            .database
+            .call(move |_| {
+                let _ = entered.send(());
+                blocked.recv().unwrap();
+                Ok(())
+            })
+            .await
+    });
+    waiting.await.unwrap();
+    let discard = tokio::spawn({
+        let session = session.clone();
+        async move { session.forget_quarantined_authorization().await }
+    });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while session.inner.owner.load(Ordering::Acquire) != 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    discard.abort();
+    let _ = discard.await;
+    assert_eq!(
+        session.close().await.unwrap_err().kind(),
+        SessionErrorKind::Owned
+    );
+    release.send(()).unwrap();
+    blocker.await.unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while session.inner.owner.load(Ordering::Acquire) != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!session.is_quarantined().unwrap());
+    crate::Client::new(session, crate::ClientOptions::default())
+        .unwrap()
+        .close()
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn failed_native_finalizer_still_releases_owner_and_preserves_quarantine() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.sqlite");
+    let session = open(&path, SessionOptions::default()).await;
+    let mut dc = session.inner.dc_option(1).unwrap().unwrap();
+    dc.auth_key = Some([0xa5; 256]);
+    session.inner.set_dc_option(&dc).await.unwrap();
+    session.quarantine_authorization().await.unwrap();
+    session.inner.database.request_credential_clear();
+    session.test_fence();
+    assert_eq!(
+        session.close().await.unwrap_err().kind(),
+        SessionErrorKind::Fenced
+    );
+    let restored = open(&path, SessionOptions::default()).await;
+    assert!(restored.is_quarantined().unwrap());
+    assert!(
+        restored
+            .inner
+            .dc_option(1)
+            .unwrap()
+            .unwrap()
+            .auth_key
+            .is_some()
+    );
+    restored.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn keys_peers_identity_and_only_acknowledged_state_survive_encrypted_restart() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("session.sqlite");

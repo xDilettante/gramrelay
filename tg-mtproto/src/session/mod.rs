@@ -59,6 +59,38 @@ impl Session {
     pub fn binding(&self) -> &SessionBinding {
         &self.inner.database.binding
     }
+    /// Local quarantine policy only; false is not proof of remote authorization.
+    pub fn is_quarantined(&self) -> Result<bool> {
+        self.inner
+            .database
+            .shared
+            .read(|view| view.snapshot.quarantined)
+    }
+    pub(crate) async fn quarantine_authorization(&self) -> Result<()> {
+        self.inner
+            .database
+            .call(|native| {
+                native.mutate(|snapshot| {
+                    snapshot.quarantined = true;
+                    Ok(())
+                })
+            })
+            .await
+    }
+    /// Explicitly discard quarantined local keys/state without a network request.
+    /// This does not revoke an unresolved remote authorization. An attached
+    /// Client must be closed and its Session reopened before local recovery.
+    pub async fn forget_quarantined_authorization(&self) -> Result<()> {
+        let claim = self.claim_client()?;
+        self.inner
+            .database
+            .call(move |native| {
+                let result = native.clear_authorization();
+                drop(claim);
+                result
+            })
+            .await
+    }
     pub(crate) async fn remember_verified(
         &self,
         identity: AccountIdentity,
@@ -71,6 +103,7 @@ impl Session {
         }
         self.inner.database.call(move |native| {
             native.mutate(|snapshot| {
+                if snapshot.quarantined { return Err(error(SessionErrorKind::Quarantined)); }
                 if snapshot.account.is_some_and(|stored| stored != identity)
                     || snapshot.peers.iter().any(|peer| matches!(peer, PeerInfo::User {id, is_self:Some(true), ..} if *id!=identity.id.get()))
                 {
@@ -135,6 +168,9 @@ pub(crate) struct ClientClaim {
     started: bool,
 }
 impl ClientClaim {
+    pub fn session(&self) -> Session {
+        self.session.clone()
+    }
     pub fn api_id(&self) -> i32 {
         self.session.binding().api_id()
     }
@@ -160,6 +196,10 @@ impl ClientClaim {
     pub async fn finish(&self) -> Result<()> {
         self.session.inner.owner.store(2, Ordering::Release);
         self.session.inner.database.close().await
+    }
+    pub async fn finish_logged_out(&self) -> Result<()> {
+        self.session.inner.database.request_credential_clear();
+        self.finish().await
     }
 }
 impl Drop for ClientClaim {

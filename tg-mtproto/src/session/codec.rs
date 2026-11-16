@@ -7,9 +7,9 @@ use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
     aead::{Aead, KeyInit, Payload},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::io::{self, Write};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 #[derive(Serialize)]
 struct Context<'a> {
@@ -84,9 +84,27 @@ pub(super) fn decrypt(
             )
             .map_err(|_| error(SessionErrorKind::Authentication))?,
     );
-    let mut deserializer = serde_json::Deserializer::from_slice(&plaintext);
+    // Probe only the authenticated payload version, then decode exactly that
+    // structure. Never accept v2 by falling back to the legacy representation.
+    #[derive(Deserialize)]
+    struct Version {
+        version: u8,
+    }
+    let version: Version =
+        serde_json::from_slice(&plaintext).map_err(|_| error(SessionErrorKind::Authentication))?;
+    let snapshot = match version.version {
+        1 => decode_strict::<LegacySnapshot>(&plaintext)?.upgrade()?,
+        2 => decode_strict::<Snapshot>(&plaintext)?,
+        _ => return Err(error(SessionErrorKind::UnsupportedSchema)),
+    };
+    snapshot.validate(options)?;
+    Ok(snapshot)
+}
+
+fn decode_strict<T: DeserializeOwned>(plaintext: &[u8]) -> Result<T> {
+    let mut deserializer = serde_json::Deserializer::from_slice(plaintext);
     let mut unknown = false;
-    let snapshot: Snapshot = serde_ignored::deserialize(&mut deserializer, |_| unknown = true)
+    let value = serde_ignored::deserialize(&mut deserializer, |_| unknown = true)
         .map_err(|_| error(SessionErrorKind::Authentication))?;
     deserializer
         .end()
@@ -94,8 +112,43 @@ pub(super) fn decrypt(
     if unknown {
         return Err(error(SessionErrorKind::Authentication));
     }
-    snapshot.validate(options)?;
-    Ok(snapshot)
+    Ok(value)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacySnapshot {
+    version: u8,
+    home_dc: i32,
+    datacenters: Vec<grammers_session::types::DcOption>,
+    peers: Vec<grammers_session::types::PeerInfo>,
+    acknowledged: Option<grammers_session::types::UpdatesState>,
+    account: Option<super::AccountIdentity>,
+}
+impl LegacySnapshot {
+    fn upgrade(mut self) -> Result<Snapshot> {
+        if self.version != 1 {
+            return Err(error(SessionErrorKind::UnsupportedSchema));
+        }
+        Ok(Snapshot {
+            version: 2,
+            quarantined: false,
+            home_dc: self.home_dc,
+            datacenters: std::mem::take(&mut self.datacenters),
+            peers: std::mem::take(&mut self.peers),
+            acknowledged: self.acknowledged.take(),
+            account: self.account.take(),
+        })
+    }
+}
+impl Drop for LegacySnapshot {
+    fn drop(&mut self) {
+        for dc in &mut self.datacenters {
+            if let Some(key) = &mut dc.auth_key {
+                key.zeroize();
+            }
+        }
+    }
 }
 struct Buffer {
     bytes: Zeroizing<Vec<u8>>,
@@ -123,6 +176,91 @@ impl Write for Buffer {
 mod tests {
     use super::*;
     use grammers_session::types::{ChannelState, PeerInfo, UpdatesState};
+
+    fn authenticated_value(value: &serde_json::Value) -> Result<Snapshot> {
+        let binding = SessionBinding::new("demo", 1).unwrap();
+        let key = SessionKey::from_bytes([7; 32]);
+        let id = [1; 16];
+        let nonce = [2; 24];
+        let plaintext = serde_json::to_vec(value).unwrap();
+        let ciphertext = XChaCha20Poly1305::new_from_slice(key.0.as_ref())
+            .unwrap()
+            .encrypt(
+                &XNonce::from(nonce),
+                Payload {
+                    msg: &plaintext,
+                    aad: &context(&id, 0, &binding).unwrap(),
+                },
+            )
+            .unwrap();
+        decrypt(
+            nonce,
+            &ciphertext,
+            &id,
+            0,
+            &binding,
+            &key,
+            &SessionOptions::default(),
+        )
+    }
+
+    #[test]
+    fn legacy_payload_upgrades_without_changing_its_identity_or_keys() {
+        let mut snapshot = Snapshot::default();
+        snapshot.datacenters[0].auth_key = Some([0xa5; 256]);
+        snapshot.peers.push(PeerInfo::User {
+            id: 42,
+            auth: None,
+            bot: Some(false),
+            is_self: Some(true),
+        });
+        snapshot.account = Some(super::super::AccountIdentity {
+            id: super::super::AccountId::new(42).unwrap(),
+            kind: super::super::AccountKind::User,
+        });
+        snapshot.acknowledged = Some(UpdatesState {
+            pts: 10,
+            ..UpdatesState::default()
+        });
+        let mut value = serde_json::to_value(&snapshot).unwrap();
+        value["version"] = 1.into();
+        value.as_object_mut().unwrap().remove("quarantined");
+        let restored = authenticated_value(&value).unwrap();
+        assert_eq!(restored.version, 2);
+        assert!(!restored.quarantined);
+        assert!(restored.datacenters == snapshot.datacenters);
+        assert_eq!(restored.account, snapshot.account);
+        assert!(restored.acknowledged == snapshot.acknowledged);
+        value["datacenters"][0]["future_field"] = true.into();
+        assert!(
+            matches!(authenticated_value(&value), Err(error) if error.kind()==SessionErrorKind::Authentication)
+        );
+    }
+
+    #[test]
+    fn v2_quarantine_is_required_and_never_defaults_away() {
+        for invalid in [None, Some(serde_json::Value::Null), Some("false".into())] {
+            let mut value = serde_json::to_value(Snapshot::default()).unwrap();
+            value["version"] = 2.into();
+            value.as_object_mut().unwrap().remove("quarantined");
+            if let Some(invalid) = invalid {
+                value["quarantined"] = invalid;
+            }
+            assert!(
+                matches!(authenticated_value(&value), Err(error) if error.kind()==SessionErrorKind::Authentication)
+            );
+        }
+        let mut value = serde_json::to_value(Snapshot::default()).unwrap();
+        value["version"] = 3.into();
+        assert!(
+            matches!(authenticated_value(&value), Err(error) if error.kind()==SessionErrorKind::UnsupportedSchema)
+        );
+        value["version"] = 1.into();
+        value["quarantined"] = false.into();
+        assert!(
+            matches!(authenticated_value(&value), Err(error) if error.kind()==SessionErrorKind::Authentication)
+        );
+    }
 
     #[test]
     fn unknown_nested_snapshot_fields_fail_closed_even_with_a_valid_authentication_tag() {

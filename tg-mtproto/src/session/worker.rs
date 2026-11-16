@@ -10,10 +10,15 @@ use rusqlite::{
 use std::{
     fs::OpenOptions as FileOptions,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 use tokio::sync::{Semaphore, oneshot, watch};
+use zeroize::Zeroize;
 
 const APPLICATION: i64 = 0x54474d53;
 type Job = Box<dyn FnOnce(&mut Native) + Send>;
@@ -25,6 +30,7 @@ pub(super) struct Database {
     pub options: SessionOptions,
     pending: Arc<Semaphore>,
     stopped: watch::Receiver<Exit>,
+    clear_on_close: Arc<AtomicBool>,
 }
 impl Database {
     pub async fn open(
@@ -40,6 +46,8 @@ impl Database {
         let (sender, receiver) = mpsc::sync_channel::<Job>(capacity);
         let (ready, waiting) = oneshot::channel();
         let (exited, stopped) = watch::channel(None);
+        let clear_on_close = Arc::new(AtomicBool::new(false));
+        let clear = clear_on_close.clone();
         std::thread::Builder::new()
             .name("tg-mtproto-session".into())
             .spawn(move || {
@@ -63,7 +71,13 @@ impl Database {
                                 state.health.send_replace(Health::Fenced);
                             }
                         }
-                        native.finish()
+                        let cleared = if clear.load(Ordering::Acquire) {
+                            native.clear_authorization()
+                        } else {
+                            Ok(())
+                        };
+                        let closed = native.finish();
+                        cleared.and(closed)
                     }
                     Err(error) => {
                         let _ = ready.send(Err(error));
@@ -92,6 +106,7 @@ impl Database {
             options: metadata.1,
             pending: Arc::new(Semaphore::new(capacity)),
             stopped,
+            clear_on_close,
         })
     }
     pub async fn call<T: Send + 'static>(
@@ -157,6 +172,9 @@ impl Database {
             }
             stopped.changed().await.map_err(storage)?;
         }
+    }
+    pub fn request_credential_clear(&self) {
+        self.clear_on_close.store(true, Ordering::Release);
     }
 }
 
@@ -443,6 +461,29 @@ impl Native {
             .ok_or_else(|| error(SessionErrorKind::Closed))?
             .snapshot = next;
         drop(view);
+        self.live()
+    }
+    pub fn clear_authorization(&mut self) -> Result<()> {
+        self.mutate(|snapshot| {
+            if !snapshot.quarantined {
+                return Err(error(SessionErrorKind::InvalidInput));
+            }
+            for dc in &mut snapshot.datacenters {
+                if let Some(key) = &mut dc.auth_key {
+                    key.zeroize();
+                }
+                dc.auth_key = None;
+            }
+            snapshot.peers.clear();
+            snapshot.account = None;
+            snapshot.acknowledged = None;
+            snapshot.quarantined = false;
+            Ok(())
+        })?;
+        let mut view = self.shared.view.write().map_err(storage)?;
+        view.as_mut()
+            .ok_or_else(|| error(SessionErrorKind::Closed))?
+            .provisional = Default::default();
         self.live()
     }
     #[cfg(test)]

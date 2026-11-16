@@ -8,12 +8,19 @@ use tokio::task::JoinSet;
 #[derive(Clone)]
 pub(super) struct Context {
     handle: SenderPoolFatHandle,
+    session: Session,
     max_response_bytes: usize,
     state: Arc<CallState>,
     shared: Arc<Shared>,
     deadline: tokio::time::Instant,
 }
 impl Context {
+    pub fn stop_after_action(&self) {
+        self.state.stop_generation.store(true, Ordering::Release);
+    }
+    pub fn confirm_logout(&self) {
+        self.state.logout_confirmed.store(true, Ordering::Release);
+    }
     // The job state, rather than the action future, owns admission guards through
     // final outcome classification. Releasing a writer can wake another thread.
     pub async fn hold_authorization_read(&self, gate: Arc<tokio::sync::RwLock<()>>) {
@@ -37,7 +44,26 @@ impl Context {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(guard);
     }
     pub async fn invoke<R: tl::RemoteCall>(&self, body: Vec<u8>) -> Result<R::Return> {
+        self.invoke_inner::<R>(body, false).await
+    }
+    pub async fn invoke_logout(&self, body: Vec<u8>) -> Result<tl::enums::auth::LoggedOut> {
+        self.invoke_inner::<tl::functions::auth::LogOut>(body, true)
+            .await
+    }
+    async fn invoke_inner<R: tl::RemoteCall>(
+        &self,
+        body: Vec<u8>,
+        allow_quarantine: bool,
+    ) -> Result<R::Return> {
         let mut body = Zeroizing::new(body);
+        if self
+            .session
+            .is_quarantined()
+            .map_err(|_| error(ClientErrorKind::Session, self.state.seal()))?
+            && !allow_quarantine
+        {
+            return Err(error(ClientErrorKind::Quarantined, self.state.seal()));
+        }
         let dc = self
             .handle
             .session
@@ -89,6 +115,13 @@ enum AuthorizationGuard {
         _guard: tokio::sync::OwnedRwLockWriteGuard<()>,
     },
 }
+#[derive(Default, Eq, PartialEq)]
+enum Completion {
+    #[default]
+    Pending,
+    Accepted,
+    Sealed,
+}
 #[derive(Default)]
 struct CallState {
     // Queue admission and sealing share one linearization point. Once backend
@@ -96,8 +129,30 @@ struct CallState {
     phase: std::sync::atomic::AtomicU8,
     done: AtomicBool,
     authorization: Mutex<Option<AuthorizationGuard>>,
+    stop_generation: AtomicBool,
+    logout_confirmed: AtomicBool,
+    completion: Mutex<Completion>,
 }
 impl CallState {
+    fn is_pending(&self) -> bool {
+        *self
+            .completion
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            == Completion::Pending
+    }
+    fn seal_completion(&self) -> Option<Outcome> {
+        let mut completion = self
+            .completion
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *completion == Completion::Accepted {
+            return None;
+        }
+        *completion = Completion::Sealed;
+        self.done.store(true, Ordering::Release);
+        Some(self.seal())
+    }
     fn authorization_transition(&self) -> bool {
         matches!(
             self.authorization
@@ -255,7 +310,7 @@ pub(super) async fn run(
             _=tokio::time::sleep_until(lease)=> {if startup.claim.live().is_err() {break ClientErrorKind::Session;}}
             _=async {match deadline {Some(deadline)=>tokio::time::sleep_until(deadline).await,None=>std::future::pending().await}}=> {
                 let now=tokio::time::Instant::now();
-                if active.values().any(|pending|!pending.state.done.load(Ordering::Acquire) && pending.deadline<=now) {break ClientErrorKind::Timeout;}
+                if active.values().any(|pending|!pending.state.done.load(Ordering::Acquire) && pending.deadline<=now && pending.state.is_pending()) {break ClientErrorKind::Timeout;}
             }
             result=&mut driver=> {driver_exit=Some(result);break ClientErrorKind::Backend;}
             completed=jobs.join_next(),if !jobs.is_empty()=> {
@@ -278,24 +333,41 @@ pub(super) async fn run(
                 let slot=Arc::new(Mutex::new(Some(call.permit)));
                 let state=Arc::new(CallState::default());
                 active.insert(id,Pending {reply:reply.clone(),_slot:slot.clone(),deadline:call.deadline,state:state.clone()});
-                let context=Context {handle:handle.clone(),max_response_bytes:options.max_response_bytes,state:state.clone(),shared:shared.clone(),deadline:call.deadline};
+                let context=Context {handle:handle.clone(),session:startup.claim.session(),max_response_bytes:options.max_response_bytes,state:state.clone(),shared:shared.clone(),deadline:call.deadline};
                 let shared=shared.clone();
                 let session_health=context.handle.session.clone();
                 #[cfg(test)]
                 let after_reply=options.after_reply;
                 #[cfg(test)]
                 let before_fence=options.before_fence;
+                #[cfg(test)]
+                let before_accept=options.before_accept;
                 jobs.spawn(async move {
                     let result=if tokio::time::Instant::now()>=call.deadline {Err(error(ClientErrorKind::Timeout,state.seal()))}
                         else if shared.closed.load(Ordering::Acquire) {Err(error(ClientErrorKind::Closed,state.seal()))}
                         else {(call.action)(context).await};
                     #[cfg(test)]
                     if let Some(delay)=before_fence {tokio::time::sleep(delay).await;}
-                    let result=if session_health.home_dc_id().is_err() {Err(error(ClientErrorKind::Session,state.seal()))}else{result};
-                    let result=if tokio::time::Instant::now()>=call.deadline {Err(error(ClientErrorKind::Timeout,state.seal()))}else{result};
-                    state.done.store(true,Ordering::Release);
-                    let fence=result.as_ref().err().filter(|failure|failure.kind()==ClientErrorKind::Timeout || (failure.outcome()==Outcome::Unknown && (state.authorization_transition() || matches!(failure.kind(),ClientErrorKind::Backend|ClientErrorKind::Session|ClientErrorKind::Decode|ClientErrorKind::Capacity|ClientErrorKind::IdentityMismatch)))).map(ClientError::kind);
-                    if fence.is_some() {shared.closed.store(true,Ordering::Release);}
+                    #[cfg(test)]
+                    if let Some(delay)=before_accept {std::thread::sleep(delay);}
+                    // Completion and shutdown sealing have one decision point.
+                    // A supervisor failure cannot be overwritten by a late job.
+                    let (override_failure,fence)={
+                        let mut completion=state.completion.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                        if *completion!=Completion::Pending {drop(completion);return (id,None);}
+                        let healthy=session_health.home_dc_id().is_ok();
+                        let override_failure=if tokio::time::Instant::now()>=call.deadline {Some(error(ClientErrorKind::Timeout,state.seal()))}
+                            else if !healthy {Some(error(ClientErrorKind::Session,state.seal()))}
+                            else if result.is_ok() && shared.closed.load(Ordering::Acquire) {Some(error(ClientErrorKind::Closed,state.seal()))}
+                            else {None};
+                        let failure=override_failure.or_else(||result.as_ref().err().copied());
+                        *completion=Completion::Accepted;
+                        state.done.store(true,Ordering::Release);
+                        if override_failure.is_none() && result.is_ok() && state.logout_confirmed.load(Ordering::Acquire) {shared.logout_confirmed.store(true,Ordering::Release);}
+                        let fence=if state.stop_generation.load(Ordering::Acquire) {Some(ClientErrorKind::Closed)} else {failure.as_ref().filter(|failure|failure.kind()==ClientErrorKind::Timeout || (failure.outcome()==Outcome::Unknown && (state.authorization_transition() || matches!(failure.kind(),ClientErrorKind::Backend|ClientErrorKind::Session|ClientErrorKind::Decode|ClientErrorKind::Capacity|ClientErrorKind::IdentityMismatch)))).map(ClientError::kind)};
+                        if fence.is_some() {shared.closed.store(true,Ordering::Release);}
+                        (override_failure,fence)
+                    };
                     state.release_authorization();
                     if fence.is_none() {
                         // The backend has completed. Free admission before the caller
@@ -306,7 +378,11 @@ pub(super) async fn run(
                     }
                     // Returned user types can panic on Drop after cancellation. Keep
                     // delivery/destruction in the owned job, never in the supervisor.
-                    if let Some(sender)=reply_take(&reply) {let _=sender.send(result);}
+                    if let Some(failure)=override_failure {
+                        if let Some(sender)=reply_take(&reply) {let _=sender.send(Err(failure));}
+                        // No user-defined destructor runs under the completion lock.
+                        drop(result);
+                    } else if let Some(sender)=reply_take(&reply) {let _=sender.send(result);}
                     #[cfg(test)]
                     if let Some(delay)=after_reply {tokio::time::sleep(delay).await;}
                     (id,fence)
@@ -318,8 +394,10 @@ pub(super) async fn run(
     slots.close();
     startup.receiver.close();
     for pending in active.values_mut() {
-        if let Some(reply) = reply_take(&pending.reply) {
-            let _ = reply.send(Err(error(reason, pending.state.seal())));
+        if let Some(outcome) = pending.state.seal_completion()
+            && let Some(reply) = reply_take(&pending.reply)
+        {
+            let _ = reply.send(Err(error(reason, outcome)));
         }
     }
     while let Ok(call) = startup.receiver.try_recv() {
@@ -334,11 +412,12 @@ pub(super) async fn run(
     while jobs.join_next().await.is_some() {}
     drop(active);
     drop(handle);
-    let stored = startup
-        .claim
-        .finish()
-        .await
-        .map_err(|_| error(ClientErrorKind::Session, Outcome::Unknown));
+    let stored = if shared.logout_confirmed.load(Ordering::Acquire) {
+        startup.claim.finish_logged_out().await
+    } else {
+        startup.claim.finish().await
+    }
+    .map_err(|_| error(ClientErrorKind::Session, Outcome::Unknown));
     let result = driver_result
         .map_err(|_| error(ClientErrorKind::Backend, Outcome::Unknown))
         .and(stored);

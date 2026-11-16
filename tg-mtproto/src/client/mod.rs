@@ -29,6 +29,8 @@ pub struct ClientOptions {
     after_reply: Option<Duration>,
     #[cfg(test)]
     before_fence: Option<Duration>,
+    #[cfg(test)]
+    before_accept: Option<Duration>,
     max_pending: usize,
     timeout: Duration,
     max_request_bytes: usize,
@@ -41,6 +43,8 @@ impl Default for ClientOptions {
             after_reply: None,
             #[cfg(test)]
             before_fence: None,
+            #[cfg(test)]
+            before_accept: None,
             max_pending: 16,
             timeout: Duration::from_secs(30),
             max_request_bytes: grammers_mtproto::MAX_REQUEST_SIZE.min(1024 * 1024),
@@ -99,6 +103,7 @@ struct Shared {
     closed: AtomicBool,
     stop: watch::Sender<bool>,
     exited: watch::Sender<Option<Result<()>>>,
+    logout_confirmed: AtomicBool,
 }
 struct Core {
     session: Session,
@@ -186,11 +191,18 @@ impl Client {
         let claim = session
             .claim_client()
             .map_err(|_| error(ClientErrorKind::Session, Outcome::NotSent))?;
+        if session
+            .is_quarantined()
+            .map_err(|_| error(ClientErrorKind::Session, Outcome::NotSent))?
+        {
+            return Err(error(ClientErrorKind::Quarantined, Outcome::NotSent));
+        }
         let (sender, receiver) = mpsc::channel(options.max_pending);
         let shared = Arc::new(Shared {
             closed: AtomicBool::new(false),
             stop: watch::channel(false).0,
             exited: watch::channel(None).0,
+            logout_confirmed: AtomicBool::new(false),
         });
         Ok(Self {
             inner: Arc::new(Core {
@@ -228,10 +240,14 @@ impl Client {
         if self.inner.shared.closed.load(Ordering::Acquire) {
             return Err(error(ClientErrorKind::Closed, Outcome::NotSent));
         }
-        self.inner
+        if self
+            .inner
             .session
-            .live()
-            .map_err(|_| error(ClientErrorKind::Session, Outcome::NotSent))?;
+            .is_quarantined()
+            .map_err(|_| error(ClientErrorKind::Session, Outcome::NotSent))?
+        {
+            return Err(error(ClientErrorKind::Quarantined, Outcome::NotSent));
+        }
         let permit = self
             .inner
             .slots

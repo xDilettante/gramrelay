@@ -23,6 +23,7 @@ pub enum ClientErrorKind {
     FloodWait,
     Decode,
     IdentityMismatch,
+    Quarantined,
 }
 
 /// Static diagnostic metadata. No upstream error or remote description is retained.
@@ -59,6 +60,7 @@ impl ClientError {
             ClientErrorKind::FloodWait => "mtproto_flood_wait",
             ClientErrorKind::Decode => "mtproto_decode",
             ClientErrorKind::IdentityMismatch => "mtproto_identity_mismatch",
+            ClientErrorKind::Quarantined => "mtproto_quarantined",
         }
     }
 }

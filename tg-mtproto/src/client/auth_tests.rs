@@ -1,6 +1,8 @@
 use super::*;
 use crate::{AccountId, AccountIdentity, AccountKind, AppCredentials, BotToken};
 use std::sync::atomic::AtomicUsize;
+#[path = "logout_tests.rs"]
+mod logout;
 
 fn expected(bot: bool) -> AccountIdentity {
     AccountIdentity {

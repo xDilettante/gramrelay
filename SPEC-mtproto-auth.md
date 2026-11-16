@@ -65,7 +65,8 @@ Identity/bot increment evidence: nine SDK-backed synthetic tests pass, including
 actual encrypted Session restart and a multithread wake-before-fence regression
 that failed before the guard-retention fix. The focused independent re-review
 found no remaining defect in that ownership boundary. Interactive auth and
-quarantined logout remain pending; no live compatibility is claimed.
+DC migration remain pending; no live compatibility is claimed. Quarantined
+logout is implemented separately in SPEC-mtproto-logout.md.
 Windows/Rust 1.98.0 workspace verification: 382 all-feature / 218 default tests,
 five doctests and clean all-feature Clippy/fmt. Dependency graph is unchanged
 from the preceding 362-dependency audit and three-archive source verification.

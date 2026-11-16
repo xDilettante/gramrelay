@@ -95,6 +95,31 @@ fn checked_peer(user: tl::enums::User, expected: AccountIdentity) -> Result<Peer
     })
 }
 
+async fn verify_in_context(
+    context: &super::runtime::Context,
+    session: &Session,
+    expected: AccountIdentity,
+    limit: usize,
+) -> Result<AccountIdentity> {
+    check_stored(session, expected)?;
+    let request = tl::functions::users::GetUsers {
+        id: vec![tl::enums::InputUser::UserSelf],
+    };
+    let mut bytes = encode_request(&request, limit)?;
+    let mut users = context
+        .invoke::<tl::functions::users::GetUsers>(std::mem::take(&mut *bytes))
+        .await?;
+    if users.len() != 1 {
+        return Err(error(ClientErrorKind::IdentityMismatch, Outcome::Unknown));
+    }
+    let peer = checked_peer(users.remove(0), expected)?;
+    session
+        .remember_verified(expected, peer)
+        .await
+        .map_err(|_| error(ClientErrorKind::Session, Outcome::Unknown))?;
+    Ok(expected)
+}
+
 impl Client {
     /// Verify live self identity and atomically remember it before returning.
     /// Remembered metadata alone is never treated as current authorization.
@@ -106,23 +131,7 @@ impl Client {
         let limit = self.inner.options.max_request_bytes;
         self.submit(reservation, move |context| async move {
             context.hold_authorization_read(authorization).await;
-            check_stored(&session, expected)?;
-            let request = tl::functions::users::GetUsers {
-                id: vec![tl::enums::InputUser::UserSelf],
-            };
-            let mut bytes = encode_request(&request, limit)?;
-            let mut users = context
-                .invoke::<tl::functions::users::GetUsers>(std::mem::take(&mut *bytes))
-                .await?;
-            if users.len() != 1 {
-                return Err(error(ClientErrorKind::IdentityMismatch, Outcome::Unknown));
-            }
-            let peer = checked_peer(users.remove(0), expected)?;
-            session
-                .remember_verified(expected, peer)
-                .await
-                .map_err(|_| error(ClientErrorKind::Session, Outcome::Unknown))?;
-            Ok(expected)
+            verify_in_context(&context, &session, expected, limit).await
         })
         .await
     }
@@ -176,5 +185,36 @@ impl Client {
             Ok(expected)
         })
         .await
+    }
+
+    /// Verify the expected account, quarantine before LogOut, then join cleanup.
+    /// A failed/uncertain logout preserves quarantine for explicit host recovery.
+    pub async fn sign_out(&self, expected: AccountIdentity) -> Result<()> {
+        let reservation = self.reserve()?;
+        check_stored(&self.inner.session, expected)?;
+        let session = self.inner.session.clone();
+        let authorization = self.inner.authorization.clone();
+        let limit = self.inner.options.max_request_bytes;
+        let result: Result<()> = self
+            .submit(reservation, move |context| async move {
+                context.hold_authorization_write(authorization).await;
+                verify_in_context(&context, &session, expected, limit).await?;
+                context.stop_after_action();
+                session
+                    .quarantine_authorization()
+                    .await
+                    .map_err(|_| error(ClientErrorKind::Session, Outcome::Unknown))?;
+                let mut bytes = encode_request(&tl::functions::auth::LogOut {}, limit)?;
+                let tl::enums::auth::LoggedOut::Out(mut response) =
+                    context.invoke_logout(std::mem::take(&mut *bytes)).await?;
+                if let Some(token) = response.future_auth_token.as_mut() {
+                    token.zeroize();
+                }
+                context.confirm_logout();
+                Ok(())
+            })
+            .await;
+        result?;
+        self.close().await
     }
 }

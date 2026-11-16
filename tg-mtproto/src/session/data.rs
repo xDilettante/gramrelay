@@ -14,6 +14,7 @@ use zeroize::Zeroize;
 #[serde(deny_unknown_fields)]
 pub(super) struct Snapshot {
     pub version: u8,
+    pub quarantined: bool,
     pub home_dc: i32,
     pub datacenters: Vec<DcOption>,
     pub peers: Vec<PeerInfo>,
@@ -24,7 +25,8 @@ impl Default for Snapshot {
     fn default() -> Self {
         let data = SessionData::default();
         Self {
-            version: 1,
+            version: 2,
+            quarantined: false,
             home_dc: data.home_dc,
             datacenters: data.dc_options.into_values().collect(),
             peers: vec![],
@@ -44,7 +46,7 @@ impl Drop for Snapshot {
 }
 impl Snapshot {
     pub fn validate(&self, options: &SessionOptions) -> Result<()> {
-        if self.version != 1 {
+        if self.version != 2 {
             return Err(error(SessionErrorKind::UnsupportedSchema));
         }
         if self.datacenters.len() > options.max_datacenters || self.peers.len() > options.max_peers

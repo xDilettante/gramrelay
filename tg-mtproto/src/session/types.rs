@@ -13,6 +13,7 @@ pub enum SessionErrorKind {
     Owned,
     Closed,
     Fenced,
+    Quarantined,
 }
 #[derive(Clone, Copy, Debug)]
 pub struct SessionError {
@@ -32,6 +33,7 @@ impl SessionError {
             SessionErrorKind::Owned => "mtproto_session_owned",
             SessionErrorKind::Closed => "mtproto_session_closed",
             SessionErrorKind::Fenced => "mtproto_session_fenced",
+            SessionErrorKind::Quarantined => "mtproto_session_quarantined",
         }
     }
 }
