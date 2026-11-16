@@ -3,13 +3,15 @@
 
 mod client;
 mod error;
+mod files;
 mod requests;
 mod types;
 
 pub use client::{Bot, BotBuilder};
 pub use error::{EffectOutcome, Error, ErrorKind, Result};
-pub use requests::{AnswerCallbackQuery, RequestFuture, SendMessage};
+pub use files::InputFile;
+pub use requests::{AnswerCallbackQuery, RequestFuture, SendDocument, SendMessage};
 pub use types::{
-    CallbackQuery, CallbackQueryId, Chat, ChatId, InlineKeyboardButton, InlineKeyboardMarkup,
-    Message, MessageId, Update, User, UserId,
+    CallbackQuery, CallbackQueryId, Chat, ChatId, Document, FileId, InlineKeyboardButton,
+    InlineKeyboardMarkup, Message, MessageId, Update, User, UserId,
 };

@@ -59,6 +59,26 @@ pub struct Message {
     pub date: i64,
     pub chat: Chat,
     pub text: Option<String>,
+    pub document: Option<Document>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct FileId(String);
+impl FileId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
+pub struct Document {
+    pub file_id: FileId,
+    pub file_unique_id: String,
+    pub file_name: Option<String>,
+    pub mime_type: Option<String>,
+    pub file_size: Option<u64>,
 }
 
 /// An opaque identifier supplied by Telegram for a callback query.

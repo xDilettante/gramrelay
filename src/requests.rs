@@ -123,3 +123,47 @@ pub(crate) fn validate_text(text: &str, field: &'static str, min: usize, max: us
     }
     Ok(())
 }
+
+#[must_use = "requests are lazy; await the request to execute it"]
+pub struct SendDocument<'a> {
+    bot: &'a Bot,
+    chat: ChatId,
+    file: crate::InputFile,
+    caption: Option<String>,
+}
+impl<'a> SendDocument<'a> {
+    pub(crate) fn new(bot: &'a Bot, chat: ChatId, file: crate::InputFile) -> Self {
+        Self {
+            bot,
+            chat,
+            file,
+            caption: None,
+        }
+    }
+    pub fn caption(mut self, caption: impl Into<String>) -> Self {
+        self.caption = Some(caption.into());
+        self
+    }
+}
+impl<'a> IntoFuture for SendDocument<'a> {
+    type Output = Result<Message>;
+    type IntoFuture = RequestFuture<'a, Message>;
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move {
+            if let Some(caption) = &self.caption {
+                validate_text(caption, "caption", 0, 1024)?;
+            }
+            self.bot
+                .perform(async move {
+                    let mut form = reqwest::multipart::Form::new()
+                        .text("chat_id", i64::from(self.chat).to_string());
+                    if let Some(caption) = self.caption {
+                        form = form.text("caption", caption);
+                    }
+                    let form = self.file.attach(form, self.bot.upload_limit()).await?;
+                    Ok(self.bot.post("sendDocument")?.multipart(form))
+                })
+                .await
+        })
+    }
+}

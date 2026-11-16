@@ -1,6 +1,6 @@
 use crate::{
-    AnswerCallbackQuery, CallbackQueryId, ChatId, EffectOutcome, Error, ErrorKind, Result,
-    SendMessage,
+    AnswerCallbackQuery, CallbackQueryId, ChatId, EffectOutcome, Error, ErrorKind, InputFile,
+    Result, SendDocument, SendMessage,
 };
 use reqwest::{Client, RequestBuilder, Url};
 use serde::{Deserialize, de::DeserializeOwned};
@@ -23,6 +23,7 @@ struct Inner {
     api_url: Url,
     timeout: Duration,
     max_response_bytes: usize,
+    max_upload_bytes: u64,
     in_flight: Semaphore,
 }
 
@@ -33,6 +34,7 @@ pub struct BotBuilder {
     allow_http_loopback: bool,
     timeout: Duration,
     max_response_bytes: usize,
+    max_upload_bytes: u64,
     max_in_flight: usize,
 }
 
@@ -62,6 +64,7 @@ impl Bot {
             allow_http_loopback: false,
             timeout: Duration::from_secs(30),
             max_response_bytes: 1024 * 1024,
+            max_upload_bytes: 50_000_000,
             max_in_flight: 32,
         }
     }
@@ -74,6 +77,14 @@ impl Bot {
     /// Answer a callback from an update already received by the host.
     pub fn answer_callback_query(&self, id: CallbackQueryId) -> AnswerCallbackQuery<'_> {
         AnswerCallbackQuery::new(self, id)
+    }
+
+    pub fn send_document(&self, chat: ChatId, file: InputFile) -> SendDocument<'_> {
+        SendDocument::new(self, chat, file)
+    }
+
+    pub(crate) fn upload_limit(&self) -> u64 {
+        self.inner.max_upload_bytes
     }
 
     pub(crate) fn post(&self, method: &str) -> Result<RequestBuilder> {
@@ -193,6 +204,10 @@ impl BotBuilder {
         self.max_response_bytes = limit;
         self
     }
+    pub fn max_upload_bytes(mut self, limit: u64) -> Self {
+        self.max_upload_bytes = limit;
+        self
+    }
     /// Requests exceeding the limit fail immediately; no unbounded wait queue is created.
     pub fn max_in_flight(mut self, limit: usize) -> Self {
         self.max_in_flight = limit;
@@ -215,6 +230,7 @@ impl BotBuilder {
             return Err(Error::local(ErrorKind::Configuration, "timeout"));
         }
         if self.max_response_bytes == 0
+            || self.max_upload_bytes == 0
             || self.max_in_flight == 0
             || self.max_in_flight > Semaphore::MAX_PERMITS
         {
@@ -259,6 +275,7 @@ impl BotBuilder {
                 api_url,
                 timeout: self.timeout,
                 max_response_bytes: self.max_response_bytes,
+                max_upload_bytes: self.max_upload_bytes,
                 in_flight: Semaphore::new(self.max_in_flight),
             }),
         })
