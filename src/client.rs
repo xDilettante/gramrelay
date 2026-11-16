@@ -343,8 +343,18 @@ async fn decode_response<T: DeserializeOwned>(
         }
         body.extend_from_slice(&chunk);
     }
-    let envelope: Envelope<T> = serde_json::from_slice(&body)
-        .map_err(|_| Error::new(ErrorKind::Decode, EffectOutcome::Unknown))?;
+    let envelope: Envelope<T> = serde_json::from_slice(&body).map_err(|_| {
+        let mut error = Error::new(
+            if status.is_server_error() {
+                ErrorKind::Http
+            } else {
+                ErrorKind::Decode
+            },
+            EffectOutcome::Unknown,
+        );
+        error.http_status = Some(status.as_u16());
+        error
+    })?;
     if status.is_success() && envelope.ok {
         return envelope
             .result

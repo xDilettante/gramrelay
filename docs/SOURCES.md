@@ -28,5 +28,6 @@ The implementation uses reqwest 0.13.5, Tokio 1.54.1, tokio-util 0.7.20 and wire
 - File endpoint and cloud download limit: https://core.telegram.org/bots/api#getfile
 - URL segment encoding: https://docs.rs/url/2.5.8/url/struct.PathSegmentsMut.html#method.extend
 - Caller-owned async writers, including Vec: https://docs.rs/tokio/1.54.1/tokio/io/trait.AsyncWrite.html
+- Non-cryptographic retry jitter: fastrand 2.5.0, pinned in Cargo.lock; f64's 0..1 contract verified in the installed registry source (src/lib.rs). https://docs.rs/fastrand/2.5.0/fastrand/
 
 Unknown effect handling is our conservative contract, not a Telegram idempotency guarantee. It intentionally treats connection and decode failures after dispatch as ambiguous.

@@ -32,6 +32,12 @@ JSON calls and downloads share HTTP execution, the semaphore and the end-to-end 
 
 ## Remaining C1 gates
 
+RetryPolicy is opt-in on generated Call. Default policy when explicitly attached: at most 3 attempts, 30-second total elapsed budget, exponential delays starting at 100 ms capped at 5 seconds, with full jitter from fastrand (already pinned in the lockfile; not used for credentials). jitter(false) enables deterministic scheduling for tests. Configuration permits 1..=10 attempts and finite positive elapsed budget. Local preparation/validation/capacity failures do not retry. Reads with reviewed ReadOnly advice may retry transport/timeouts and HTTP 5xx, including non-JSON proxy failures, or confirmed Bot API 429. Decode/oversize/permanent errors do not loop.
+
+Writes/acknowledgements only retry a confirmed Bot API 429 when retry_rejected_writes is explicitly enabled. Unknown writes never retry; migrations never change the target. Credential/session operations and ephemeral/query references do not retry. Requests retain identical typed parameters. Multipart streams cannot be replayed; an enabled multi-attempt refused-write policy with attachments is rejected before opening files. A read-only policy on multipart executes once with its elapsed cap.
+
+Respect retry_after; never clamp it below the server delay. If delay exceeds max_delay or the remaining total budget, return the original error. Backoff holds no in-flight permit. The total elapsed cap also bounds each attempt's preparation/network/response through the existing shared timeout. Cancellation drops backoff/work without detached retries. Test exact attempt counts, immutable payloads, reads, refusals, unknown writes/acks, sensitive/temporal operations, long delays, total budget, stream refusal and capacity release during backoff.
+
 Contextual documents share the same delivery descriptor and validation as text replies: chat/thread/business/direct-message topic, ephemeral receiver, parent ID and expiry. Expose MessageContext.reply_document, CallbackContext.reply_document and ephemeral_reply_document; inaccessible/guest/unsupported scopes never fall back to another send. The remaining ephemeral reply window caps preparation/upload/response time as well as being checked before dispatch. No file opens before await, including a request rejected by scope validation.
 
 - Rich text/entity helpers use UTF-16 offsets and validate boundaries, nesting and Telegram limits; plain text stays the default.

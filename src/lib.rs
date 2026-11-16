@@ -1,4 +1,4 @@
-//! Predictable Telegram Bot API requests. No request is automatically retried.
+//! Predictable Telegram Bot API requests. Retries are opt-in; unknown writes never replay.
 //! On an ambiguous failure, inspect Error::outcome before considering another attempt.
 //!
 //! ```no_run
@@ -20,6 +20,7 @@ mod files;
 #[cfg(feature = "bot")]
 mod polling;
 mod requests;
+mod retry;
 #[cfg(feature = "bot")]
 mod routing;
 mod text;
@@ -38,6 +39,7 @@ pub use files::InputFile;
 #[cfg(feature = "bot")]
 pub use polling::PollingOptions;
 pub use requests::{AnswerCallbackQuery, RequestFuture, SendDocument, SendMessage};
+pub use retry::RetryPolicy;
 #[cfg(feature = "bot")]
 pub use routing::{CallbackContext, MessageContext, MessageEvent, Router, UpdateContext};
 pub use text::{EntityKind, ParseMode, RichText};

@@ -25,3 +25,9 @@ String inputs still send plain text. send_message, MessageContext.reply and Send
 MessageContext.event records provenance. Route other message variants explicitly with on_message_event(MessageEvent, handler) and opt into their polling subscriptions. Replies now preserve direct-message topics and ephemeral recipient/parent IDs in addition to chat, thread and business connection. Missing recipients and expired ephemeral parents fail locally; the expiry preflight uses the host UTC clock.
 
 CallbackContext.reply returns Result because inline and inaccessible callbacks do not provide readable message content. ephemeral_reply uses the callback ID without inventing a chat; answer() remains a separate required action. Guest contexts require answer_guest with a typed InlineQueryResult. Numeric guest chat IDs are not permission to send an ordinary bot message.
+
+Text and document replies share delivery validation. reply_document/ephemeral_reply_document preserve the same scopes; the remaining ephemeral window also caps preparation/upload/response time. max_attachments is now configurable with a default of 50.
+
+## Explicit retry policy
+
+Requests still make one attempt by default. Generated Call accepts RetryPolicy for reviewed reads, with bounded elapsed time, attempt count and backoff/jitter. Confirmed ordinary JSON 429 refusals require retry_rejected_writes(true); Unknown writes, credential/session operations, migrations and temporal references remain ineligible. Multipart replay is rejected before dispatch. Downloads do not retry into a potentially partially written destination.

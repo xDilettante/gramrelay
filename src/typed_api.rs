@@ -15,7 +15,7 @@ pub enum Effect {
     SessionChange,
 }
 
-/// Advice for an explicit retry policy; requests never retry automatically.
+/// Advice about ambiguous-attempt replay. Confirmed-refusal policy is separate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplaySafety {
     ReadOnly,
@@ -55,9 +55,14 @@ pub struct Call<'a, M: Method> {
     pub(crate) bot: &'a Bot,
     pub(crate) params: M,
     attachments: Vec<(String, InputFile)>,
+    retry: Option<crate::RetryPolicy>,
 }
 
 impl<M: Method> Call<'_, M> {
+    pub fn retry_policy(mut self, policy: crate::RetryPolicy) -> Self {
+        self.retry = Some(policy);
+        self
+    }
     /// Bind a new file to a typed `attach://name` reference. Preparation is lazy.
     pub fn attach(mut self, name: impl Into<String>, file: InputFile) -> Self {
         self.attachments.push((name.into(), file));
@@ -83,6 +88,7 @@ impl Bot {
             bot: self,
             params,
             attachments: Vec::new(),
+            retry: None,
         }
     }
 }
@@ -93,39 +99,47 @@ impl<'a, M: Method> IntoFuture for Call<'a, M> {
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move {
+            if self.attachments.is_empty() {
+                return crate::retry::run_json(self.bot, &self.params, self.retry).await;
+            }
+            let timeout = self
+                .retry
+                .as_ref()
+                .map(crate::RetryPolicy::stream_timeout)
+                .transpose()?;
             self.bot
-                .perform(async {
-                    let params = serde_json::to_value(&self.params)
-                        .map_err(|_| Error::local(ErrorKind::Validation, "parameters"))?;
-                    let references = self.params.attachment_references();
-                    validate_bindings(
-                        &params,
-                        &references,
-                        &self.attachments,
-                        self.bot.attachment_limit(),
-                    )?;
-                    if self.attachments.is_empty() {
-                        return Ok(self.bot.post(M::NAME)?.json(&params));
-                    }
-                    let mut form = Form::new();
-                    let object = params
-                        .as_object()
-                        .ok_or_else(|| Error::local(ErrorKind::Validation, "parameters"))?;
-                    for (name, value) in object {
-                        let value = value
-                            .as_str()
-                            .map(str::to_owned)
-                            .unwrap_or_else(|| value.to_string());
-                        form = form.text(name.clone(), value);
-                    }
-                    let mut remaining = self.bot.upload_limit();
-                    for (name, file) in self.attachments {
-                        let (part, length) = file.into_part(remaining).await?;
-                        remaining -= length;
-                        form = form.part(name, part);
-                    }
-                    Ok(self.bot.post(M::NAME)?.multipart(form))
-                })
+                .perform_with_timeout(
+                    async {
+                        let params = serde_json::to_value(&self.params)
+                            .map_err(|_| Error::local(ErrorKind::Validation, "parameters"))?;
+                        let references = self.params.attachment_references();
+                        validate_bindings(
+                            &params,
+                            &references,
+                            &self.attachments,
+                            self.bot.attachment_limit(),
+                        )?;
+                        let mut form = Form::new();
+                        let object = params
+                            .as_object()
+                            .ok_or_else(|| Error::local(ErrorKind::Validation, "parameters"))?;
+                        for (name, value) in object {
+                            let value = value
+                                .as_str()
+                                .map(str::to_owned)
+                                .unwrap_or_else(|| value.to_string());
+                            form = form.text(name.clone(), value);
+                        }
+                        let mut remaining = self.bot.upload_limit();
+                        for (name, file) in self.attachments {
+                            let (part, length) = file.into_part(remaining).await?;
+                            remaining -= length;
+                            form = form.part(name, part);
+                        }
+                        Ok(self.bot.post(M::NAME)?.multipart(form))
+                    },
+                    timeout,
+                )
                 .await
         })
     }

@@ -87,7 +87,7 @@ impl Error {
     pub fn api_error_code(&self) -> Option<i64> {
         self.api_error_code
     }
-    /// Advisory only: this prototype never retries automatically.
+    /// Server backoff advice, honored by an explicitly enabled RetryPolicy.
     pub fn retry_after(&self) -> Option<Duration> {
         self.retry_after
     }
