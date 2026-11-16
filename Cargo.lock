@@ -1359,6 +1359,9 @@ name = "tg"
 version = "0.1.0-alpha.1"
 dependencies = [
  "fastrand",
+ "futures-util",
+ "http",
+ "http-body-util",
  "metrics",
  "reqwest",
  "serde",

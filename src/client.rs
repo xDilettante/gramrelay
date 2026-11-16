@@ -19,6 +19,8 @@ pub struct Bot {
 
 struct Inner {
     http: Client,
+    #[cfg(feature = "test-kit")]
+    mock: Option<crate::test_kit::MockTransport>,
     token: String,
     api_url: Url,
     timeout: Duration,
@@ -31,6 +33,8 @@ struct Inner {
 
 /// Configure trusted transport settings. Do not populate these from untrusted tool arguments.
 pub struct BotBuilder {
+    #[cfg(feature = "test-kit")]
+    mock: Option<crate::test_kit::MockTransport>,
     token: String,
     api_url: String,
     allow_http_loopback: bool,
@@ -63,6 +67,8 @@ impl Bot {
 
     pub fn builder(token: impl Into<String>) -> BotBuilder {
         BotBuilder {
+            #[cfg(feature = "test-kit")]
+            mock: None,
             token: token.into(),
             api_url: "https://api.telegram.org/".into(),
             allow_http_loopback: false,
@@ -196,12 +202,7 @@ impl Bot {
                     .map_err(|_| Error::local(ErrorKind::Validation, "request"))?;
                 dispatched = true;
                 attempt.dispatched();
-                let response = self
-                    .inner
-                    .http
-                    .execute(request)
-                    .await
-                    .map_err(transport_error)?;
+                let response = self.execute(method, request).await?;
                 consume(response).await
             };
             let timeout = timeout.map_or(self.inner.timeout, |limit| limit.min(self.inner.timeout));
@@ -221,9 +222,31 @@ impl Bot {
         attempt.finish(&result);
         result
     }
+
+    async fn execute(
+        &self,
+        _method: &'static str,
+        request: reqwest::Request,
+    ) -> Result<reqwest::Response> {
+        #[cfg(feature = "test-kit")]
+        if let Some(mock) = &self.inner.mock {
+            return mock.execute(_method, request).await;
+        }
+        self.inner
+            .http
+            .execute(request)
+            .await
+            .map_err(transport_error)
+    }
 }
 
 impl BotBuilder {
+    /// Replace network execution completely with a bounded in-memory script.
+    #[cfg(feature = "test-kit")]
+    pub fn mock_transport(mut self, mock: crate::test_kit::MockTransport) -> Self {
+        self.mock = Some(mock);
+        self
+    }
     pub fn api_url(mut self, url: impl Into<String>) -> Self {
         self.api_url = url.into();
         self
@@ -319,6 +342,8 @@ impl BotBuilder {
         Ok(Bot {
             inner: Arc::new(Inner {
                 http,
+                #[cfg(feature = "test-kit")]
+                mock: self.mock,
                 token: self.token,
                 api_url,
                 timeout: self.timeout,

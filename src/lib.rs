@@ -24,6 +24,8 @@ mod retry;
 #[cfg(feature = "bot")]
 mod routing;
 mod telemetry;
+#[cfg(feature = "test-kit")]
+pub mod test_kit;
 mod text;
 mod typed_api;
 mod types;
