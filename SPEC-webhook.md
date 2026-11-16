@@ -1,5 +1,7 @@
 # Authenticated webhook intake (R4)
 
+Status: integrated and verified on Windows / Rust 1.98.0. Memory and durable modes, shared HTTP intake, diagnostics, recovery and examples are implemented. Full-project authorization, MTProto and release gates remain separate tasks.
+
 ## Objective and boundary
 
 Implement the bot-runtime webhook module from docs/ARCHITECTURE.md. Both ordinary bots without SQLite and durable tg-agent feeds must be usable. Share authentication, parsing, admission, HTTP responses and shutdown; separate their acknowledgement/recovery semantics. In-memory queue admission alone never produces a successful response. Do not register, remove or replace the remote Telegram webhook implicitly.
@@ -27,6 +29,8 @@ Deduplicate IDs using a canonical DTO fingerprint. Matching in-flight delivery r
 
 The optional tg-agent webhook feature reuses UpdateFeed::append_webhook; 200 follows its successful commit, including an identical stored duplicate. Check verified bot identity before claiming SourceMode::Webhook; exclude polling in this process and database. A supervised heartbeat renews the lease during idle time and active HTTP work, with renewal bounded by its known expiry. Lease loss closes intake; it never silently switches mode/reclaims another worker's source. Shutdown drains HTTP/DB work, waits behind cancelled native jobs and releases the DB lease before dropping the SDK source guard. Processing remains an independent durable consumer.
 
+UpdateFeed::webhook(&bot, secret) is a lazy DurableWebhook builder. Validate its listener/options and request budget (at most half the journal lease) before identity/ownership work. Maintenance admission waits fairly for bounded DB capacity without holding a mutex; ordinary public renewal retains fail-fast behavior. Renewals sample time after the write lock and are bounded by the known remaining lease. Watch snapshots share the same fenced generation with active requests; fatal source loss closes intake. Normal stop awaits native-job cleanup; dropping the whole future leaves the database lease bounded by expiry. Optional tg-agent tracing/metrics features forward the SDK integrations.
+
 ## Implementation slices and verification
 
 1. src/webhook/{types,ingress,http}.rs: secret/options/sink contract, bounded authentication/body intake and Axum method router. Unit/integration fixtures cover repeated/wrong/missing secrets before body polling, malformed/unknown JSON, exact byte and request limits, slow/chunked bodies, fixed private diagnostics and deadline/cancellation accounting.
@@ -35,3 +39,5 @@ The optional tg-agent webhook feature reuses UpdateFeed::append_webhook; 200 fol
 4. Optional tracing/metrics contain only fixed categories and durations; no token, secret, path, bot/chat/update IDs, payload or raw errors. Document task-based use and an offline localhost example, feature matrix, dependency audit and regressions. Mark R4 complete only after both managed modes and the transport boundary are integrated and checked.
 
 Commands: cargo test --locked --workspace --all-targets --all-features; cargo test --locked --workspace --doc --all-features; cargo fmt --all -- --check; cargo clippy --locked --workspace --all-targets --all-features -- -D warnings; cargo audit. Verify client/storage-only builds separately. Existing schema generator output must remain unchanged. No live Telegram calls, remote registration, publication or push are part of this work.
+
+Verification: 214 all-feature / 172 default workspace tests, 3 doctests, Clippy, client/storage-only and isolated webhook/tracing/metrics builds, dependency audit and offline memory/durable webhook examples pass. R4-specific coverage includes 13 HTTP/ingress checks, 8 memory HTTP and 3 queue checks, 7 durable HTTP checks, fair maintenance admission and incoming telemetry privacy/cancellation. Existing J2 real-process crash/ownership checks remain in the full suite. POST-pipeline observations describe decisions after processing/commit, not proof that the peer received the response; non-POST host routing and global panic hooks remain host-owned.

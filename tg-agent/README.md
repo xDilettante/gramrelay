@@ -68,4 +68,37 @@ run_consumer_until(&bot, consumer_id, router, options, stop) независим�
 cargo run --locked --offline -p tg-agent --features bot --example durable_bot
 ```
 
-Тесты принудительно завершают настоящие дочерние процессы после получения, commit приёма, синтетического эффекта обработчика и подтверждения подписчика. Дополнительно проверяются конкурирующие процессы, восстановление offset, заполнение, heartbeat под блокировкой SQLite и отмена при max_pending(1). HTTP-аутентификацию добавит R4; разрешения на чтение и действия — A1.
+Тесты принудительно завершают настоящие дочерние процессы после получения, commit приёма, синтетического эффекта обработчика и подтверждения подписчика. Дополнительно проверяются конкурирующие процессы, восстановление offset, заполнение, heartbeat под блокировкой SQLite и отмена при max_pending(1). Разрешения на чтение и действия добавит A1.
+
+## Устойчивый webhook
+
+```toml
+[dependencies]
+tg = { path = "C:/dev/Rust/TelegramRust" }
+tg-agent = { path = "C:/dev/Rust/TelegramRust/tg-agent", features = ["webhook"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+```
+
+Опция webhook включает bot и общий HTTP-адаптер tg. UpdateFeed::webhook(&bot, secret) создаёт ленивый DurableWebhook; options(WebhookOptions) задаёт те же лимиты HTTP, что у обычного бота. serve_until(listener, stop) проверяет getMe/feed bot_id, занимает SDK guard и SourceMode::Webhook, затем отвечает 200 после append_webhook commit. Повтор с тем же fingerprint получает 200 без новой строки, конфликт — 409, заполнение — 503. События остаются в журнале после перезапуска; обработка идёт через независимый consumer.
+
+```rust,no_run
+use tg::{Bot, CancellationToken};
+use tg::webhook::WebhookSecret;
+use tg_agent::{updates::UpdateFeed, runtime::Result};
+
+async fn serve(feed: &UpdateFeed, bot: &Bot,
+    listener: tokio::net::TcpListener, secret: WebhookSecret,
+    stop: CancellationToken) -> Result<()> {
+    feed.webhook(bot, secret).serve_until(listener, stop).await
+}
+```
+
+По умолчанию общий request_timeout 30 секунд; он должен занимать не больше половины journal lease (60 секунд). Heartbeat работает и в простое, ждёт место в ограниченной очереди БД и ограничивает ожидание продления известным сроком владения. Потеря lease закрывает приём; runtime не пытается заново занять источник. Source lease освобождается после HTTP drain и всех принятых native jobs, затем освобождается SDK guard. Такая очистка БД ожидается отдельно от HTTP shutdown deadline. Если оборвать весь future вместо stop.cancel() + await, уже принятая запись может закончиться, а DB lease остаётся до истечения срока. Удалённый setWebhook/deleteWebhook выполняет хост явно; HTTP/1 listener по умолчанию loopback, TLS обслуживает хост или доверенный reverse proxy.
+
+Опции tracing и metrics перенаправляются в SDK. Диагностика webhook содержит только фиксированные статусы/причины, длительность и число активных POST-pipeline; ID, пути, секреты и тела в неё не включаются. Subscriber/recorder устанавливает приложение.
+
+Полный локальный пример с SQLite и отдельным consumer:
+
+```powershell
+cargo run --locked --offline -p tg-agent --features webhook --example durable_webhook
+```

@@ -7,6 +7,8 @@ use axum::{
     routing::post,
 };
 use std::error::Error as _;
+#[cfg(feature = "tracing")]
+use tracing::Instrument;
 
 const SECRET: &str = "x-telegram-bot-api-secret-token";
 impl WebhookIngress {
@@ -18,7 +20,14 @@ impl WebhookIngress {
     }
 }
 async fn receive(State(ingress): State<WebhookIngress>, request: Request) -> Response {
-    response(receive_inner(ingress, request).await)
+    let mut observation = super::telemetry::Observation::new();
+    let work = receive_inner(ingress, request);
+    #[cfg(feature = "tracing")]
+    let result = work.instrument(observation.span()).await;
+    #[cfg(not(feature = "tracing"))]
+    let result = work.await;
+    observation.finish(&result);
+    response(result)
 }
 async fn receive_inner(ingress: WebhookIngress, request: Request) -> Result<(), WebhookError> {
     let supplied = one(request.headers(), SECRET);
