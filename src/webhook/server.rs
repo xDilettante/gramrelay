@@ -1,4 +1,4 @@
-use super::WebhookIngress;
+use super::{WebhookIngress, WebhookOptions};
 use crate::{CancellationToken, EffectOutcome, Error, ErrorKind, Result};
 use hyper::server::conn::http1;
 use hyper_util::{
@@ -18,12 +18,7 @@ impl WebhookIngress {
     /// Serve bounded HTTP/1 behind the host's TLS proxy. Low-level callers own source identity,
     /// ownership and backend workers. Stop admission and drain accepted requests on cancellation.
     pub async fn serve_until(&self, listener: TcpListener, stop: CancellationToken) -> Result<()> {
-        let address = listener
-            .local_addr()
-            .map_err(|_| Error::local(ErrorKind::Io, "webhook_listener"))?;
-        if !address.ip().is_loopback() && !self.options().trusted_proxy {
-            return Err(Error::local(ErrorKind::Configuration, "webhook_listener"));
-        }
+        self.options().validate_listener(&listener)?;
         let _lifetime = StopOnDrop(self.clone());
         let app = self.router();
         let connection_stop = CancellationToken::new();
@@ -87,5 +82,19 @@ impl WebhookIngress {
         }
         drained.map_err(|_| Error::new(ErrorKind::Timeout, EffectOutcome::Unknown))??;
         failure.map_or(Ok(()), Err)
+    }
+}
+
+impl WebhookOptions {
+    /// Check managed plaintext listener policy before starting identity requests or source claims.
+    pub fn validate_listener(&self, listener: &TcpListener) -> Result<()> {
+        self.validate()?;
+        let address = listener
+            .local_addr()
+            .map_err(|_| Error::local(ErrorKind::Io, "webhook_listener"))?;
+        if !address.ip().is_loopback() && !self.trusted_proxy {
+            return Err(Error::local(ErrorKind::Configuration, "webhook_listener"));
+        }
+        Ok(())
     }
 }

@@ -24,6 +24,10 @@ impl Default for DispatchOptions {
     }
 }
 impl DispatchOptions {
+    #[cfg(feature = "webhook")]
+    pub(crate) fn concurrency_limit(&self) -> usize {
+        self.max_concurrency
+    }
     pub fn max_concurrency(mut self, limit: usize) -> Self {
         self.max_concurrency = limit;
         self
