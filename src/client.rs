@@ -87,6 +87,23 @@ impl Bot {
         self.inner.max_upload_bytes
     }
 
+    #[cfg(feature = "bot")]
+    pub(crate) fn request_deadline(&self) -> Duration {
+        self.inner.timeout
+    }
+
+    #[cfg(feature = "bot")]
+    pub(crate) fn identity_key(&self) -> &str {
+        let id = self
+            .inner
+            .token
+            .split(':')
+            .next()
+            .unwrap_or_default()
+            .trim_start_matches('0');
+        if id.is_empty() { "0" } else { id }
+    }
+
     pub(crate) fn post(&self, method: &str) -> Result<RequestBuilder> {
         // A leading ./ prevents the token's colon from being parsed as a URL scheme.
         let url = self

@@ -16,5 +16,7 @@ The implementation uses reqwest 0.13.5, Tokio 1.54.1, tokio-util 0.7.20 and wire
 - Bounded file reading: https://docs.rs/tokio/latest/tokio/io/trait.AsyncReadExt.html#method.take
 - AsyncRead to Stream: https://docs.rs/tokio-util/latest/tokio_util/io/struct.ReaderStream.html
 - Local HTTP mocks: https://docs.rs/wiremock/0.6.5/wiremock/
+- Cancellation tokens: https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html
+- Process signal handling: https://docs.rs/tokio/latest/tokio/signal/fn.ctrl_c.html
 
 Unknown effect handling is our conservative contract, not a Telegram idempotency guarantee. It intentionally treats connection and decode failures after dispatch as ambiguous.

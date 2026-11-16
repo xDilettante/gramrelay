@@ -15,6 +15,7 @@ pub enum ErrorKind {
     Telegram,
     Decode,
     ResponseTooLarge,
+    Handler,
 }
 
 /// What is known about the remote effect of a failed request.
@@ -42,6 +43,15 @@ pub struct Error {
 }
 
 impl Error {
+    /// Report an application-handler failure without retaining sensitive underlying errors.
+    /// The handler may already have performed side effects, so the outcome is Unknown.
+    pub fn handler(operation: &'static str) -> Self {
+        Self {
+            field: Some(operation),
+            ..Self::new(ErrorKind::Handler, EffectOutcome::Unknown)
+        }
+    }
+
     pub(crate) fn new(kind: ErrorKind, outcome: EffectOutcome) -> Self {
         Self {
             kind,

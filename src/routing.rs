@@ -121,6 +121,15 @@ impl<S: Send + Sync + 'static> Router<S> {
         Ok(())
     }
 
+    pub(crate) fn bind_username(&mut self, name: Option<&str>) -> Result<()> {
+        let actual = name.map(str::to_ascii_lowercase);
+        if self.username.is_some() && self.username != actual {
+            return Err(Error::local(ErrorKind::Configuration, "bot_username"));
+        }
+        self.username = actual;
+        self.validate()
+    }
+
     /// Dispatch one event. Manual ingestion owns concurrency and acknowledgements.
     /// Unmatched events are intentionally ignored.
     pub async fn dispatch(&self, bot: &Bot, mut update: Update) -> Result<()> {

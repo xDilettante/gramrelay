@@ -14,6 +14,8 @@
 mod client;
 mod error;
 mod files;
+#[cfg(feature = "bot")]
+mod polling;
 mod requests;
 #[cfg(feature = "bot")]
 mod routing;
@@ -23,9 +25,13 @@ mod updates;
 pub use client::{Bot, BotBuilder};
 pub use error::{EffectOutcome, Error, ErrorKind, Result};
 pub use files::InputFile;
+#[cfg(feature = "bot")]
+pub use polling::PollingOptions;
 pub use requests::{AnswerCallbackQuery, RequestFuture, SendDocument, SendMessage};
 #[cfg(feature = "bot")]
 pub use routing::{CallbackContext, MessageContext, Router, UpdateContext};
+#[cfg(feature = "bot")]
+pub use tokio_util::sync::CancellationToken;
 pub use types::{
     CallbackQuery, CallbackQueryId, Chat, ChatId, Document, FileId, InlineKeyboardButton,
     InlineKeyboardMarkup, Message, MessageId, Update, User, UserId, WebhookInfo,

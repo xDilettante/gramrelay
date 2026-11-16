@@ -11,6 +11,7 @@ Module ID: bot-runtime. Depends on the existing client/protocol slice.
 - One library-managed poller per bot ID in this process, including separate Bot instances and clones. Raw manual get_updates calls and other processes require caller coordination.
 - Polling validates its configuration and refuses to start when an active webhook is found; it never deletes the webhook implicitly.
 - A batch has at most 100 events and is bounded by the client's response-byte cap. Groups preserve admission order within chat; separate chats run concurrently up to a configured bound. Group state is discarded after the batch.
+- If any event has no identifiable chat scope (including inline callbacks without a message), the batch is serialized conservatively; it must not race a potentially related known chat. Future typed event support can restore more concurrency.
 - The next offset is requested only after the entire prior batch succeeds. Handler errors/panics/timeouts stop the poller without acknowledging that batch. Completed side effects can therefore be repeated on application restart; persistent idempotency arrives with journal integration.
 - Shutdown stops intake and drains already accepted handlers within a configured deadline. The API supports an explicit cancellation token for tests/embedding.
 - Unknown writes are never automatically retried. The first runtime version returns transport errors to its supervisor; read retry policy is a later explicit addition.

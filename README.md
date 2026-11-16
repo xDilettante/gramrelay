@@ -1,6 +1,6 @@
 # tg — прототип Telegram-библиотеки на Rust
 
-Рабочий прототип из [проекта архитектуры](docs/ARCHITECTURE.md). Crate находится в C:/dev/Rust/TelegramRust, версия 0.1.0-alpha.1. Имя tg рабочее; публикация отключена.
+Библиотека развивается до полного объёма [проекта архитектуры](docs/ARCHITECTURE.md). Crate находится в C:/dev/Rust/TelegramRust, версия 0.1.0-alpha.1. Имя tg рабочее; публикация отключена. Критерии завершения: [tasks/goal.md](tasks/goal.md).
 
 Реализованы awaitable builders для send_message, answer_callback_query и send_document; inline-кнопки, разбор callback Update, типизированные ID, ограничения нагрузки и локальные HTTP mock-тесты.
 
@@ -54,7 +54,34 @@ async fn example(bot: &Bot, received_json: &str) -> Result<(), Box<dyn std::erro
 }
 ```
 
-Хост сам принимает Update и проверяет право пользователя выполнять прикладное действие. Callback data не является доказательством такого права. Получение событий через polling/webhooks и маршрутизатор пока не реализованы. Неизвестные поля Update сохраняются в unknown_fields; повреждённые известные callback-объекты отклоняет декодер.
+Хост проверяет право пользователя выполнять прикладное действие. Callback data не является доказательством такого права. Update можно передать вручную в Router::dispatch или получать через управляемый polling. Неизвестные поля, в том числе внутри Message, сохраняются; повреждённые известные объекты и два известных вида события в одном Update отклоняет декодер. Webhook endpoint ещё не реализован.
+
+## Polling и маршрутизация
+
+Слой bot включён по умолчанию; клиент без него подключается через default-features = false.
+
+```rust,no_run
+use tg::{Bot, MessageContext, Router};
+
+async fn start(ctx: MessageContext) -> tg::Result<()> {
+    ctx.reply("Привет!").await?;
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> tg::Result<()> {
+    let bot = Bot::from_env("TELEGRAM_BOT_TOKEN")?;
+    bot.run_polling(Router::new().command("start", start)).await
+}
+```
+
+Router::with_state передаёт обработчикам явное общее состояние. Доступны command, on_message, callback, on_callback и on_update; выполняется первый совпавший маршрут. Ответ MessageContext::reply сохраняет chat_id, message_id, тему и business connection.
+
+Polling проверяет getMe и getWebhookInfo, не удаляет существующий webhook и разрешает один управляемый poller на bot ID внутри процесса. Ручные вызовы get_updates и другие процессы требуют координации приложения.
+
+По умолчанию пачка содержит до 100 событий, одновременно работают до 16 групп чатов; внутри чата порядок последовательный. При неизвестной области события вся пачка обрабатывается последовательно. Следующий offset отправляется только после успешного завершения всей пачки. Ошибка, паника или тайм-аут обработчика останавливает polling без подтверждения этой пачки. После перезапуска уже выполненные действия могут повториться: постоянный журнал ещё не интегрирован.
+
+run_polling обрабатывает Ctrl-C и завершает принятую работу в пределах shutdown timeout. Для встраивания в приложение используйте run_polling_until с PollingOptions и CancellationToken: этот вариант не регистрирует обработчик сигналов. Серверный poll_timeout должен быть меньше общего deadline клиента. Первые значения по умолчанию — 20 секунд для long polling и 30 секунд для обработчика/остановки. Транспортные ошибки возвращаются вызывающему коду; автоматического перезапуска пока нет.
 
 ## Файлы
 
@@ -143,8 +170,9 @@ cargo audit
 cargo run --example send_message -- 123456789 "Привет!"
 cargo run --example upload_document -- 123456789 "C:/path/report.pdf"
 cargo run --example answer_callback -- "C:/path/update.json"
+cargo run --example polling
 ```
 
-Проверки выполнялись на Windows x86_64, Rust 1.98.0: 23 unit/integration-теста и 2 doctest. MSRV и работа на Linux/macOS пока не подтверждены. Проверяются реальный JSON/multipart, callback, передача файла, локальные отказы, 429, 5xx, неизвестные ответы, тайм-ауты до/после dispatch и на чтении body, ограничения памяти/конкурентности, redirects и сокрытие секретов в диагностике. Живые вызовы Telegram при разработке не выполнялись.
+Проверки выполнялись на Windows x86_64, Rust 1.98.0: 42 unit/integration-теста и 2 doctest; проходят также тесты клиентской сборки без слоя bot. MSRV и работа на Linux/macOS пока не подтверждены. Проверяются JSON/multipart, callback, файлы, локальные отказы, 429, 5xx, неизвестные ответы, тайм-ауты, ограничения нагрузки, redirects, секреты в диагностике, маршрутизация, polling, порядок событий и остановка. Живые вызовы Telegram при разработке не выполнялись.
 
-Следующие этапы: приём событий и routing, постоянный журнал, CLI/MCP, генерация полной схемы Bot API, затем отдельный MTProto-клиент. Это частичное покрытие Bot API, не готовый полный фреймворк. Источники контрактов: [docs/SOURCES.md](docs/SOURCES.md). План: [tasks/todo.md](tasks/todo.md).
+Следующие этапы: полная схема Bot API, постоянный журнал и webhook endpoint, CLI/MCP, затем отдельный MTProto-клиент. Это частичное покрытие Bot API; полная цель остаётся активной. Источники контрактов: [docs/SOURCES.md](docs/SOURCES.md). План: [tasks/todo.md](tasks/todo.md).

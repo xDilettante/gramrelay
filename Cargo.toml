@@ -22,3 +22,7 @@ wiremock = "0.6"
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[[example]]
+name = "polling"
+required-features = ["bot"]
