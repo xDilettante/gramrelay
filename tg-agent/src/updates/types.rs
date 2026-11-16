@@ -114,6 +114,45 @@ pub enum SourceMode {
     Polling,
     Webhook,
 }
+
+/// Private proof of the checkpoint read for one source generation. Use immediately.
+#[derive(Clone)]
+pub struct PollCheckpoint {
+    pub(super) profile: String,
+    pub(super) bot_id: i64,
+    pub(super) source_revision: i64,
+    pub(super) revision: i64,
+    pub(super) offset: Option<i64>,
+    pub(super) issuer: String,
+    pub(super) until_ms: i64,
+}
+impl PollCheckpoint {
+    pub fn offset(&self) -> Option<i64> {
+        self.offset
+    }
+}
+impl fmt::Debug for PollCheckpoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PollCheckpoint").finish_non_exhaustive()
+    }
+}
+#[derive(Debug)]
+pub struct PollReceipt {
+    pub(super) inserted: usize,
+    pub(super) duplicates: usize,
+    pub(super) next_offset: Option<i64>,
+}
+impl PollReceipt {
+    pub fn inserted(&self) -> usize {
+        self.inserted
+    }
+    pub fn duplicates(&self) -> usize {
+        self.duplicates
+    }
+    pub fn next_offset(&self) -> Option<i64> {
+        self.next_offset
+    }
+}
 impl SourceMode {
     pub(super) fn as_str(self) -> &'static str {
         match self {
@@ -124,6 +163,7 @@ impl SourceMode {
 }
 #[derive(Clone)]
 pub struct SourceLease {
+    pub(super) issuer: String,
     pub(super) profile: String,
     pub(super) bot_id: i64,
     pub(super) revision: i64,

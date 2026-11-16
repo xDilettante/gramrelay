@@ -359,3 +359,38 @@ async fn damaged_payloads_fail_without_a_new_cursor_or_private_diagnostics() {
     assert!(!format!("{error:?} {error}").contains("PRIVATE_"));
     journal.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn source_leases_are_bound_to_the_issuing_database_instance() {
+    let directory = tempfile::tempdir().unwrap();
+    let first = Journal::open(directory.path().join("a.sqlite"), JournalOptions::default())
+        .await
+        .unwrap();
+    let second = Journal::open(directory.path().join("b.sqlite"), JournalOptions::default())
+        .await
+        .unwrap();
+    let a = UpdateFeed::open(first.clone(), "bot", 1, UpdateOptions::default())
+        .await
+        .unwrap();
+    let b = UpdateFeed::open(second.clone(), "bot", 1, UpdateOptions::default())
+        .await
+        .unwrap();
+    let a_lease = a.claim_source(SourceMode::Webhook).await.unwrap();
+    let b_lease = b.claim_source(SourceMode::Webhook).await.unwrap();
+    assert_eq!(
+        b.append_webhook(&a_lease, update(1, "wrong issuer"))
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::LeaseLost
+    );
+    assert_eq!(
+        b.release_source(a_lease).await.unwrap_err().kind(),
+        JournalErrorKind::LeaseLost
+    );
+    b.append_webhook(&b_lease, update(1, "right issuer"))
+        .await
+        .unwrap();
+    first.close().await.unwrap();
+    second.close().await.unwrap();
+}

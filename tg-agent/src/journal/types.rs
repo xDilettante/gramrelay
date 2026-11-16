@@ -425,6 +425,7 @@ impl Operation {
 }
 #[derive(Clone)]
 pub(super) struct Lease {
+    pub issuer: String,
     pub request: OperationRequest,
     pub revision: i64,
 }

@@ -1,7 +1,8 @@
 //! Durable incoming updates. Storage capabilities do not grant permission to read Telegram data.
+mod poll;
 mod types;
 use crate::journal::{
-    Journal, JournalError, JournalErrorKind, Result, deadline, now, storage,
+    Journal, JournalError, JournalErrorKind, JournalOptions, Result, deadline, now, storage,
     types::{canonical_json, millis, valid_id},
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
@@ -70,7 +71,7 @@ impl UpdateFeed {
             let changed=previous.as_deref()!=Some(mode.as_str());
             transaction.execute("UPDATE update_feeds SET source_mode=?1,source_worker=?2,source_revision=?3,source_until_ms=?4,poll_offset=CASE WHEN ?5 THEN NULL ELSE poll_offset END,poll_revision=poll_revision+?5,poll_updated_at_ms=CASE WHEN ?5 THEN NULL ELSE poll_updated_at_ms END WHERE profile=?6",params![mode.as_str(),worker,revision,until,changed,&feed.profile]).map_err(|_|storage())?;
             transaction.commit().map_err(|_|storage())?;
-            Ok(SourceLease{profile:feed.profile,bot_id:feed.bot_id,revision,mode,until_ms:until})
+            Ok(SourceLease{profile:feed.profile,bot_id:feed.bot_id,revision,mode,until_ms:until,issuer:worker.into()})
         }).await
     }
     pub async fn renew_source(&self, lease: &SourceLease) -> Result<SourceLease> {
@@ -104,6 +105,7 @@ impl UpdateFeed {
         self.check_scope(&lease)?;
         let name = self.profile.clone();
         self.journal.run(move |connection,_,worker|{
+            if lease.issuer!=worker{return Err(lost());}
             let count=connection.execute("UPDATE update_feeds SET source_worker=NULL,source_until_ms=NULL,source_revision=source_revision+1 WHERE profile=?1 AND source_worker=?2 AND source_revision=?3",params![name,worker,lease.revision]).map_err(|_|storage())?;
             if count!=1{return Err(lost());}Ok(())
         }).await
@@ -124,30 +126,33 @@ impl UpdateFeed {
         if lease.mode != SourceMode::Webhook {
             return Err(lost());
         }
-        if update.update_id < 0 || update.known_event_count() > 1 {
-            return Err(JournalError::new(JournalErrorKind::Validation));
-        }
-        let payload = canonical_json(&update, self.options.max_event_bytes)?;
-        let hash: [u8; 32] = Sha256::digest(&payload).into();
+        let event = encode_update(update, &self.options)?;
         let feed = self.clone();
         let lease = lease.clone();
-        self.journal.run(move |connection,limits,worker|{
-            let transaction=connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_|storage())?;
-            let time=now()?;verify_source(&transaction,&feed,&lease,worker,time)?;
-            let existing=transaction.query_row("SELECT sequence,payload_hash FROM updates WHERE profile=?1 AND update_id=?2",params![feed.profile,update.update_id],|row|Ok((row.get::<_,i64>(0)?,row.get::<_,Vec<u8>>(1)?))).optional().map_err(|_|storage())?;
-            if let Some((sequence,previous))=existing{
-                if previous.as_slice()!=hash{return Err(JournalError::new(JournalErrorKind::Conflict));}
-                return Ok(AppendReceipt{inserted:false,cursor:UpdateCursor{profile:feed.profile,sequence}});
-            }
-            let (entries,bytes):(i64,i64)=transaction.query_row("SELECT COALESCE(SUM(entry_count),0),COALESCE(SUM(byte_count),0) FROM update_feeds",[],|row|Ok((row.get(0)?,row.get(1)?))).map_err(|_|storage())?;
-            if entries>=limits.max_update_entries as i64||payload.len() as u128+bytes as u128>limits.max_update_bytes as u128{return Err(JournalError::new(JournalErrorKind::Capacity));}
-            let (last,received):(i64,i64)=transaction.query_row("SELECT last_sequence,last_received_at_ms FROM update_feeds WHERE profile=?1",[&feed.profile],|row|Ok((row.get(0)?,row.get(1)?))).map_err(|_|storage())?;
-            let sequence=last.checked_add(1).ok_or_else(storage)?;let received=time.max(received);
-            transaction.execute("INSERT INTO updates(profile,sequence,update_id,payload,payload_hash,chat_id,received_at_ms,expires_at_ms) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![feed.profile,sequence,update.update_id,payload,hash.as_slice(),update.chat_id().map(i64::from),received,deadline(received,feed.options.retention)?]).map_err(|_|storage())?;
-            transaction.execute("UPDATE update_feeds SET last_sequence=?1,last_received_at_ms=?2,entry_count=entry_count+1,byte_count=byte_count+?3 WHERE profile=?4",params![sequence,received,payload.len() as i64,feed.profile]).map_err(|_|storage())?;
-            transaction.commit().map_err(|_|storage())?;
-            Ok(AppendReceipt{inserted:true,cursor:UpdateCursor{profile:feed.profile,sequence}})
-        }).await
+        self.journal
+            .run(move |connection, limits, worker| {
+                let transaction = connection
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .map_err(|_| storage())?;
+                let time = now()?;
+                verify_source(&transaction, &feed, &lease, worker, time)?;
+                let stored = persist_updates(
+                    &transaction,
+                    &feed,
+                    std::slice::from_ref(&event),
+                    time,
+                    limits,
+                )?;
+                transaction.commit().map_err(|_| storage())?;
+                Ok(AppendReceipt {
+                    inserted: stored.inserted == 1,
+                    cursor: UpdateCursor {
+                        profile: feed.profile,
+                        sequence: stored.positions[0],
+                    },
+                })
+            })
+            .await
     }
     pub async fn read(&self, cursor: Option<&UpdateCursor>, limit: usize) -> Result<UpdatePage> {
         if !(1..=100).contains(&limit) {
@@ -186,6 +191,94 @@ impl UpdateFeed {
         }).await
     }
 }
+struct EncodedUpdate {
+    id: i64,
+    payload: Vec<u8>,
+    hash: [u8; 32],
+    chat_id: Option<i64>,
+}
+fn encode_update(update: tg::Update, policy: &UpdateOptions) -> Result<EncodedUpdate> {
+    if update.update_id < 0 || update.known_event_count() > 1 {
+        return Err(JournalError::new(JournalErrorKind::Validation));
+    }
+    let payload = canonical_json(&update, policy.max_event_bytes)?;
+    Ok(EncodedUpdate {
+        id: update.update_id,
+        hash: Sha256::digest(&payload).into(),
+        chat_id: update.chat_id().map(i64::from),
+        payload,
+    })
+}
+struct Persisted {
+    inserted: usize,
+    positions: Vec<i64>,
+}
+fn persist_updates(
+    connection: &Connection,
+    feed: &UpdateFeed,
+    events: &[EncodedUpdate],
+    time: i64,
+    limits: &JournalOptions,
+) -> Result<Persisted> {
+    let mut positions = vec![0; events.len()];
+    let mut fresh = Vec::new();
+    let mut new_bytes = 0usize;
+    for (index, event) in events.iter().enumerate() {
+        let existing = connection
+            .query_row(
+                "SELECT sequence,payload_hash FROM updates WHERE profile=?1 AND update_id=?2",
+                params![feed.profile, event.id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?)),
+            )
+            .optional()
+            .map_err(|_| storage())?;
+        if let Some((sequence, hash)) = existing {
+            if hash.as_slice() != event.hash {
+                return Err(JournalError::new(JournalErrorKind::Conflict));
+            }
+            positions[index] = sequence;
+        } else {
+            fresh.push(index);
+            new_bytes = new_bytes
+                .checked_add(event.payload.len())
+                .ok_or_else(storage)?;
+        }
+    }
+    let (entries, bytes): (i64, i64) = connection
+        .query_row(
+            "SELECT COALESCE(SUM(entry_count),0),COALESCE(SUM(byte_count),0) FROM update_feeds",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| storage())?;
+    if entries as u128 + fresh.len() as u128 > limits.max_update_entries as u128
+        || bytes as u128 + new_bytes as u128 > limits.max_update_bytes as u128
+    {
+        return Err(JournalError::new(JournalErrorKind::Capacity));
+    }
+    if !fresh.is_empty() {
+        let (mut sequence, received): (i64, i64) = connection
+            .query_row(
+                "SELECT last_sequence,last_received_at_ms FROM update_feeds WHERE profile=?1",
+                [&feed.profile],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|_| storage())?;
+        let received = time.max(received);
+        let expires = deadline(received, feed.options.retention)?;
+        for index in &fresh {
+            let event = &events[*index];
+            sequence = sequence.checked_add(1).ok_or_else(storage)?;
+            connection.execute("INSERT INTO updates(profile,sequence,update_id,payload,payload_hash,chat_id,received_at_ms,expires_at_ms) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![feed.profile,sequence,event.id,&event.payload,event.hash.as_slice(),event.chat_id,received,expires]).map_err(|_|storage())?;
+            positions[*index] = sequence;
+        }
+        connection.execute("UPDATE update_feeds SET last_sequence=?1,last_received_at_ms=?2,entry_count=entry_count+?3,byte_count=byte_count+?4 WHERE profile=?5",params![sequence,received,fresh.len() as i64,new_bytes as i64,feed.profile]).map_err(|_|storage())?;
+    }
+    Ok(Persisted {
+        inserted: fresh.len(),
+        positions,
+    })
+}
 fn lost() -> JournalError {
     JournalError::new(JournalErrorKind::LeaseLost)
 }
@@ -196,6 +289,9 @@ fn verify_source(
     worker: &str,
     time: i64,
 ) -> Result<()> {
+    if lease.issuer != worker {
+        return Err(lost());
+    }
     let valid:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM update_feeds WHERE profile=?1 AND bot_id=?2 AND source_worker=?3 AND source_revision=?4 AND source_mode=?5 AND source_until_ms>?6)",params![feed.profile,feed.bot_id,worker,lease.revision,lease.mode.as_str(),time],|row|row.get(0)).map_err(|_|storage())?;
     if valid { Ok(()) } else { Err(lost()) }
 }

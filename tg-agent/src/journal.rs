@@ -77,7 +77,7 @@ impl Journal {
                 transaction.execute("INSERT INTO operations(profile,operation_id,principal,action,payload_hash,state,revision,worker,lease_until_ms,created_at_ms,updated_at_ms,expires_at_ms) VALUES (?1,?2,?3,?4,?5,'prepared',1,?6,?7,?8,?8,?9)", params![request.profile,request.id,request.principal,request.action,request.hash.as_slice(),worker,lease_until.min(expires),time,expires]).map_err(|_| storage())?;
             }
             transaction.commit().map_err(|_| storage())?;
-            Ok(Preparation::Ready(Prepared(types::Lease { request, revision })))
+            Ok(Preparation::Ready(Prepared(types::Lease { request, revision, issuer:worker.into() })))
         }).await
     }
 
@@ -85,19 +85,21 @@ impl Journal {
     pub async fn begin(&self, prepared: Prepared) -> Result<InFlight> {
         self.run(move |connection, options, worker| {
             let lease = prepared.0;
+            if lease.issuer!=worker{return Err(JournalError::new(JournalErrorKind::LeaseLost));}
             let revision = lease.revision.checked_add(1).ok_or_else(storage)?;
             let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_| storage())?;
             let time = now()?;
             let count = transaction.execute("UPDATE operations SET state='in_flight',revision=?1,lease_until_ms=min(?2,expires_at_ms),updated_at_ms=?3 WHERE profile=?4 AND operation_id=?5 AND principal=?6 AND worker=?7 AND revision=?8 AND state='prepared' AND lease_until_ms>?3 AND expires_at_ms>?3 AND expired=0", params![revision,deadline(time,options.lease)?,time,lease.request.profile,lease.request.id,lease.request.principal,worker,lease.revision]).map_err(|_| storage())?;
             if count != 1 { return Err(JournalError::new(JournalErrorKind::LeaseLost)); }
             transaction.commit().map_err(|_| storage())?;
-            Ok(InFlight(types::Lease { request: lease.request, revision }))
+            Ok(InFlight(types::Lease { request: lease.request, revision,issuer:lease.issuer }))
         }).await
     }
 
     pub async fn complete(&self, flight: InFlight, completion: Completion) -> Result<Operation> {
         self.run(move |connection, options, worker| {
             let lease = flight.0;
+            if lease.issuer!=worker{return Err(JournalError::new(JournalErrorKind::LeaseLost));}
             let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_| storage())?;
             let (result, availability) = match completion.result {
                 Some(value) if options.retain_results => match types::encode(&value,options.max_result_bytes) {

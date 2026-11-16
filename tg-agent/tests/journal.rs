@@ -203,3 +203,40 @@ async fn request_bounds_and_storage_errors_are_safe() {
     assert_eq!(error.kind(), JournalErrorKind::Validation);
     assert!(!format!("{error:?} {error}").contains("PRIVATE_"));
 }
+
+#[tokio::test]
+async fn leases_from_another_database_are_not_valid_even_when_keys_and_versions_match() {
+    let directory = tempfile::tempdir().unwrap();
+    let first = Journal::open(directory.path().join("a.sqlite"), JournalOptions::default())
+        .await
+        .unwrap();
+    let second = Journal::open(directory.path().join("b.sqlite"), JournalOptions::default())
+        .await
+        .unwrap();
+    let a = prepared(first.prepare(request("same", "same")).await.unwrap());
+    let b = prepared(second.prepare(request("same", "same")).await.unwrap());
+    assert_eq!(
+        second.begin(a.clone()).await.unwrap_err().kind(),
+        JournalErrorKind::LeaseLost
+    );
+    let a = first.begin(a).await.unwrap();
+    let b = second.begin(b).await.unwrap();
+    assert_eq!(
+        second
+            .complete(a.clone(), Completion::succeeded(json!({})))
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::LeaseLost
+    );
+    first
+        .complete(a, Completion::succeeded(json!({})))
+        .await
+        .unwrap();
+    second
+        .complete(b, Completion::succeeded(json!({})))
+        .await
+        .unwrap();
+    first.close().await.unwrap();
+    second.close().await.unwrap();
+}
