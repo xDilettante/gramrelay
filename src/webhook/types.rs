@@ -129,6 +129,14 @@ impl fmt::Debug for WebhookOptions {
     }
 }
 impl WebhookOptions {
+    /// Overall admitted-request budget, including body and backend/queue waits.
+    pub fn request_budget(&self) -> Duration {
+        self.request_timeout
+    }
+    /// Deadline for draining admitted HTTP work during managed shutdown.
+    pub fn shutdown_budget(&self) -> Duration {
+        self.shutdown_timeout
+    }
     pub fn path(mut self, value: impl Into<String>) -> Self {
         self.path = value.into();
         self

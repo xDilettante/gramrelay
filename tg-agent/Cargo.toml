@@ -7,6 +7,9 @@ description = "Durable and authorized Telegram actions for agents"
 
 [features]
 bot = ["tg/bot", "tokio/macros", "tokio/time"]
+webhook = ["bot", "tg/webhook", "tokio/net"]
+tracing = ["tg/tracing"]
+metrics = ["tg/metrics"]
 
 [dependencies]
 base64 = "0.23"
@@ -19,6 +22,7 @@ tg = { path = "..", default-features = false }
 tokio = { version = "1", features = ["rt", "sync"] }
 
 [dev-dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tg = { path = "..", default-features = false, features = ["test-kit"] }
@@ -29,3 +33,7 @@ unsafe_code = "forbid"
 [[example]]
 name = "durable_bot"
 required-features = ["bot"]
+
+[[example]]
+name = "durable_webhook"
+required-features = ["webhook"]

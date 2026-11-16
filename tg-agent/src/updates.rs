@@ -84,31 +84,45 @@ impl UpdateFeed {
         }).await
     }
     pub async fn renew_source(&self, lease: &SourceLease) -> Result<SourceLease> {
+        self.renew_source_with_admission(lease, false).await
+    }
+    #[cfg(feature = "webhook")]
+    pub(crate) async fn renew_source_fenced(&self, lease: &SourceLease) -> Result<SourceLease> {
+        self.renew_source_with_admission(lease, true).await
+    }
+    async fn renew_source_with_admission(
+        &self,
+        lease: &SourceLease,
+        wait: bool,
+    ) -> Result<SourceLease> {
         self.check_scope(lease)?;
         let feed = self.clone();
         let lease = lease.clone();
         let duration = self.journal.lease_duration();
-        self.journal
-            .run(move |connection, _, worker| {
-                let transaction = connection
-                    .transaction_with_behavior(TransactionBehavior::Immediate)
-                    .map_err(|_| storage())?;
-                let time = now()?;
-                verify_source(&transaction, &feed, &lease, worker, time)?;
-                let until = deadline(time, duration)?;
-                transaction
-                    .execute(
-                        "UPDATE update_feeds SET source_until_ms=?1 WHERE profile=?2",
-                        params![until, feed.profile],
-                    )
-                    .map_err(|_| storage())?;
-                transaction.commit().map_err(|_| storage())?;
-                Ok(SourceLease {
-                    until_ms: until,
-                    ..lease
-                })
+        let action = move |connection: &mut Connection, _: &JournalOptions, worker: &str| {
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| storage())?;
+            let time = now()?;
+            verify_source(&transaction, &feed, &lease, worker, time)?;
+            let until = deadline(time, duration)?;
+            transaction
+                .execute(
+                    "UPDATE update_feeds SET source_until_ms=?1 WHERE profile=?2",
+                    params![until, feed.profile],
+                )
+                .map_err(|_| storage())?;
+            transaction.commit().map_err(|_| storage())?;
+            Ok(SourceLease {
+                until_ms: until,
+                ..lease
             })
-            .await
+        };
+        if wait {
+            self.journal.run_fenced(action).await
+        } else {
+            self.journal.run(action).await
+        }
     }
     pub async fn release_source(&self, lease: SourceLease) -> Result<()> {
         self.check_scope(&lease)?;
@@ -388,6 +402,44 @@ impl Journal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "webhook")]
+    #[tokio::test]
+    async fn heartbeat_admission_waits_behind_cancelled_native_work() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = Journal::open(
+            directory.path().join("updates.sqlite"),
+            JournalOptions::default().max_pending(1),
+        )
+        .await
+        .unwrap();
+        let feed = UpdateFeed::open(journal.clone(), "bot", 1, UpdateOptions::default())
+            .await
+            .unwrap();
+        let lease = feed.claim_source(SourceMode::Webhook).await.unwrap();
+        let (entered, waiting) = tokio::sync::oneshot::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let worker = journal.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .run(move |_, _, _| {
+                    let _ = entered.send(());
+                    blocked
+                        .recv_timeout(std::time::Duration::from_secs(3))
+                        .map_err(|_| storage())?;
+                    Ok(())
+                })
+                .await
+        });
+        waiting.await.unwrap();
+        task.abort();
+        let renewal = feed.renew_source_fenced(&lease);
+        tokio::pin!(renewal);
+        tokio::select! {biased;result=&mut renewal=>panic!("maintenance must wait: {result:?}"),_=std::future::ready(())=>{}}
+        release.send(()).unwrap();
+        renewal.await.unwrap();
+        assert!(task.await.unwrap_err().is_cancelled());
+        journal.close().await.unwrap();
+    }
     #[tokio::test]
     async fn a_well_formed_future_cursor_is_rejected_without_reading_or_advancing() {
         let directory = tempfile::tempdir().unwrap();

@@ -95,7 +95,7 @@ impl Database {
         action: impl FnOnce(&mut Connection, &JournalOptions, &str) -> Result<T> + Send + 'static,
         wait_for_slot: bool,
     ) -> Result<T> {
-        // Confirmation/release wait fairly behind admitted work without the sender mutex.
+        // Maintenance/confirmation/release wait without holding the sender mutex.
         // Normal commands still fail fast; close wakes all waiting cleanup callers.
         let permit = if wait_for_slot {
             self.pending

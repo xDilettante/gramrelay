@@ -5,3 +5,5 @@ pub mod journal;
 #[cfg(feature = "bot")]
 pub mod runtime;
 pub mod updates;
+#[cfg(feature = "webhook")]
+pub mod webhook;

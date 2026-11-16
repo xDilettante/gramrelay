@@ -44,7 +44,7 @@ impl Journal {
         self.inner.call(action).await
     }
 
-    /// Confirmation/release wait fairly for a bounded queue slot instead of returning Capacity.
+    /// Maintenance/confirmation/release wait fairly for a bounded slot instead of Capacity.
     pub(crate) async fn run_fenced<T: Send + 'static>(
         &self,
         action: impl FnOnce(&mut Connection, &JournalOptions, &str) -> Result<T> + Send + 'static,
