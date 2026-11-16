@@ -22,6 +22,20 @@ fn generated_inventory_matches_the_pinned_schema() {
     assert_eq!(catalog::TYPES, types);
     assert_eq!(catalog::METHODS.len(), 193);
     assert_eq!(catalog::TYPES.len(), 425);
+    let rarity = schema["types"]["UniqueGiftModel"]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["name"] == "rarity_per_mille")
+        .unwrap();
+    assert!(rarity.get("literal").is_none());
+    let inaccessible_date = schema["types"]["InaccessibleMessage"]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["name"] == "date")
+        .unwrap();
+    assert_eq!(inaccessible_date["literal"], 0);
     for name in ["sendMessage", "getUpdates", "sendWidget", "getUniqueGift"] {
         assert!(catalog::METHODS.contains(&name));
     }

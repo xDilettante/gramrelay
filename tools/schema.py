@@ -109,6 +109,8 @@ def sections(document: Document) -> dict[str, list[Node]]:
 
 
 def field_rows(nodes: list[Node], owner: str, is_method: bool, overrides: dict, used: set) -> list[dict] | None:
+    if any(node.tag != "table" and any(node.descendants("table")) for node in nodes):
+        raise SchemaError(f"{owner}: unsupported nested field table")
     tables = [node for node in nodes if node.tag == "table"]
     candidates = []
     for table in tables:
@@ -168,7 +170,9 @@ def field_rows(nodes: list[Node], owner: str, is_method: bool, overrides: dict, 
         ):
             if literal.group(1) not in {"one", "the", "set", "specified", "provided"}:
                 result["literal"] = literal.group(1)
-        elif wire == "Integer" and (literal := re.search(r"\balways\s+(-?\d+)\b", description, re.I)):
+        elif wire == "Integer" and (literal := re.search(
+            r"(?:^|[.!?]\s+)Always\s+(-?\d+)\s*(?:[.!?](?:\s|$)|$)", description
+        )):
             result["literal"] = int(literal.group(1))
         fields.append(result)
     return fields
@@ -321,12 +325,20 @@ def import_html(source: str, overrides: dict) -> dict:
                 variants = []
                 for node in nodes:
                     if node.tag == "ul":
-                        for link in node.descendants("a"):
-                            variant = text(link)
-                            if variant in known:
-                                expr = parse_type(variant)
-                                if expr not in variants:
-                                    variants.append(expr)
+                        for item in node.children:
+                            if not isinstance(item, Node):
+                                if item.strip():
+                                    raise SchemaError(f"{name}: unsupported union text {item!r}")
+                                continue
+                            links = list(item.descendants("a"))
+                            if item.tag != "li" or len(links) != 1 or text(item) != text(links[0]):
+                                raise SchemaError(f"{name}: unsupported union item {text(item)!r}")
+                            variant = text(links[0])
+                            if variant not in known:
+                                raise SchemaError(f"{name}: unknown union variant {variant!r}")
+                            expr = parse_type(variant)
+                            if expr not in variants:
+                                variants.append(expr)
                 description = " ".join(text(node) for node in nodes)
                 if name == "RichText" and "String" in description and "Array" in description:
                     variants[:0] = [{"kind":"primitive","name":"String"},

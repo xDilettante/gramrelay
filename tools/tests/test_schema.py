@@ -58,6 +58,29 @@ class SchemaTests(unittest.TestCase):
         schema = import_html(html, {})
         self.assertEqual(schema["types"]["TrueVariant"]["fields"][0]["literal"], "known")
 
+    def test_conditional_numeric_fact_is_not_an_unconditional_literal(self):
+        html = FIXTURE.replace("Identifier", "Rarity. Always 0 for crafted gifts.")
+        schema = import_html(html, {})
+        self.assertNotIn("literal", schema["types"]["Message"]["fields"][0])
+        unconditional = import_html(FIXTURE.replace("Identifier", "Always 0"), {})
+        self.assertEqual(unconditional["types"]["Message"]["fields"][0]["literal"], 0)
+
+    def test_wrapped_parameter_table_is_not_silently_discarded(self):
+        start = FIXTURE.index("<table>", FIXTURE.index('name="sendmessage"'))
+        end = FIXTURE.index("</table>", start) + len("</table>")
+        html = FIXTURE[:start] + "<div>" + FIXTURE[start:end] + "</div>" + FIXTURE[end:]
+        with self.assertRaisesRegex(SchemaError, "sendMessage"):
+            import_html(html, {})
+
+    def test_unknown_union_label_is_not_silently_deleted(self):
+        html = FIXTURE.replace("</ul>", '<li><a href="#empty">Empty</a></li></ul>', 1)
+        html = html.replace(">TrueVariant</a>", ">UnexpectedVariant</a>", 1)
+        with self.assertRaisesRegex(SchemaError, "UnexpectedVariant"):
+            import_html(html, {})
+        unlinked = FIXTURE.replace("</ul>", "<li>UnexpectedVariant</li></ul>", 1)
+        with self.assertRaisesRegex(SchemaError, "UnexpectedVariant"):
+            import_html(unlinked, {})
+
     def test_unresolved_reference_is_a_hard_error(self):
         with self.assertRaisesRegex(SchemaError, "Missing"):
             import_html(FIXTURE.replace("<td>Integer</td>", "<td>Missing</td>", 1), {})

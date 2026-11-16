@@ -29444,7 +29444,6 @@
           }
         },
         {
-          "literal": 0,
           "name": "rarity_per_mille",
           "required": true,
           "type": {

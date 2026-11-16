@@ -2,7 +2,7 @@
 
 pub const BOT_API_VERSION: &str = "10.4";
 pub const SOURCE_SHA256: &str = "3e2ea7b370e5ab4e9b9d275e4d88d7a0ec9350b67449a0f877fd939bce39ec67";
-pub const SCHEMA_SHA256: &str = "41617a4144483dc982219acc4ded5a2a159e0115d9d525571be8569206759aba";
+pub const SCHEMA_SHA256: &str = "ab64ce7cc9b0344bde3dc50b8552632067361f2cb317dc42d5d592f06c7d89b9";
 
 pub const METHODS: &[&str] = &[
     "addStickerToSet",
