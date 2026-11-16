@@ -335,7 +335,7 @@ fn text(value: &str, min: usize, max: usize) -> Result<()> {
         Ok(())
     }
 }
-pub(super) fn valid_id(value: &str) -> Result<()> {
+pub(crate) fn valid_id(value: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 128
         || !value
@@ -372,7 +372,7 @@ struct WireRequest {
 }
 // Serde's derived struct/adjacent-enum visitors also accept positional arrays.
 // Restrict the tool boundary to objects while retaining duplicate-field checks.
-fn map_only<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+pub(crate) fn map_only<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,

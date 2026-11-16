@@ -6,6 +6,10 @@
 mod policy;
 mod runtime;
 mod types;
+#[cfg(feature = "host")]
+pub(crate) use runtime::validate_cursor;
+#[cfg(feature = "host")]
+pub(crate) use types::{map_only as deserialize_object, valid_id as validate_identifier};
 
 pub use runtime::{
     BotInfo, CallbackClockPolicy, CallbackReference, ChatInfo, ExecutionResult, Executor,

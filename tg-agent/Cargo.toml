@@ -7,7 +7,8 @@ description = "Durable and authorized Telegram actions for agents"
 
 [features]
 executor = ["tokio/time"]
-cli = ["executor", "tokio/io-util"]
+host = ["executor", "tokio/io-util", "tokio/fs"]
+cli = ["host", "tokio/io-std", "tokio/rt-multi-thread"]
 bot = ["tg/bot", "tokio/macros", "tokio/time"]
 webhook = ["bot", "tg/webhook", "tokio/net"]
 tracing = ["tg/tracing"]
@@ -25,9 +26,10 @@ tokio = { version = "1", features = ["rt", "sync"] }
 
 [dev-dependencies]
 jsonschema = { version = "0.61.2", default-features = false }
+wiremock = "0.6"
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "process"] }
 tg = { path = "..", default-features = false, features = ["test-kit"] }
 
 [lints.rust]

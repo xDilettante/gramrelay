@@ -73,6 +73,59 @@ Standalone callback reads require the explicitly configured TrustedWallClock
 mode when original monotonic provenance belongs to another journal lifetime;
 default JournalMonotonic remains fail-closed.
 
+An operator may preload callback_observations=[{profile,cursor}] using exact event
+cursors from the existing feed (at most 1024). The host reads only that retained
+record within the event byte bound and calls Executor::observe_callback with
+current source/scope/expiry checks before issuing configured approvals. A cursor
+is a position, never authority. This supports one-shot callback calls and exact
+callback approvals across process lifetimes only under the explicit clock trust
+policy; malformed/expired/composite/forbidden observations fail startup. Tool
+requests cannot supply observations or change the clock policy. Long-lived serve
+may also register references through authorized read_updates normally.
+
+Profile update_options optionally specifies retention_seconds, max_event_bytes
+and max_batch_bytes, using A1 defaults otherwise. Validate through the shared
+UpdateOptions contract before storage; settings must match an existing immutable
+feed, never silently change its retention or positions.
+
+Config input is capped at 1 MiB; profiles at 64, approvals at 256, restorations
+at 1024. Every config object rejects positional arrays, unknown/duplicate fields.
+Profile names and bot IDs are unique; resource/action/cost lists reject duplicates.
+Validate all static fields, grants, references and environment-built clients
+before opening the journal. Startup performs no identity/Telegram RPC. Runtime
+metadata/restoration/approval failures close the opened journal before reporting.
+The host's protected configuration directory and token environment are authority,
+not an authentication mechanism for untrusted operating-system processes.
+
+Minimal host config (paths must be actual absolute platform paths):
+
+```json
+{
+  "schema_version": 1,
+  "principal": "local-agent",
+  "journal_path": "C:/protected/telegram-agent.sqlite",
+  "profiles": [{
+    "name": "work",
+    "bot_id": "123456789",
+    "token_env": "TG_WORK_TOKEN",
+    "grant": {
+      "actions": ["send_message", "get_operation"],
+      "chats": ["123456789"],
+      "budget": {"id": "persistent-work-budget"}
+    }
+  }]
+}
+```
+
+Grant optional fields: all_chats (exclusive with nonempty chats), files,
+unscoped_updates, expires_at_ms, require_approval, costs=[{action,units}]. Empty
+action/resource lists deny. Budget accepts window_seconds (default 60) and limits
+{invocations,write_attempts,upload_bytes,cost_units}, with shared A1 defaults.
+Approval entries are {request:<exact Request>,expires_at_ms}; restoration entries
+are {profile,file_handle,path}. callback_clock_policy is journal_monotonic by
+default or explicit trusted_wall_clock. Token environment names are ASCII
+[A-Z_][A-Z0-9_]{0,127}. Tokens, raw paths and remote descriptions never enter errors.
+
 Input document/frame limit is Request::MAX_JSON_BYTES before dispatch. Bounded
 framing never read_until-allocates an arbitrary line. Oversize closes the stream
 after one safe error; malformed bounded frames receive an error and serve keeps
@@ -109,3 +162,12 @@ uses real host policy/executor and all acceptance cases are verified.
    immutable file restoration and explicit approvals; wire standalone run/serve.
 3. Executable-level localhost execution/restart/approval/IO regressions, complete
    docs and full gates. Only then mark A2 complete; A3 still remains separate.
+
+Current implementation: all three increments are integrated. Standalone tools,
+schema, run/serve and dry-run use the same ToolSession/Executor. Eighteen real
+process tests cover every action, config/scope/approval/cursor preflight, exact
+restoration and callback source, immutable feed settings, quota/restart/Unknown,
+framing and a broken stdout pipe. Verified: 328 all-feature / 178 default tests,
+3 doctests, 21 protocol schema tests, deterministic agent schemas, Clippy/fmt,
+isolated storage/executor/host/CLI builds and dependency audit. A2 is complete;
+A3 and the full architecture remain open. See docs/AGENT-CLI.md.

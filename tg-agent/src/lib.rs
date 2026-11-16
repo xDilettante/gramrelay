@@ -5,6 +5,8 @@
 pub mod cli;
 #[cfg(feature = "executor")]
 pub mod executor;
+#[cfg(feature = "host")]
+pub mod host;
 pub mod journal;
 #[cfg(feature = "bot")]
 pub mod runtime;

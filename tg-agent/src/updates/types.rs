@@ -34,7 +34,7 @@ impl UpdateOptions {
         self.max_batch_bytes = value;
         self
     }
-    pub(super) fn validate(&self, limits: &JournalOptions) -> Result<()> {
+    pub(crate) fn validate(&self, limits: &JournalOptions) -> Result<()> {
         millis(self.retention)?;
         if self.max_event_bytes == 0
             || self.max_event_bytes > self.max_batch_bytes

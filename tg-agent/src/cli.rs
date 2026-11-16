@@ -1,5 +1,5 @@
 //! Bounded JSON adapters for an explicitly configured trusted-host ToolSession.
-//! Standalone host configuration/execution is the remaining A2 increment.
+//! Standalone execution loads operator configuration through the shared Host.
 use crate::{
     executor::Request,
     tools::{ExecutionMode, OutputLimit, ToolError, ToolResponse, ToolSession, encode_response},
@@ -142,6 +142,9 @@ fn io_error() -> ToolError {
 /// Thin executable shell; discovery is independent of credentials and storage.
 pub fn entrypoint() -> ExitCode {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if let Some((serve, path, mode)) = execution_args(&args) {
+        return launch(serve, path, mode);
+    }
     let args = args
         .iter()
         .map(|value| value.to_str())
@@ -149,7 +152,7 @@ pub fn entrypoint() -> ExitCode {
     let value = match args.as_deref() {
         Some(["--help"] | ["help"]) => {
             println!(
-                "tg-agent tools\ntg-agent schema [request|response|catalog]\n\nDiscovery requires no credentials. Embedded JSON execution uses cli::run_json/serve_jsonl with a trusted ToolSession."
+                "tg-agent tools\ntg-agent schema [request|response|catalog]\ntg-agent run --config ABSOLUTE_PATH [--dry-run]\ntg-agent serve --config ABSOLUTE_PATH [--dry-run]\n\nDiscovery requires no credentials. Execution uses protected host configuration and environment-only tokens."
             );
             return ExitCode::SUCCESS;
         }
@@ -162,7 +165,7 @@ pub fn entrypoint() -> ExitCode {
         _ => {
             let response = ToolResponse::Error(ToolError::new(
                 "agent_usage",
-                "Use tg-agent tools or tg-agent schema [request|response|catalog].",
+                "Use tools, schema [request|response|catalog], or run/serve --config ABSOLUTE_PATH [--dry-run].",
             ));
             let mut stdout = std::io::stdout().lock();
             let _ = serde_json::to_writer(&mut stdout, &response);
@@ -183,4 +186,78 @@ pub fn entrypoint() -> ExitCode {
         return ExitCode::from(2);
     }
     ExitCode::SUCCESS
+}
+fn execution_args(args: &[std::ffi::OsString]) -> Option<(bool, &std::path::Path, ExecutionMode)> {
+    let [command, flag, path, options @ ..] = args else {
+        return None;
+    };
+    if flag != "--config" || (command != "run" && command != "serve") {
+        return None;
+    }
+    let mode = match options {
+        [] => ExecutionMode::Execute,
+        [flag] if flag == "--dry-run" => ExecutionMode::DryRun,
+        _ => return None,
+    };
+    Some((command == "serve", std::path::Path::new(path), mode))
+}
+fn launch(serve: bool, path: &std::path::Path, mode: ExecutionMode) -> ExitCode {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => {
+            return startup_error(ToolError::new(
+                "agent_runtime",
+                "Host runtime could not start.",
+            ));
+        }
+    };
+    runtime.block_on(async {
+        let host = match crate::host::Host::load(path).await {
+            Ok(host) => host,
+            Err(error) => return startup_error(error),
+        };
+        let result = if serve {
+            serve_jsonl(
+                host.session(),
+                tokio::io::stdin(),
+                tokio::io::stdout(),
+                mode,
+                OutputLimit::default(),
+            )
+            .await
+            .map(|_| false)
+        } else {
+            run_json(
+                host.session(),
+                tokio::io::stdin(),
+                tokio::io::stdout(),
+                mode,
+                OutputLimit::default(),
+            )
+            .await
+        };
+        let closed = host.close().await;
+        match (result, closed) {
+            (Err(error), _) | (_, Err(error)) => {
+                eprintln!("{}", error.code());
+                ExitCode::from(2)
+            }
+            (Ok(is_error), Ok(())) => ExitCode::from(u8::from(is_error)),
+        }
+    })
+}
+fn startup_error(error: ToolError) -> ExitCode {
+    let response = ToolResponse::Error(error);
+    let mut stdout = std::io::stdout().lock();
+    if serde_json::to_writer(&mut stdout, &response).is_err()
+        || stdout.write_all(b"\n").is_err()
+        || stdout.flush().is_err()
+    {
+        eprintln!("agent_io");
+    }
+    ExitCode::from(2)
 }

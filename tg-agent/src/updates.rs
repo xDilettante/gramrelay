@@ -217,6 +217,25 @@ impl UpdateFeed {
         self.read_with_budget(cursor, limit, self.options.max_batch_bytes)
             .await
     }
+    #[cfg(feature = "host")]
+    pub(crate) async fn event_at(&self, cursor: &UpdateCursor) -> Result<Option<StoredUpdate>> {
+        if cursor.profile != self.profile || cursor.sequence <= 0 {
+            return Err(JournalError::new(JournalErrorKind::Validation));
+        }
+        let previous = UpdateCursor {
+            profile: self.profile.clone(),
+            sequence: cursor.sequence - 1,
+        };
+        let page = self
+            .read_with_budget(Some(&previous), 1, self.options.max_event_bytes)
+            .await?;
+        // A missing/pruned position must never resolve to the following event.
+        Ok(page
+            .into_events()
+            .into_iter()
+            .next()
+            .filter(|event| event.cursor() == cursor))
+    }
     pub(crate) async fn read_with_budget(
         &self,
         cursor: Option<&UpdateCursor>,

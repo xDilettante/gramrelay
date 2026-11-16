@@ -162,6 +162,7 @@ impl ToolError {
             request,
         )
     }
+    #[cfg(feature = "cli")]
     pub(crate) fn output_io(request: Option<&Request>) -> Self {
         Self::delivery_error(
             "agent_io",

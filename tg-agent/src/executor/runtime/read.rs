@@ -457,7 +457,7 @@ impl Executor {
 fn invalid_response() -> ExecutorError {
     ExecutorError::new(ExecutorErrorKind::InvalidResponse)
 }
-fn validate_cursor(request: &Request) -> Result<Option<UpdateCursor>> {
+pub(crate) fn validate_cursor(request: &Request) -> Result<Option<UpdateCursor>> {
     let ActionCall::ReadUpdates(args) = request.call() else {
         return Ok(None);
     };

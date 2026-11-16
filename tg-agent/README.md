@@ -1,6 +1,6 @@
 # tg-agent
 
-Отдельный пакет для постоянного состояния и инструментов агентов. Реализованы SQLite-журнал операций, хранение updates, checkpoint polling, независимые подтверждения потребителей, HTTP webhook и авторизованный исполнитель восьми действий A1. CLI и MCP следуют за ним. Хранилище не выдаёт права Telegram: principal/profile поступают от доверенного хоста, который обязан проверять текущие разрешения перед вызовом и выдачей сохранённого результата.
+Отдельный пакет для постоянного состояния и инструментов агентов. Реализованы SQLite-журнал операций, хранение updates, checkpoint polling, независимые подтверждения потребителей, HTTP webhook и авторизованный исполнитель восьми действий A1. Общий JSON-интерфейс и самостоятельный CLI реализованы; MCP следует за ними. Хранилище не выдаёт права Telegram: principal/profile поступают от доверенного хоста, который обязан проверять текущие разрешения перед вызовом и выдачей сохранённого результата.
 
 ## Типы инструментов и политика A1
 
@@ -38,17 +38,20 @@ cargo run --locked --offline -p tg-agent --features executor --example authorize
 cargo run --locked --offline -p tg-agent --features executor --example authorized_document
 ```
 
-## Общий JSON-интерфейс (A2 в работе)
+## Общий JSON-интерфейс и CLI (A2)
 
 tools::ToolSession создаётся доверенным Rust-хостом из Executor и Principal. execute_for дополнительно связывает выбранное имя инструмента с Request.call.tool до допуска; входной JSON не получает прав задавать principal, grant или approval. Host-only approve хранит точное подтверждение запроса; clear_approvals удаляет сохранённые подтверждения для последующих вызовов. Для отзыва capability, уже переданного выполняющемуся вызову, нужно изменить/отозвать grant в PolicyStore; допущенный удалённый эффект нельзя отменить. Текущие права и ревизия политики проверяются исполнителем и при чтении кеша.
 
 Ответ имеет schema_version=1, ok и result/dry_run/error. ok=true означает получение результата исполнителя: для записи нужно проверить operation.state и result_availability. Ошибки содержат статический code/message и automatic_retry_allowed=false; ошибки проверенной записи сохраняют operation_id и next_action=get_operation. Сбой вывода после действия также сохраняет ключ и unknown; Debug/Display не показывают payload или идентификаторы.
 
-Опция cli включает встроенные cli::run_json/serve_jsonl и бинарный tg-agent для tools/schema. NDJSON обрабатывается последовательно; кадр до 65536 байтов, output по умолчанию до 8 MiB. Слишком большой кадр закрывает поток, обычный некорректный кадр получает ошибку без выполнения. Самостоятельные команды run/serve с конфигурацией хоста ещё не реализованы; A2 остаётся открытым, MCP — следующий модуль.
+Опция cli включает встроенные cli::run_json/serve_jsonl и бинарный tg-agent с tools/schema/run/serve. run --config ABSOLUTE_PATH принимает один JSON-документ, serve --config ABSOLUTE_PATH — NDJSON; --dry-run проверяет запрос без отправки. Кадр ограничен 65536 байтами, output по умолчанию — 8 MiB. Слишком большой кадр закрывает поток, обычный некорректный кадр получает ошибку без выполнения. Все восемь действий используют общий исполнитель. [Полное руководство CLI](../docs/AGENT-CLI.md).
+
+Опция host отдельно открывает Host::load для встраиваемого приложения/MCP. Конфигурация оператора задаёт principal, абсолютный путь журнала, профили, grants и имена переменных окружения токенов. Неизменяемые файлы восстанавливаются только по заранее выданному handle и совпадающим байтам. Подтверждения содержат точный Request и expiry; callback_observations связывает точный cursor события с текущими scope/TTL перед подтверждением. Межпроцессные callback требуют явного trusted_wall_clock; модель не может задавать эти host-параметры через tool JSON. Загрузка выполняет статические проверки до открытия БД, не отправляет RPC и закрывает журнал при последующем сбое. EOF завершает работу с явным close.
 
 ```powershell
 cargo run --locked --offline -p tg-agent --features cli --bin tg-agent -- tools
 cargo run --locked --offline -p tg-agent --features cli --bin tg-agent -- schema request
+cargo run --locked --offline -p tg-agent --features cli --bin tg-agent -- run --config C:/protected/host.json --dry-run
 cargo run --locked --offline -p tg-agent --features cli --example agent_json
 python tools/agent_schema.py check
 ```

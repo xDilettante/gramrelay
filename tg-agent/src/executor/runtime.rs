@@ -22,6 +22,8 @@ use tokio::{
 mod callbacks;
 mod files;
 mod read;
+#[cfg(feature = "host")]
+pub(crate) use read::validate_cursor;
 mod write;
 pub use callbacks::{CallbackClockPolicy, CallbackReference};
 use callbacks::{CallbackRegistry, ReferenceDeadline};
