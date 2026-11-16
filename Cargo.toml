@@ -52,3 +52,7 @@ required-features = ["bot"]
 [[example]]
 name = "test_kit"
 required-features = ["test-kit"]
+
+[[example]]
+name = "webhook_mock"
+required-features = ["webhook", "test-kit"]
