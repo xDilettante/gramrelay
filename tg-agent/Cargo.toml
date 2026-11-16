@@ -6,6 +6,7 @@ publish = false
 description = "Durable and authorized Telegram actions for agents"
 
 [features]
+executor = []
 bot = ["tg/bot", "tokio/macros", "tokio/time"]
 webhook = ["bot", "tg/webhook", "tokio/net"]
 tracing = ["tg/tracing"]
