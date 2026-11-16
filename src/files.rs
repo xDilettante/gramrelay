@@ -13,11 +13,21 @@ pub struct InputFile(Source);
 
 enum Source {
     Bytes { name: String, bytes: Vec<u8> },
+    Owned { name: String, bytes: bytes::Bytes },
     Path(PathBuf),
     FileId(String),
 }
 
 impl InputFile {
+    /// Shares an owned immutable buffer without copying its contents.
+    /// The owner stays alive until the multipart body releases its bytes, even
+    /// if the caller stops waiting. `AsRef` is evaluated once at construction.
+    pub fn owned_bytes(name: impl Into<String>, owner: impl AsRef<[u8]> + Send + 'static) -> Self {
+        Self(Source::Owned {
+            name: name.into(),
+            bytes: bytes::Bytes::from_owner(owner),
+        })
+    }
     pub fn bytes(name: impl Into<String>, bytes: impl Into<Vec<u8>>) -> Self {
         Self(Source::Bytes {
             name: name.into(),
@@ -52,6 +62,15 @@ impl InputFile {
                 check_size(length, max_bytes)?;
                 validate_name(&name)?;
                 (Part::bytes(bytes).file_name(name), length)
+            }
+            Source::Owned { name, bytes } => {
+                let length = bytes.len() as u64;
+                check_size(length, max_bytes)?;
+                validate_name(&name)?;
+                (
+                    Part::stream_with_length(Body::from(bytes), length).file_name(name),
+                    length,
+                )
             }
             Source::Path(path) => {
                 let name = path

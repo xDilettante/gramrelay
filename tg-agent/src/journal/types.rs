@@ -67,6 +67,7 @@ pub struct JournalOptions {
     pub(crate) max_update_feeds: usize,
     pub(crate) max_update_consumers: usize,
     pub(crate) max_budget_ledgers: usize,
+    pub(crate) max_file_handles: usize,
 }
 impl Default for JournalOptions {
     fn default() -> Self {
@@ -82,10 +83,15 @@ impl Default for JournalOptions {
             max_update_feeds: 64,
             max_update_consumers: 256,
             max_budget_ledgers: 4096,
+            max_file_handles: 100_000,
         }
     }
 }
 impl JournalOptions {
+    pub fn max_file_handles(mut self, value: usize) -> Self {
+        self.max_file_handles = value;
+        self
+    }
     pub fn max_budget_ledgers(mut self, value: usize) -> Self {
         self.max_budget_ledgers = value;
         self
@@ -149,6 +155,8 @@ impl JournalOptions {
             || self.max_update_consumers > 1_000_000
             || self.max_budget_ledgers == 0
             || self.max_budget_ledgers > 1_000_000
+            || self.max_file_handles == 0
+            || self.max_file_handles > 1_000_000
             || update_bound.is_none_or(|value| value > i64::MAX as u128)
         {
             return Err(JournalError::new(JournalErrorKind::Validation));

@@ -134,19 +134,16 @@ Include handle and immutable content metadata in the canonical operation fingerp
 
 Commands: cargo test --locked --workspace --all-targets --all-features; cargo test --locked --workspace --doc --all-features; cargo fmt --all -- --check; cargo clippy --locked --workspace --all-targets --all-features -- -D warnings; cargo audit. Run schema/migration and isolated feature checks appropriate to each increment. A1 completion requires all actions and abuse/recovery invariants, not just a passing send-message slice. A2/A3 publish the same typed schemas/semantics through CLI and official rmcp.
 
-Current implementation: increments 1 through 3 are integrated. execute supports
-get_me/get_chat/read_updates/get_operation/send_message/edit_message_text and
-answer_callback_query; send_document explicitly returns UnsupportedAction until
-increment 4. Policy-only dry-run remains local; executor dry-run/approval resolves
-registered callback references, immutable owner-checked operation scopes and cursor
-position metadata without state refresh, RPC or quota. Schema v4 freezes authorization.sql; later durable file
-registration metadata will require a subsequent reviewed migration, not an edit
-of v4. The current ledger capacity is configurable (4096 by default). Default
-executor concurrency/RPC/receipt budgets are 16/30 seconds/5 seconds. Tests cover
-ten policy, eight admission/storage, eleven end-to-end send/recovery, seventeen
-read/boundary, twelve callback, three edit and five migration cases, plus bounded
-receipt-provenance and post-begin deadline regressions. Offline authorized_send
-makes one identity read and one send for two invocations; authorized_read performs
-no RPC at all. authorized_callback observes a fresh local event and acknowledges
-twice under one key with only one callback RPC.
-Full A1 and the architecture goal remain open.
+Current implementation: all four increments and eight actions are integrated.
+Policy-only dry-run remains local; executor dry-run/approval resolves registered
+callback references, immutable owner-checked file/operation scopes and cursor
+position metadata without state refresh, RPC or quota. It does not promise active
+file bytes or quota availability. Schema v4 authorization.sql stays frozen;
+v5 files.sql adds immutable metadata. See SPEC-agent-files.md for file limits,
+restoration and ownership. Ledger capacity defaults to 4096; executor concurrency/
+RPC/receipt budgets to 16/30 seconds/5 seconds. Tests cover ten policy, eight
+admission/storage, eleven send/recovery, seventeen read/boundary, twelve callback,
+three edit, twelve file and seven migration cases, plus provenance, ownership and
+post-wait expiry/deadline regressions. Four offline authorized_* examples cover
+all action families without Telegram connections. CLI/MCP and the full
+architecture goal remain open as A2/A3 and subsequent tasks.

@@ -50,3 +50,7 @@ required-features = ["executor"]
 [[example]]
 name = "authorized_callback"
 required-features = ["executor"]
+
+[[example]]
+name = "authorized_document"
+required-features = ["executor"]

@@ -9,8 +9,8 @@ mod types;
 
 pub use runtime::{
     BotInfo, CallbackClockPolicy, CallbackReference, ChatInfo, ExecutionResult, Executor,
-    ExecutorOptions, FailureReceipt, MessageReceipt, OperationReceipt, ReadEvent, ReadEventScope,
-    ReadPage,
+    ExecutorOptions, FailureReceipt, FileLimits, MessageReceipt, OperationReceipt, ReadEvent,
+    ReadEventScope, ReadPage, RegisteredFile,
 };
 
 pub use policy::{

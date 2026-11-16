@@ -32,12 +32,13 @@ Text and document replies share delivery validation. reply_document/ephemeral_re
 
 Requests still make one attempt by default. Generated Call accepts RetryPolicy for reviewed reads, with bounded elapsed time, attempt count and backoff/jitter. Confirmed ordinary JSON 429 refusals require retry_rejected_writes(true); Unknown writes, credential/session operations, migrations and temporal references remain ineligible. Multipart replay is rejected before dispatch. Downloads do not retry into a potentially partially written destination.
 
-## Agent journal v4
+## Agent journal v5
 
-Opening an agent journal upgrades reviewed v1/v2/v3 databases to v4 in one
+Opening an agent journal upgrades reviewed v1/v2/v3/v4 databases to v5 in one
 transaction, including storage-only builds. Existing operation keys, receipts,
 update positions and source/consumer ownership are retained. New tables persist
-executor scopes and fixed-window budget counters; older library versions reject
+executor scopes, fixed-window budget counters and immutable file metadata;
+older library versions reject
 this schema. Back up the protected SQLite directory before upgrading a deployed
 host. Do not replace a live database with a pre-send backup to retry an uncertain
 operation: doing so erases the deduplication boundary.
@@ -48,3 +49,9 @@ an arbitrary result. Retain those keys and choose a distinct executor namespace
 only as an explicit host migration decision, never as automatic retry recovery.
 Budget identities persist across grant revisions. Changing a fixed window needs
 a new host-chosen budget identity; revocation/restart alone does not reset usage.
+
+File bytes are resident snapshots, not SQLite content. New uploads after restart
+require explicit host restoration of identical bytes for the retained handle;
+cached/get_operation receipts require current file scope but no resident bytes.
+Never renew an old handle by overwriting metadata. Register a new file intent
+explicitly when content/expiry changes, retaining old operation keys and receipts.

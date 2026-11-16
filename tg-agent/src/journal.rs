@@ -4,6 +4,8 @@ pub(crate) mod authorization;
 #[cfg(all(test, feature = "executor"))]
 #[path = "journal/authorization_tests.rs"]
 mod authorization_tests;
+#[cfg(feature = "executor")]
+pub(crate) mod files;
 pub(crate) mod types;
 mod worker;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
@@ -333,7 +335,7 @@ fn initialize(connection: &mut Connection) -> Result<()> {
         transaction
             .pragma_update(None, "application_id", APPLICATION)
             .map_err(|_| storage())?;
-    } else if application != APPLICATION || !(1..=4).contains(&version) {
+    } else if application != APPLICATION || !(1..=5).contains(&version) {
         return Err(JournalError::new(JournalErrorKind::UnsupportedSchema));
     }
     if version < 2 {
@@ -376,6 +378,23 @@ fn initialize(connection: &mut Connection) -> Result<()> {
             .pragma_update(None, "user_version", 4)
             .map_err(|_| storage())?;
     }
+    if version < 5 {
+        verify_schema(
+            &transaction,
+            &[
+                include_str!("journal/schema.sql"),
+                include_str!("updates/schema.sql"),
+                include_str!("updates/consumers.sql"),
+                include_str!("journal/authorization.sql"),
+            ],
+        )?;
+        transaction
+            .execute_batch(include_str!("journal/files.sql"))
+            .map_err(|_| storage())?;
+        transaction
+            .pragma_update(None, "user_version", 5)
+            .map_err(|_| storage())?;
+    }
     verify_schema(
         &transaction,
         &[
@@ -383,6 +402,7 @@ fn initialize(connection: &mut Connection) -> Result<()> {
             include_str!("updates/schema.sql"),
             include_str!("updates/consumers.sql"),
             include_str!("journal/authorization.sql"),
+            include_str!("journal/files.sql"),
         ],
     )?;
     transaction.commit().map_err(|_| storage())?;

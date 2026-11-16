@@ -20,10 +20,12 @@ use tokio::{
     time::{Instant, timeout, timeout_at},
 };
 mod callbacks;
+mod files;
 mod read;
 mod write;
 pub use callbacks::{CallbackClockPolicy, CallbackReference};
 use callbacks::{CallbackRegistry, ReferenceDeadline};
+pub use files::{FileLimits, RegisteredFile};
 pub use read::{BotInfo, ChatInfo, ReadEvent, ReadEventScope, ReadPage};
 
 #[derive(Debug, Clone)]
@@ -35,6 +37,7 @@ pub struct ExecutorOptions {
     callback_ttl: Duration,
     max_callback_references: usize,
     callback_clock_policy: CallbackClockPolicy,
+    file_limits: FileLimits,
 }
 impl Default for ExecutorOptions {
     fn default() -> Self {
@@ -46,10 +49,15 @@ impl Default for ExecutorOptions {
             callback_ttl: Duration::from_secs(10),
             max_callback_references: 1024,
             callback_clock_policy: CallbackClockPolicy::JournalMonotonic,
+            file_limits: FileLimits::default(),
         }
     }
 }
 impl ExecutorOptions {
+    pub fn file_limits(mut self, value: FileLimits) -> Self {
+        self.file_limits = value;
+        self
+    }
     pub fn callback_ttl(mut self, value: Duration) -> Self {
         self.callback_ttl = value;
         self
@@ -79,6 +87,7 @@ impl ExecutorOptions {
         self
     }
     fn validate(&self) -> Result<()> {
+        self.file_limits.validate()?;
         if self.max_in_flight == 0
             || self.max_in_flight > 1024
             || self.request_budget.is_zero()
@@ -115,6 +124,7 @@ pub struct Executor {
     slots: Arc<Semaphore>,
     options: ExecutorOptions,
     callback_references: Arc<std::sync::Mutex<CallbackRegistry>>,
+    files: Arc<files::FileRegistry>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -259,6 +269,7 @@ impl Executor {
             policy,
             profiles: Arc::default(),
             slots: Arc::new(Semaphore::new(options.max_in_flight)),
+            files: Arc::new(files::FileRegistry::new(options.file_limits)),
             options,
             callback_references: Arc::default(),
         })
@@ -298,7 +309,7 @@ impl Executor {
         );
         Ok(())
     }
-    /// Shared authorized execution. Reference/file write integration is incremental.
+    /// Shared authorized execution through current policy and durable admission.
     pub async fn execute(
         &self,
         principal: &Principal,
@@ -380,6 +391,7 @@ struct Authorization {
     bot_id: i64,
     scope: Option<OperationScope>,
     reference: Option<ReferenceDeadline>,
+    file: Option<RegisteredFile>,
 }
 impl Authorization {
     fn checked(&self, time: i64) -> Result<(DryRun, Grant)> {
@@ -402,6 +414,19 @@ impl Authorization {
     fn budget_at(&self, time: i64) -> journal::Result<BudgetContext> {
         let (_, grant) = self
             .checked(time)
+            .map_err(|_| JournalError::new(JournalErrorKind::Denied))?;
+        Ok(budget_context(&self.principal, &self.request, &grant))
+    }
+    fn write_checked(&self, time: i64) -> Result<(DryRun, Grant)> {
+        let result = self.checked(time)?;
+        if let Some(file) = &self.file {
+            files::ensure_live(file.expires_at_ms, now()?)?;
+        }
+        Ok(result)
+    }
+    fn write_budget_at(&self, time: i64) -> journal::Result<BudgetContext> {
+        let (_, grant) = self
+            .write_checked(time)
             .map_err(|_| JournalError::new(JournalErrorKind::Denied))?;
         Ok(budget_context(&self.principal, &self.request, &grant))
     }
@@ -489,6 +514,7 @@ fn supported(request: &Request) -> Result<()> {
             | Action::GetChat
             | Action::ReadUpdates
             | Action::GetOperation
+            | Action::SendDocument
             | Action::SendMessage
             | Action::EditMessageText
             | Action::AnswerCallbackQuery

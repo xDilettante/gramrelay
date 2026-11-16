@@ -439,7 +439,10 @@ impl PolicyStore {
     ) -> Result<()> {
         if !matches!(
             request.action(),
-            Action::GetOperation | Action::AnswerCallbackQuery | Action::ReadUpdates
+            Action::GetOperation
+                | Action::AnswerCallbackQuery
+                | Action::ReadUpdates
+                | Action::SendDocument
         ) {
             return Err(invalid_policy());
         }

@@ -240,6 +240,20 @@ impl Executor {
         request: &Request,
         approval: Option<&Approval>,
     ) -> Result<Authorization> {
+        let file = if let ActionCall::SendDocument(args) = request.call() {
+            self.policy
+                .check_lookup(principal, request, profile.bot_id, now()?)?;
+            Some(
+                profile
+                    .journal
+                    .file_metadata(request.profile(), principal.as_str(), &args.file_handle)
+                    .await
+                    .map_err(storage_error)?
+                    .ok_or_else(|| ExecutorError::new(ExecutorErrorKind::NotFound))?,
+            )
+        } else {
+            None
+        };
         let (scope, reference) = if request.action() == Action::AnswerCallbackQuery {
             let (scope, reference) = self.callback_context(profile, principal, request)?;
             (Some(scope), Some(reference))
@@ -254,6 +268,7 @@ impl Executor {
             bot_id: profile.bot_id,
             scope,
             reference,
+            file,
         })
     }
     pub(super) async fn verified<'a>(
@@ -264,7 +279,7 @@ impl Executor {
         profile
             .identity
             .get_or_try_init(|| async {
-                auth.checked(now()?)?;
+                auth.write_checked(now()?)?;
                 let identity =
                     timeout(self.options.request_budget, profile.bot.verified_identity())
                         .await

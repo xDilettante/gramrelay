@@ -42,7 +42,7 @@ async fn migration_preserves_receipts_hashes_versions_and_another_workers_flight
         .unwrap()
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
     let request = OperationRequest::new("bot", "alice", "done", "send_message", &payload).unwrap();
     assert!(
         matches!(journal.prepare(request).await.unwrap(),Preparation::Existing(record) if record.state() == OperationState::Succeeded && record.revision() == 7 && record.result().unwrap()["message_id"] == 42)
@@ -127,7 +127,7 @@ async fn version_two_migrates_without_rewinding_update_or_poll_positions() {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        4
+        5
     );
     let feed = UpdateFeed::open(journal.clone(), "bot", 1, UpdateOptions::default())
         .await
@@ -170,7 +170,7 @@ async fn version_three_keeps_active_consumer_ownership_and_validates_the_new_uni
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        4
+        5
     );
     let retained: (String, i64, i64) = connection
         .query_row(
@@ -227,6 +227,109 @@ async fn malformed_version_three_is_not_partially_upgraded_to_executor_storage()
         connection
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_schema WHERE name='executor_budgets'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn version_four_preserves_durable_usage_and_creates_validated_file_metadata() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("v4.sqlite");
+    let connection = version_one(&path);
+    for ddl in [
+        include_str!("../src/updates/schema.sql"),
+        include_str!("../src/updates/consumers.sql"),
+        include_str!("../src/journal/authorization.sql"),
+    ] {
+        connection.execute_batch(ddl).unwrap();
+    }
+    connection.pragma_update(None, "user_version", 4).unwrap();
+    connection
+        .execute(
+            "INSERT INTO executor_budgets VALUES('bot','owner','budget',60000,0,3,2,17,4)",
+            [],
+        )
+        .unwrap();
+    drop(connection);
+    let journal = Journal::open(&path, JournalOptions::default())
+        .await
+        .unwrap();
+    journal.close().await.unwrap();
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        5
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT upload_bytes FROM executor_budgets", [], |row| row
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+        17
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM executor_files", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    connection
+        .execute("DROP INDEX executor_files_owner", [])
+        .unwrap();
+    drop(connection);
+    assert_eq!(
+        Journal::open(&path, JournalOptions::default())
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::UnsupportedSchema
+    );
+}
+
+#[tokio::test]
+async fn malformed_version_four_does_not_partially_create_files() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("bad-v4.sqlite");
+    let connection = version_one(&path);
+    for ddl in [
+        include_str!("../src/updates/schema.sql"),
+        include_str!("../src/updates/consumers.sql"),
+        include_str!("../src/journal/authorization.sql"),
+    ] {
+        connection.execute_batch(ddl).unwrap();
+    }
+    connection.pragma_update(None, "user_version", 4).unwrap();
+    connection
+        .execute("DROP INDEX executor_callback_admission", [])
+        .unwrap();
+    drop(connection);
+    assert_eq!(
+        Journal::open(&path, JournalOptions::default())
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::UnsupportedSchema
+    );
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        4
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE name='executor_files'",
                 [],
                 |row| row.get::<_, i64>(0)
             )

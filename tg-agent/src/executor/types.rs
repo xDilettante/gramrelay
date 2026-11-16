@@ -26,6 +26,8 @@ pub enum ExecutorErrorKind {
     CursorExpired,
     ReferenceExpired,
     ReferenceUnavailable,
+    FileExpired,
+    FileUnavailable,
 }
 #[derive(Debug)]
 pub struct ExecutorError {
@@ -69,6 +71,8 @@ impl ExecutorError {
             ExecutorErrorKind::CursorExpired => "executor_cursor_expired",
             ExecutorErrorKind::ReferenceExpired => "executor_reference_expired",
             ExecutorErrorKind::ReferenceUnavailable => "executor_reference_unavailable",
+            ExecutorErrorKind::FileExpired => "executor_file_expired",
+            ExecutorErrorKind::FileUnavailable => "executor_file_unavailable",
         }
     }
 }

@@ -19,6 +19,7 @@ webhook = ["bot", "dep:axum", "dep:futures-util", "dep:http-body-util", "dep:hyp
 test-kit = ["dep:http", "dep:http-body-util", "dep:futures-util"]
 
 [dependencies]
+bytes = "1.12"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"], optional = true }
 fastrand = "2.5"
 futures-util = { version = "0.3", default-features = false, features = ["std"], optional = true }

@@ -37,6 +37,20 @@ impl Executor {
             ActionCall::AnswerCallbackQuery(_) => {
                 admission.scope.clone().expect("registered callback scope")
             }
+            ActionCall::SendDocument(args) => {
+                let file = admission.file.as_ref().expect("resolved file metadata");
+                OperationScope {
+                    bot_id: profile.bot_id,
+                    action: Action::SendDocument,
+                    chat: Some(args.chat_id),
+                    file: Some(journal::authorization::FileScope {
+                        handle: file.handle.clone(),
+                        sha256: file.sha256,
+                        bytes: file.byte_size,
+                    }),
+                    reference_hash: None,
+                }
+            }
             _ => return Err(ExecutorError::new(ExecutorErrorKind::UnsupportedAction)),
         };
         let auth = admission.clone();
@@ -44,8 +58,13 @@ impl Executor {
             Some(reference) => {
                 serde_json::json!({"request":request,"reference":{"received_at_ms":reference.received_at_ms,"expires_at_ms":reference.expires_at_ms}})
             }
-            None => serde_json::to_value(request)
-                .map_err(|_| ExecutorError::new(ExecutorErrorKind::InvalidInput))?,
+            None => match &auth.file {
+                Some(file) => {
+                    serde_json::json!({"request":request,"file":{"handle":file.handle,"sha256":file.sha256,"byte_size":file.byte_size,"filename":file.filename,"expires_at_ms":file.expires_at_ms}})
+                }
+                None => serde_json::to_value(request)
+                    .map_err(|_| ExecutorError::new(ExecutorErrorKind::InvalidInput))?,
+            },
         };
         let intent = OperationRequest::new(
             request.profile(),
@@ -69,8 +88,18 @@ impl Executor {
                     .map_err(|error| error.with_outcome(EffectOutcome::Unknown));
             }
         };
+        let upload = match &auth.file {
+            Some(file) => match self.files.upload(file) {
+                Ok(upload) => Some(upload),
+                Err(error) => {
+                    let _ = profile.journal.release_prepared(prepared).await;
+                    return Err(error);
+                }
+            },
+            None => None,
+        };
         let identity = async {
-            let identity_budget = auth
+            let mut identity_budget = auth
                 .reference
                 .as_ref()
                 .map(|reference| reference.remaining(now()?))
@@ -78,11 +107,19 @@ impl Executor {
                 .map_or(self.options.request_budget, |value| {
                     value.min(self.options.request_budget)
                 });
+            if let Some(file) = &auth.file {
+                identity_budget =
+                    identity_budget.min(files::remaining(file.expires_at_ms, now()?)?);
+            }
             timeout(identity_budget, self.verified(profile, &auth))
                 .await
                 .map_err(|_| {
                     ExecutorError::new(if auth.reference.is_some() {
                         ExecutorErrorKind::ReferenceExpired
+                    } else if auth.file.as_ref().is_some_and(|file| {
+                        super::now().is_ok_and(|time| time >= file.expires_at_ms)
+                    }) {
+                        ExecutorErrorKind::FileExpired
                     } else {
                         ExecutorErrorKind::Identity
                     })
@@ -96,7 +133,7 @@ impl Executor {
         let proof = prepared.clone();
         let flight = match profile
             .journal
-            .begin_authorized(prepared, move |time| admission.budget_at(time))
+            .begin_authorized(prepared, move |time| admission.write_budget_at(time))
             .await
         {
             Ok(value) => value,
@@ -115,7 +152,7 @@ impl Executor {
             .unwrap_or_default();
         let lease_deadline = sampled.checked_add(remaining);
         let rpc = (|| -> Result<Instant> {
-            auth.checked(now()?)?;
+            auth.write_checked(now()?)?;
             let now = Instant::now();
             let lease_limit = lease_deadline
                 .and_then(|deadline| deadline.checked_sub(self.options.receipt_margin))
@@ -129,6 +166,17 @@ impl Executor {
                 .reference
                 .as_ref()
                 .map_or(deadline, |reference| reference.cap_rpc(deadline));
+            let deadline = if let Some(file) = &auth.file {
+                let sampled = Instant::now();
+                let remaining = files::remaining(file.expires_at_ms, super::now()?)?;
+                deadline.min(
+                    sampled
+                        .checked_add(remaining)
+                        .ok_or_else(|| ExecutorError::new(ExecutorErrorKind::InvalidPolicy))?,
+                )
+            } else {
+                deadline
+            };
             Ok(deadline)
         })();
         let rpc_deadline = match rpc {
@@ -164,7 +212,7 @@ impl Executor {
                 if let Some(value) = args.disable_notification {
                     params = params.disable_notification(value);
                 }
-                attempt(&profile.bot, params, rpc_deadline, &auth, |message| {
+                attempt(&profile.bot, params, rpc_deadline, &auth, None, |message| {
                     message_value(&message, chat, None)
                 })
                 .await
@@ -180,6 +228,7 @@ impl Executor {
                     params,
                     rpc_deadline,
                     &auth,
+                    None,
                     |response| match response {
                         tg::api::types::EditMessageTextResult::Message(message) => {
                             message_value(&message, chat, Some(args.message_id))
@@ -199,9 +248,26 @@ impl Executor {
                 if let Some(alert) = args.show_alert {
                     params = params.show_alert(alert);
                 }
-                attempt(&profile.bot, params, rpc_deadline, &auth, |_| {
+                attempt(&profile.bot, params, rpc_deadline, &auth, None, |_| {
                     Some(serde_json::json!({"acknowledged":true}))
                 })
+                .await
+            }
+            ActionCall::SendDocument(args) => {
+                let chat = args.chat_id;
+                let mut params = tg::api::methods::SendDocument::new("attach://file".into())
+                    .chat_id(tg::ChatId::from(chat.get()).into());
+                if let Some(caption) = &args.caption {
+                    params = params.caption(caption.clone());
+                }
+                attempt(
+                    &profile.bot,
+                    params,
+                    rpc_deadline,
+                    &auth,
+                    upload,
+                    |message| message_value(&message, chat, None),
+                )
                 .await
             }
             _ => Completion::executor_not_started(),
@@ -220,12 +286,13 @@ async fn attempt<M: tg::api::Method>(
     params: M,
     deadline: Instant,
     auth: &Authorization,
+    attachment: Option<tg::InputFile>,
     project: impl FnOnce(M::Response) -> Option<serde_json::Value> + Send,
 ) -> Completion {
     let Ok(time) = now() else {
         return Completion::executor_not_started();
     };
-    if auth.checked(time).is_err() {
+    if auth.write_checked(time).is_err() {
         return Completion::executor_not_started();
     }
     let Some(budget) = deadline
@@ -234,16 +301,15 @@ async fn attempt<M: tg::api::Method>(
     else {
         return Completion::executor_not_started();
     };
-    match timeout_at(
-        deadline,
-        bot.call(params).retry_policy(
-            tg::RetryPolicy::default()
-                .max_attempts(1)
-                .max_elapsed(budget),
-        ),
-    )
-    .await
-    {
+    let mut call = bot.call(params).retry_policy(
+        tg::RetryPolicy::default()
+            .max_attempts(1)
+            .max_elapsed(budget),
+    );
+    if let Some(file) = attachment {
+        call = call.attach("file", file);
+    }
+    match timeout_at(deadline, call).await {
         Ok(Ok(response)) => {
             project(response).map_or_else(Completion::executor_uncertain, Completion::succeeded)
         }
