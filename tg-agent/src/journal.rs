@@ -335,7 +335,7 @@ fn initialize(connection: &mut Connection) -> Result<()> {
         transaction
             .pragma_update(None, "application_id", APPLICATION)
             .map_err(|_| storage())?;
-    } else if application != APPLICATION || !(1..=5).contains(&version) {
+    } else if application != APPLICATION || !(1..=6).contains(&version) {
         return Err(JournalError::new(JournalErrorKind::UnsupportedSchema));
     }
     if version < 2 {
@@ -395,6 +395,25 @@ fn initialize(connection: &mut Connection) -> Result<()> {
             .pragma_update(None, "user_version", 5)
             .map_err(|_| storage())?;
     }
+    if version < 6 {
+        verify_schema(
+            &transaction,
+            &[
+                include_str!("journal/schema.sql"),
+                include_str!("updates/schema.sql"),
+                include_str!("updates/consumers.sql"),
+                include_str!("journal/authorization.sql"),
+                include_str!("journal/files.sql"),
+            ],
+        )?;
+        transaction
+            .execute_batch(include_str!("journal/profiles.sql"))
+            .map_err(|_| storage())?;
+        transaction.execute("INSERT INTO account_profiles(profile,kind,account_id) SELECT profile,'bot_api',bot_id FROM update_feeds", []).map_err(|_| storage())?;
+        transaction
+            .pragma_update(None, "user_version", 6)
+            .map_err(|_| storage())?;
+    }
     verify_schema(
         &transaction,
         &[
@@ -403,6 +422,7 @@ fn initialize(connection: &mut Connection) -> Result<()> {
             include_str!("updates/consumers.sql"),
             include_str!("journal/authorization.sql"),
             include_str!("journal/files.sql"),
+            include_str!("journal/profiles.sql"),
         ],
     )?;
     transaction.commit().map_err(|_| storage())?;

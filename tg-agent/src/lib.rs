@@ -10,6 +10,7 @@ pub mod host;
 pub mod journal;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+pub mod profiles;
 #[cfg(feature = "bot")]
 pub mod runtime;
 #[cfg(feature = "executor")]

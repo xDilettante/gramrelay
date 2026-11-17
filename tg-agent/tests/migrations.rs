@@ -25,6 +25,177 @@ fn version_one(path: &std::path::Path) -> Connection {
     connection
 }
 
+fn version_five(path: &std::path::Path) -> Connection {
+    let connection = version_one(path);
+    for ddl in [
+        include_str!("../src/updates/schema.sql"),
+        include_str!("../src/updates/consumers.sql"),
+        include_str!("../src/journal/authorization.sql"),
+        include_str!("../src/journal/files.sql"),
+    ] {
+        connection.execute_batch(ddl).unwrap();
+    }
+    connection.pragma_update(None, "user_version", 5).unwrap();
+    connection
+}
+
+#[tokio::test]
+async fn malformed_version_five_cannot_partially_create_account_bindings() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("bad-v5.sqlite");
+    let connection = version_five(&path);
+    connection
+        .execute("DROP INDEX executor_files_owner", [])
+        .unwrap();
+    drop(connection);
+    assert_eq!(
+        Journal::open(&path, JournalOptions::default())
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::UnsupportedSchema
+    );
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        5
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE name='account_profiles'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn version_six_binding_constraints_and_exact_schema_are_checked_on_reopen() {
+    use tg_agent::profiles::ProfileIdentity;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("v6.sqlite");
+    let journal = Journal::open(&path, JournalOptions::default())
+        .await
+        .unwrap();
+    journal
+        .bind_profile("user", ProfileIdentity::mtproto_user(42).unwrap())
+        .await
+        .unwrap();
+    journal.close().await.unwrap();
+    let connection = Connection::open(&path).unwrap();
+    for sql in [
+        "INSERT INTO account_profiles VALUES('alias','mtproto_user',42)",
+        "INSERT INTO account_profiles VALUES('zero','mtproto_user',0)",
+        "INSERT INTO account_profiles VALUES('unknown','unknown',1)",
+    ] {
+        assert!(connection.execute(sql, []).is_err());
+    }
+    connection
+        .execute(
+            "ALTER TABLE account_profiles ADD COLUMN unreviewed TEXT",
+            [],
+        )
+        .unwrap();
+    drop(connection);
+    assert_eq!(
+        Journal::open(&path, JournalOptions::default())
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::UnsupportedSchema
+    );
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        6
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT account_id FROM account_profiles WHERE profile='user'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        42
+    );
+}
+
+#[tokio::test]
+async fn version_five_binds_only_known_feeds_and_preserves_legacy_operation_keys() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("v5-profiles.sqlite");
+    let connection = version_five(&path);
+    connection.execute("INSERT INTO update_feeds(profile,bot_id,retention_ms,max_event_bytes,max_batch_bytes,poll_offset,poll_revision) VALUES('known-bot',42,604800000,1048576,1048576,99,7)", []).unwrap();
+    connection.execute("INSERT INTO operations(profile,operation_id,principal,action,payload_hash,state,revision,created_at_ms,updated_at_ms,expires_at_ms) VALUES('orphan','retained','alice','send_message',zeroblob(32),'unknown',3,1,2,?1)", [i64::MAX]).unwrap();
+    connection
+        .execute(
+            "INSERT INTO executor_budgets VALUES('orphan','alice','budget',60000,0,3,2,17,4)",
+            [],
+        )
+        .unwrap();
+    drop(connection);
+    let journal = Journal::open(&path, JournalOptions::default())
+        .await
+        .unwrap();
+    let connection = Connection::open(&path).unwrap();
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 6);
+    let binding: (String, i64) = connection
+        .query_row(
+            "SELECT kind,account_id FROM account_profiles WHERE profile='known-bot'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(binding, ("bot_api".into(), 42));
+    let count: i64 = connection
+        .query_row("SELECT COUNT(*) FROM account_profiles", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(count, 1, "orphan keys cannot establish an account identity");
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT poll_offset,poll_revision FROM update_feeds",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+            )
+            .unwrap(),
+        (99, 7)
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT upload_bytes FROM executor_budgets", [], |row| row
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+        17
+    );
+    drop(connection);
+    let retained = journal
+        .get("orphan", "alice", "retained")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (retained.state(), retained.revision()),
+        (OperationState::Unknown, 3)
+    );
+    journal.close().await.unwrap();
+}
+
 #[tokio::test]
 async fn migration_preserves_receipts_hashes_versions_and_another_workers_flight() {
     let directory = tempfile::tempdir().unwrap();
@@ -42,7 +213,7 @@ async fn migration_preserves_receipts_hashes_versions_and_another_workers_flight
         .unwrap()
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
     let request = OperationRequest::new("bot", "alice", "done", "send_message", &payload).unwrap();
     assert!(
         matches!(journal.prepare(request).await.unwrap(),Preparation::Existing(record) if record.state() == OperationState::Succeeded && record.revision() == 7 && record.result().unwrap()["message_id"] == 42)
@@ -127,7 +298,7 @@ async fn version_two_migrates_without_rewinding_update_or_poll_positions() {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        5
+        6
     );
     let feed = UpdateFeed::open(journal.clone(), "bot", 1, UpdateOptions::default())
         .await
@@ -170,7 +341,7 @@ async fn version_three_keeps_active_consumer_ownership_and_validates_the_new_uni
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        5
+        6
     );
     let retained: (String, i64, i64) = connection
         .query_row(
@@ -264,7 +435,7 @@ async fn version_four_preserves_durable_usage_and_creates_validated_file_metadat
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        5
+        6
     );
     assert_eq!(
         connection

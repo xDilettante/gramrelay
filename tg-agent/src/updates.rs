@@ -76,6 +76,7 @@ impl UpdateFeed {
         journal.run(move |connection,limits,_| {
             policy.validate(limits)?;deadline(now()?,policy.retention)?;
             let transaction=connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_|storage())?;
+            crate::profiles::bind(&transaction, limits, &name, crate::profiles::ProfileIdentity::bot_api(bot_id)?)?;
             let existing=transaction.query_row("SELECT bot_id,retention_ms,max_event_bytes,max_batch_bytes FROM update_feeds WHERE profile=?1",[&name],|row|Ok((row.get::<_,i64>(0)?,row.get::<_,i64>(1)?,row.get::<_,i64>(2)?,row.get::<_,i64>(3)?))).optional().map_err(|_|storage())?;
             if let Some(existing)=existing {
                 if existing!=(bot_id,millis(policy.retention)?,policy.max_event_bytes as i64,policy.max_batch_bytes as i64){return Err(JournalError::new(JournalErrorKind::Conflict));}

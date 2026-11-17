@@ -65,6 +65,7 @@ pub struct JournalOptions {
     pub(crate) max_update_entries: usize,
     pub(crate) max_update_bytes: usize,
     pub(crate) max_update_feeds: usize,
+    pub(crate) max_profiles: usize,
     pub(crate) max_update_consumers: usize,
     pub(crate) max_budget_ledgers: usize,
     pub(crate) max_file_handles: usize,
@@ -81,6 +82,7 @@ impl Default for JournalOptions {
             max_update_entries: 100_000,
             max_update_bytes: 64 * 1024 * 1024,
             max_update_feeds: 64,
+            max_profiles: 64,
             max_update_consumers: 256,
             max_budget_ledgers: 4096,
             max_file_handles: 100_000,
@@ -88,6 +90,11 @@ impl Default for JournalOptions {
     }
 }
 impl JournalOptions {
+    /// Bound immutable account bindings, independently of update-feed capacity.
+    pub fn max_profiles(mut self, value: usize) -> Self {
+        self.max_profiles = value;
+        self
+    }
     pub fn max_file_handles(mut self, value: usize) -> Self {
         self.max_file_handles = value;
         self
@@ -151,6 +158,8 @@ impl JournalOptions {
             || self.max_update_bytes == 0
             || self.max_update_feeds == 0
             || self.max_update_feeds > 1024
+            || self.max_profiles == 0
+            || self.max_profiles > 1024
             || self.max_update_consumers == 0
             || self.max_update_consumers > 1_000_000
             || self.max_budget_ledgers == 0
