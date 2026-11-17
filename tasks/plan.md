@@ -17,8 +17,9 @@ M3 is complete locally: shared typed MT dispatch/extended schemas, trusted Host
 v2 and standalone CLI/MCP lifecycle fixtures. The original Bot v1 discovery is
 unchanged. Q3's chrono remediation, inherited hardened dependency graph and local
 source-candidate acceptance are complete. Windows MSRV1.89/current1.100 runtime
-and feature matrices pass; native Linux/macOS remain. Continue all Q1–Q4
-documentation, evaluation, measurement, platform/packaging and security
+and feature matrices pass; Linux x86_64 GNU repeats both compiler matrices,
+stable lint and relocated source consumer acceptance. Both macOS cells remain.
+Continue all Q1–Q4 documentation, evaluation, measurement, platform/packaging and security
 acceptance. The user chose to keep original code closed; record private licensing
 separately, preserving third-party licenses and publish=false. This does not
 remove or weaken any remaining completion gate.

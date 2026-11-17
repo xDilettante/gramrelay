@@ -3,8 +3,8 @@
 ## Objective and current evidence
 
 Prove the supported toolchain, platform and feature surface of all three public
-libraries without relying on workspace feature unification. Previous evidence is
-Windows x86_64 / Rust 1.98.0 only. At the initial audit no rust-version was declared. The
+libraries without relying on workspace feature unification. At the initial audit,
+evidence covered Windows x86_64 / Rust 1.98.0 only and no rust-version was declared. The
 locked all-feature metadata contains 337 packages; the highest declared minimum
 is Rust 1.89 (rusqlite, uuid and aes). This is a candidate, not a successful
 compiler test by itself. Do not downgrade or silently replace dependencies for this gate.
@@ -128,6 +128,26 @@ Linux tool suite passed all 41 tests from candidate c5299cc83aa1. A subsequent
 actual provenance check exposed missing original upstream SDK archives in a
 fresh Cargo home. Those authenticated comparison inputs are now bundled, with
 two further regressions: Windows43 and Linux43 plus actual no-cache verifier
-checks pass in the working tree. Fresh relocated checking is still required;
-see SPEC-source-distribution.md / ADR0023. Linux current-stable's Rust matrix
-is running independently from c5299cc; runtime Rust inputs remain unchanged.
+checks pass in the working tree. Fresh relocated checking from 767a65e now
+passes too; see SPEC-source-distribution.md / ADR0023.
+
+Linux current-stable 1.100.0 completed all 28 stages independently from
+c5299cc83aa1: default395/all681/doc16 and 25 production configurations.
+All 649 source inputs still match its immutable ZIP after execution, and
+separate fmt/Clippy -D warnings passed. Evidence is retained in
+target/compat-linux-1.100.0-evidence/run-4vqk9kaq and the stable lint log.
+Cargo cleaned its terminal 8.7 GiB dev cache. This proves native Ubuntu/WSL2
+x86_64 GNU only; both macOS cells and remote CI execution remain unverified.
+
+Fresh external metadata also needs non-host manifests: its offline all-platform
+graph initially lacked android_system_properties despite a successful native
+Linux workspace build. A separate checksum-verified cache of all 329 locked
+public crates made the same full metadata command pass without filtering its
+scope. CI now explicitly runs cargo fetch --locked with no --target. Its audit
+job consumes this workflow run's six native evidence artifacts, requires one
+independent consumer lock per cell and audits those in addition to Cargo.lock.
+Actionlint and a scoped fresh review are clear. The actual inline audit Python
+step was exercised with six locks, missing/duplicate cells and an auditor
+failure; it accepts exactly the complete set and propagates errors. The workflow
+remains unexecuted remotely and requires adequate storage. Both macOS compiler
+cells, packaging and Q1/Q2/Q4 remain open; Q3/full goal are not complete.

@@ -227,4 +227,16 @@ regressions failed before the fix; Windows43 and native Linux43 now pass, and
 both actual verifiers succeed with an empty CARGO_HOME. A corrupt/non-regular
 bundled input cannot silently use a valid cache; explicit --archive still works.
 Fresh scoped review found no concrete issues; cross-model skipped autonomous.
-The next source export must include these inputs and repeat relocated checking.
+Source candidate 767a65ee630cc727374af1f65dac53c6906cc741 was exported twice
+identically: 656 files, ZIP SHA256
+c43befb04455c7c145705fce4efc3e41b72d6768fbad201631b1a54fd0b53eae.
+Native Linux checked the relocated archive's 43 Python tests, schema and all
+five source verifiers, then executed its independent consumer offline with
+ordinary public registry caches prepared. All eight hardened graph nodes
+originate in the temporary extracted tree; Bot message/callback/upload/Unknown,
+MCP discovery and MT real-TL/joined close passed. The independent 278-package
+lock and root 337-package lock have clean audits; no chrono is present.
+All 656 outer source inputs still match the ZIP. Evidence/receipt/lock are
+retained in target/compat-linux-source-consumer-evidence and adjacent logs.
+Cargo cleaned the completed 1.2 GiB consumer cache. This proves source delivery,
+not registry normalization or the remaining release gates.
