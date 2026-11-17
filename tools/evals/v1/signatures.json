@@ -18,5 +18,15 @@
   "T17": "pub fn solve() -> tg::Router",
   "T18": "pub fn solve() -> tg::Router",
   "T19": "pub async fn solve<S: Send + Sync + 'static>(bot: &tg::Bot, router: tg::Router<S>, max_concurrency: usize, stop: tg::CancellationToken) -> tg::Result<()>",
-  "T20": "pub async fn solve<S: Send + Sync + 'static>(bot: &tg::Bot, router: tg::Router<S>, secret: tg::webhook::WebhookSecret, listener: tokio::net::TcpListener, max_body_bytes: usize, stop: tg::CancellationToken) -> tg::Result<()>"
+  "T20": "pub async fn solve<S: Send + Sync + 'static>(bot: &tg::Bot, router: tg::Router<S>, secret: tg::webhook::WebhookSecret, listener: tokio::net::TcpListener, max_body_bytes: usize, stop: tg::CancellationToken) -> tg::Result<()>",
+  "T21": "pub async fn solve(path: &std::path::Path, profile: &str, principal: &str, key: &str, payload: &serde_json::Value, receipt: serde_json::Value) -> tg_agent::journal::Result<Option<tg_agent::journal::Operation>>",
+  "T22": "pub async fn solve(executor: &tg_agent::executor::Executor, policy: &tg_agent::executor::PolicyStore, actor: &tg_agent::executor::Principal, allowed: tg_agent::executor::ChatId, request: &tg_agent::executor::Request) -> Result<tg_agent::executor::ExecutionResult, tg_agent::executor::ExecutorError>",
+  "T23": "pub async fn solve(executor: &tg_agent::executor::Executor, actor: &tg_agent::executor::Principal, request: &tg_agent::executor::Request, key: &str) -> Result<[tg_agent::executor::ExecutionResult; 3], tg_agent::executor::ExecutorError>",
+  "T24": "pub fn solve(profile: &str, key: &str, chat: i64, text: &str) -> Result<[tg_agent::tools::ToolRequest; 2], tg_agent::executor::ExecutorError>",
+  "T25": "pub fn solve() -> (tg_agent::tools::ToolCatalog, tg_agent::tools::ToolCatalog)",
+  "T26": "pub async fn solve(executor: &tg_agent::executor::Executor, policy: &tg_agent::executor::PolicyStore, actor: &tg_agent::executor::Principal, profile: &str, chat: tg_agent::executor::ChatId, name: String, bytes: Vec<u8>, expires_ms: i64, key: &str) -> Result<(tg_agent::executor::RegisteredFile, tg_agent::executor::ExecutionResult), tg_agent::executor::ExecutorError>",
+  "T27": "pub async fn solve(path: &std::path::Path, binding: tg_mtproto::SessionBinding, create_key: tg_mtproto::SessionKey, reopen_key: tg_mtproto::SessionKey) -> Result<tg_mtproto::Session,tg_mtproto::SessionError>",
+  "T28": "pub async fn solve(path: &std::path::Path, binding: tg_mtproto::SessionBinding, key: tg_mtproto::SessionKey) -> Result<tg_mtproto::Session,tg_mtproto::SessionError>",
+  "T29": "pub async fn solve(client: &tg_mtproto::Client, ping_id: i64) -> Result<tg_mtproto::tl::enums::Pong,tg_mtproto::ClientError>",
+  "T30": "pub async fn solve(client: &tg_mtproto::Client) -> Result<(),tg_mtproto::ClientError>"
 }
