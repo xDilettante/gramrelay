@@ -55,3 +55,23 @@ require explicit host restoration of identical bytes for the retained handle;
 cached/get_operation receipts require current file scope but no resident bytes.
 Never renew an old handle by overwriting metadata. Register a new file intent
 explicitly when content/expiry changes, retaining old operation keys and receipts.
+
+## Agent journal v9
+
+Opening reviewed v1–v8 journals upgrades through the previous migrations and
+rebuilds executor_files in one immediate transaction. The immutable columns and
+owner index stay the same; profile now references account_profiles so MT bot/user
+and Bot API handles share the bounded permanent registry. Copy/drop/rename/index
+recreation preserves all metadata, scoped receipts, keys and budgets, including
+rows beyond newly configured capacity. Old schemas and original FKs are verified
+before copying; old Bot file bindings must match their actual Bot feed/account.
+Orphans or contradictory kinds/IDs cannot be silently reclassified as MT data.
+Final exact DDL and FK verification precede commit; failures retain the original
+version/schema/rows. Older libraries reject v9. Protect/back up the SQLite
+directory before deployment and join Executor → Client → Journal before shutdown.
+
+The MT Rust executor now supports all eight typed actions. New document attempts
+need owner-bound restored bytes plus current file/peer/action authority and any
+exact approval. Retained get_operation/cache uses original grants without bytes
+or a live file expiry. Terminal Unknown/Rejected keys never resend. CLI/MCP MT
+integration and release gates remain open.

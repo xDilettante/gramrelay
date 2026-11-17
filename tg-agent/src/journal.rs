@@ -337,7 +337,7 @@ fn initialize(connection: &mut Connection) -> Result<()> {
         transaction
             .pragma_update(None, "application_id", APPLICATION)
             .map_err(|_| storage())?;
-    } else if application != APPLICATION || !(1..=8).contains(&version) {
+    } else if application != APPLICATION || !(1..=9).contains(&version) {
         return Err(JournalError::new(JournalErrorKind::UnsupportedSchema));
     }
     if version < 2 {
@@ -455,6 +455,41 @@ fn initialize(connection: &mut Connection) -> Result<()> {
             .pragma_update(None, "user_version", 8)
             .map_err(|_| storage())?;
     }
+    if version < 9 {
+        verify_schema(
+            &transaction,
+            &[
+                include_str!("journal/schema.sql"),
+                include_str!("updates/schema.sql"),
+                include_str!("updates/consumers.sql"),
+                include_str!("journal/authorization.sql"),
+                include_str!("journal/files.sql"),
+                include_str!("journal/profiles.sql"),
+                include_str!("journal/mtproto-updates.sql"),
+                include_str!("journal/mtproto-authorization.sql"),
+            ],
+        )?;
+        verify_foreign_keys(&transaction)?;
+        let contradictory:bool=transaction.query_row("SELECT EXISTS(SELECT 1 FROM executor_files f JOIN update_feeds u ON u.profile=f.profile LEFT JOIN account_profiles p ON p.profile=f.profile WHERE p.profile IS NULL OR p.kind!='bot_api' OR p.account_id!=u.bot_id)",[],|r|r.get(0)).map_err(|_|storage())?;
+        if contradictory {
+            return Err(JournalError::new(JournalErrorKind::UnsupportedSchema));
+        }
+        // All incoming references are immutable scope values, not FKs to this
+        // table. Rebuild from trusted DDL, preserving every original column.
+        let (table, index) = include_str!("journal/files-v9.sql")
+            .split_once(';')
+            .ok_or_else(storage)?;
+        transaction
+            .execute_batch(&table.replacen("\"executor_files\"", "executor_files_v9", 1))
+            .map_err(|_| storage())?;
+        transaction.execute("INSERT INTO executor_files_v9(handle,profile,principal,sha256,byte_size,filename,created_at_ms,expires_at_ms) SELECT handle,profile,principal,sha256,byte_size,filename,created_at_ms,expires_at_ms FROM executor_files",[]).map_err(|_|storage())?;
+        transaction.execute_batch("DROP TABLE executor_files; ALTER TABLE executor_files_v9 RENAME TO executor_files;").map_err(|_|storage())?;
+        transaction.execute_batch(index).map_err(|_| storage())?;
+        verify_foreign_keys(&transaction)?;
+        transaction
+            .pragma_update(None, "user_version", 9)
+            .map_err(|_| storage())?;
+    }
     verify_schema(
         &transaction,
         &[
@@ -462,12 +497,13 @@ fn initialize(connection: &mut Connection) -> Result<()> {
             include_str!("updates/schema.sql"),
             include_str!("updates/consumers.sql"),
             include_str!("journal/authorization.sql"),
-            include_str!("journal/files.sql"),
+            include_str!("journal/files-v9.sql"),
             include_str!("journal/profiles.sql"),
             include_str!("journal/mtproto-updates.sql"),
             include_str!("journal/mtproto-authorization.sql"),
         ],
     )?;
+    verify_foreign_keys(&transaction)?;
     transaction.commit().map_err(|_| storage())?;
     let mode: String = connection
         .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
@@ -511,6 +547,12 @@ fn verify_schema(connection: &Connection, schemas: &[&str]) -> Result<()> {
             .split_whitespace()
             .nth(name_index)
             .ok_or_else(storage)?;
+        // Only trusted expected identifiers are unquoted for lookup. Actual DDL
+        // still requires byte-for-byte equality, including literals/constraints.
+        let name = name
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .unwrap_or(name);
         let actual: Option<String> = connection
             .query_row(
                 "SELECT sql FROM sqlite_schema WHERE name=?1",
@@ -532,6 +574,18 @@ fn verify_schema(connection: &Connection, schemas: &[&str]) -> Result<()> {
         )
         .map_err(|_| storage())?;
     if actual_count != expected_count {
+        return Err(JournalError::new(JournalErrorKind::UnsupportedSchema));
+    }
+    Ok(())
+}
+
+fn verify_foreign_keys(connection: &Connection) -> Result<()> {
+    let broken = connection
+        .prepare("PRAGMA foreign_key_check")
+        .map_err(|_| storage())?
+        .exists([])
+        .map_err(|_| storage())?;
+    if broken {
         return Err(JournalError::new(JournalErrorKind::UnsupportedSchema));
     }
     Ok(())

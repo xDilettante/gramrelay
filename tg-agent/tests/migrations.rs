@@ -51,6 +51,194 @@ fn version_seven(path: &std::path::Path) -> Connection {
     connection
 }
 
+fn version_eight(path: &std::path::Path) -> Connection {
+    let c = version_seven(path);
+    c.execute_batch(include_str!("../src/journal/mtproto-authorization.sql"))
+        .unwrap();
+    c.pragma_update(None, "user_version", 8).unwrap();
+    c.execute("INSERT INTO update_feeds(profile,bot_id,retention_ms,max_event_bytes,max_batch_bytes) VALUES('bot',42,60000,1024,1024)",[]).unwrap();
+    c.execute(
+        "INSERT INTO account_profiles VALUES('bot','bot_api',42),('personal','mtproto_user',42)",
+        [],
+    )
+    .unwrap();
+    for handle in ["file_one", "file_two"] {
+        c.execute("INSERT INTO executor_files VALUES(?1,'bot','alice',?2,3,'private.bin',0,999999999999999)",params![handle,[8u8;32].as_slice()]).unwrap();
+    }
+    c.execute("INSERT INTO operations(profile,operation_id,principal,action,payload_hash,state,revision,created_at_ms,updated_at_ms,expires_at_ms) VALUES('bot','saved','alice','send_document',zeroblob(32),'unknown',4,0,0,999999999999999)",[]).unwrap();
+    c.execute("INSERT INTO executor_operation_scopes(profile,operation_id,bot_id,action,chat_id,file_handle,file_sha256,file_bytes,admitted) VALUES('bot','saved',42,'send_document',7,'file_one',?1,3,1)",[[8u8;32].as_slice()]).unwrap();
+    c
+}
+
+#[tokio::test]
+async fn version_eight_preserves_files_and_receipts_and_binds_new_metadata_to_any_exact_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v8-files.sqlite");
+    drop(version_eight(&path));
+    let journal = Journal::open(&path, JournalOptions::default().max_file_handles(1))
+        .await
+        .unwrap();
+    journal.close().await.unwrap();
+    let c = Connection::open(&path).unwrap();
+    assert_eq!(
+        c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        9
+    );
+    assert_eq!(
+        c.query_row("SELECT COUNT(*) FROM executor_files", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    let file:(String,Vec<u8>,i64,String,i64,i64)=c.query_row("SELECT principal,sha256,byte_size,filename,created_at_ms,expires_at_ms FROM executor_files WHERE handle='file_one'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).unwrap();
+    assert_eq!(
+        file,
+        (
+            "alice".into(),
+            vec![8; 32],
+            3,
+            "private.bin".into(),
+            0,
+            999999999999999
+        )
+    );
+    assert_eq!(
+        c.query_row(
+            "SELECT state,revision FROM operations WHERE operation_id='saved'",
+            [],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        )
+        .unwrap(),
+        ("unknown".into(), 4)
+    );
+    assert_eq!(
+        c.query_row(
+            "SELECT file_handle,admitted FROM executor_operation_scopes",
+            [],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        )
+        .unwrap(),
+        ("file_one".into(), 1)
+    );
+    c.pragma_update(None, "foreign_keys", "ON").unwrap();
+    c.execute("INSERT INTO executor_files VALUES('mt_file','personal','alice',zeroblob(32),3,'private.bin',0,999999999999999)",[]).unwrap();
+    assert!(c.execute("INSERT INTO executor_files VALUES('orphan','missing','alice',zeroblob(32),3,'private.bin',0,999999999999999)",[]).is_err());
+    assert!(
+        !c.prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .exists([])
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn malformed_version_eight_does_not_rebuild_or_partially_rename_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v8-bad-files.sqlite");
+    let c = version_eight(&path);
+    c.execute("DROP INDEX executor_files_owner", []).unwrap();
+    drop(c);
+    assert_eq!(
+        Journal::open(&path, JournalOptions::default())
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::UnsupportedSchema
+    );
+    let c = Connection::open(&path).unwrap();
+    assert_eq!(
+        c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        8
+    );
+    assert_eq!(
+        c.query_row("SELECT COUNT(*) FROM executor_files", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        c.query_row(
+            "SELECT COUNT(*) FROM sqlite_schema WHERE name='executor_files_v9'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn invalid_old_file_foreign_keys_cannot_be_adopted_as_mtproto_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v8-orphan.sqlite");
+    let c = version_eight(&path);
+    c.pragma_update(None, "foreign_keys", "OFF").unwrap();
+    c.execute("INSERT INTO executor_files VALUES('old_orphan','personal','alice',zeroblob(32),3,'private.bin',0,999999999999999)",[]).unwrap();
+    drop(c);
+    assert_eq!(
+        Journal::open(&path, JournalOptions::default())
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::UnsupportedSchema
+    );
+    let c = Connection::open(&path).unwrap();
+    assert_eq!(
+        c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        8
+    );
+    assert!(
+        c.query_row(
+            "SELECT sql FROM sqlite_schema WHERE name='executor_files'",
+            [],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap()
+        .contains("REFERENCES update_feeds(profile)")
+    );
+    assert_eq!(
+        c.query_row("SELECT COUNT(*) FROM executor_files", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn old_bot_files_cannot_be_reclassified_by_a_contradictory_account_binding() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v8-wrong-kind.sqlite");
+    let c = version_eight(&path);
+    c.execute(
+        "UPDATE account_profiles SET kind='mtproto_bot' WHERE profile='bot'",
+        [],
+    )
+    .unwrap();
+    drop(c);
+    assert_eq!(
+        Journal::open(&path, JournalOptions::default())
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::UnsupportedSchema
+    );
+    let c = Connection::open(&path).unwrap();
+    assert_eq!(
+        c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        8
+    );
+    assert_eq!(
+        c.query_row("SELECT COUNT(*) FROM executor_files", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+}
+
 #[tokio::test]
 async fn version_seven_adds_exact_mtproto_scopes_without_adopting_generic_operations() {
     let directory = tempfile::tempdir().unwrap();
@@ -76,7 +264,7 @@ async fn version_seven_adds_exact_mtproto_scopes_without_adopting_generic_operat
     assert_eq!(
         c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        8
+        9
     );
     assert_eq!(
         c.query_row("SELECT state,revision FROM operations", [], |r| Ok((
@@ -177,7 +365,7 @@ async fn version_six_adds_mtproto_storage_without_rebinding_accounts_or_changing
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        8
+        9
     );
     assert_eq!(
         connection
@@ -269,7 +457,7 @@ async fn current_mtproto_schema_is_verified_even_in_storage_only_builds() {
         connection
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        8
+        9
     );
 }
 
@@ -348,7 +536,7 @@ async fn version_six_binding_constraints_and_exact_schema_are_checked_on_reopen(
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        8
+        9
     );
     assert_eq!(
         connection
@@ -383,7 +571,7 @@ async fn version_five_binds_only_known_feeds_and_preserves_legacy_operation_keys
     let version: i64 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     let binding: (String, i64) = connection
         .query_row(
             "SELECT kind,account_id FROM account_profiles WHERE profile='known-bot'",
@@ -447,7 +635,7 @@ async fn migration_preserves_receipts_hashes_versions_and_another_workers_flight
         .unwrap()
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     let request = OperationRequest::new("bot", "alice", "done", "send_message", &payload).unwrap();
     assert!(
         matches!(journal.prepare(request).await.unwrap(),Preparation::Existing(record) if record.state() == OperationState::Succeeded && record.revision() == 7 && record.result().unwrap()["message_id"] == 42)
@@ -532,7 +720,7 @@ async fn version_two_migrates_without_rewinding_update_or_poll_positions() {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        8
+        9
     );
     let feed = UpdateFeed::open(journal.clone(), "bot", 1, UpdateOptions::default())
         .await
@@ -575,7 +763,7 @@ async fn version_three_keeps_active_consumer_ownership_and_validates_the_new_uni
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        8
+        9
     );
     let retained: (String, i64, i64) = connection
         .query_row(
@@ -669,7 +857,7 @@ async fn version_four_preserves_durable_usage_and_creates_validated_file_metadat
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        8
+        9
     );
     assert_eq!(
         connection

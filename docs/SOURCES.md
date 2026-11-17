@@ -1,5 +1,12 @@
 # Implementation sources
 
+- Shared file-profile migration follows SQLite's primary
+  [table reconstruction procedure](https://www.sqlite.org/lang_altertable.html#making_other_kinds_of_table_schema_changes):
+  trusted new table, exact column copy, old-table drop, rename and index recreation
+  within one immediate transaction. Original/new FKs and exact DDL are checked;
+  the reviewed file table has no incoming foreign-key references. Expected quoted
+  identifiers are unquoted only for lookup, never for actual DDL comparison.
+
 - Owner-backed immutable upload bytes use the pinned bytes 1.12.1 implementation
   of [Bytes::from_owner](https://docs.rs/bytes/1.12.1/bytes/struct.Bytes.html#method.from_owner),
   inspected in the installed primary source. It pins the owner, calls AsRef once
