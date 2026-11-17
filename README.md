@@ -4,7 +4,8 @@
 
 Минимальный поддержанный Rust — 1.89. Windows MSVC проверена на 1.89.0 и
 1.100.0; [матрица и команды](docs/COMPATIBILITY.md) отдельно отмечают ещё не
-проверенные платформы. Собственный код пока закрыт; лицензии SDK сохраняются.
+проверенные платформы. Собственный код пока [закрыт](LICENSE);
+[статус поставки](docs/PRIVATE-DISTRIBUTION.md) сохраняет отдельные лицензии SDK.
 
 Реализованы awaitable builders для send_message, answer_callback_query и send_document; inline-кнопки, разбор callback Update, типизированные ID, ограничения нагрузки и локальные HTTP mock-тесты.
 

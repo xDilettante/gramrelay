@@ -197,3 +197,11 @@ The earlier 681 workspace tests/16 doctests remain the Rust regression baseline;
 the new executable check specifically validates this archive's public API.
 Source-candidate acceptance is complete locally; registry packaging, platform/
 MSRV and Q1/Q2/Q4 remain open, so neither Q3 nor the full goal is complete.
+
+User decision on 2026-11-17: original code remains closed. LICENSE and the three
+own package license-file fields record that policy without a public grant;
+publish=false and all upstream SDK licenses/provenance remain unchanged.
+Registry preparation must preserve this private status; it is still a separate
+local packaging gate and no registry endpoint is assumed. See
+docs/PRIVATE-DISTRIBUTION.md. The later Windows/MSRV acceptance is recorded in
+SPEC-compatibility.md; other native cells and the full goal remain open.

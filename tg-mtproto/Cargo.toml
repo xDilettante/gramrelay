@@ -3,6 +3,7 @@ name = "tg-mtproto"
 version = "0.1.0-alpha.1"
 edition = "2024"
 rust-version = "1.89"
+license-file = "../LICENSE"
 publish = false
 description = "Explicit Telegram MTProto sessions and client for humans and agents"
 

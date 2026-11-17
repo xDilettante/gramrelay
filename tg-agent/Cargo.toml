@@ -3,6 +3,7 @@ name = "tg-agent"
 version = "0.1.0-alpha.1"
 edition = "2024"
 rust-version = "1.89"
+license-file = "../LICENSE"
 publish = false
 description = "Durable and authorized Telegram actions for agents"
 
