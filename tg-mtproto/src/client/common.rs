@@ -16,10 +16,12 @@ use std::{
     },
 };
 mod dialogs;
+mod files;
 mod history;
 pub use dialogs::{
     Dialog, DialogContinuation, DialogCursor, DialogFolder, DialogId, DialogPage, DialogPageIssue,
 };
+pub use files::{DocumentReceipt, SendDocument};
 mod text;
 pub use history::{HistoryCursor, HistoryMessage, HistoryMessageKind, HistoryPage};
 pub use text::{MessageReceipt, SendText};

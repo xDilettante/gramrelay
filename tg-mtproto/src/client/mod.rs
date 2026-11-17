@@ -8,8 +8,8 @@ use crate::{Session, session::ClientClaim};
 pub use auth::{AppCredentials, BotToken};
 pub use common::{
     Account, Dialog, DialogContinuation, DialogCursor, DialogFolder, DialogId, DialogPage,
-    DialogPageIssue, HistoryCursor, HistoryMessage, HistoryMessageKind, HistoryPage,
-    MessageReceipt, Peer, PeerId, PeerKind, SendText,
+    DialogPageIssue, DocumentReceipt, HistoryCursor, HistoryMessage, HistoryMessageKind,
+    HistoryPage, MessageReceipt, Peer, PeerId, PeerKind, SendDocument, SendText,
 };
 pub use error::{ClientError, ClientErrorKind, Outcome};
 use error::{Result, error};

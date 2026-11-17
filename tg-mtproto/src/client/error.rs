@@ -45,6 +45,8 @@ pub enum ClientErrorKind {
     InvalidCursor,
     IncompletePage,
     UnsupportedOperation,
+    File,
+    Integrity,
 }
 
 /// Static diagnostic metadata. No upstream error or remote description is retained.
@@ -95,6 +97,8 @@ impl ClientError {
             ClientErrorKind::InvalidCursor => "mtproto_invalid_cursor",
             ClientErrorKind::IncompletePage => "mtproto_incomplete_page",
             ClientErrorKind::UnsupportedOperation => "mtproto_unsupported_operation",
+            ClientErrorKind::File => "mtproto_file",
+            ClientErrorKind::Integrity => "mtproto_integrity",
         }
     }
 }

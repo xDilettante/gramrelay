@@ -204,6 +204,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
 dependencies = [
  "hybrid-array",
+ "zeroize",
 ]
 
 [[package]]
@@ -519,6 +520,7 @@ dependencies = [
  "const-oid",
  "crypto-common",
  "ctutils",
+ "zeroize",
 ]
 
 [[package]]
@@ -1505,6 +1507,16 @@ name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
+
+[[package]]
+name = "md-5"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69b6441f590336821bb897fb28fc622898ccceb1d6cea3fde5ea86b090c4de98"
+dependencies = [
+ "cfg-if",
+ "digest",
+]
 
 [[package]]
 name = "memchr"
@@ -2803,12 +2815,14 @@ name = "tg-mtproto"
 version = "0.1.0-alpha.1"
 dependencies = [
  "chacha20poly1305",
+ "futures-util",
  "getrandom 0.4.3",
  "grammers-crypto",
  "grammers-mtproto",
  "grammers-mtsender",
  "grammers-session",
  "grammers-tl-types",
+ "md-5",
  "num-bigint 0.4.8",
  "rusqlite",
  "serde",

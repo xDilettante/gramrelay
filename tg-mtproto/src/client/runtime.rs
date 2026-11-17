@@ -56,7 +56,7 @@ impl Context {
             }
         }
     }
-    fn check_active(&self) -> Result<()> {
+    pub(super) fn check_active(&self) -> Result<()> {
         if tokio::time::Instant::now() >= self.deadline {
             return Err(error(ClientErrorKind::Timeout, self.state.seal()));
         }

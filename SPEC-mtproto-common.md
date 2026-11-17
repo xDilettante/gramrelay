@@ -2,7 +2,8 @@
 
 Status: peer references and plain-text send/edit implemented. Bounded history is
 implemented in SPEC-mtproto-history.md and dialogs in SPEC-mtproto-dialogs.md;
-files and remaining common capabilities stay open in M2. This extends
+uploads/sending are implemented in SPEC-mtproto-files.md. Downloads and remaining
+common capabilities stay open in M2. This extends
 SPEC-mtproto-client.md.
 
 ## Account and peer references

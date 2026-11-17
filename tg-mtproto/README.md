@@ -4,7 +4,8 @@ Separate MTProto package, currently implementing M2. Encrypted local session
 storage and the owned network Client with typed raw TL calls are implemented.
 Bot/user login, 2FA, confirmed login migration, live identity verification,
 opaque peer lookup/cache references, text send/edit, bounded paginated history
-and Main/Archive dialogs are available. Files and observable update recovery
+and Main/Archive dialogs are available. Document upload/sending from owned bytes
+or protected host files is implemented. Downloads and observable update recovery
 remain open.
 This package does not route MTProto operations through the Bot API.
 
@@ -173,6 +174,46 @@ the current self account on every page. Concurrent pin/unpin/move can repeat
 entries; this is navigation, not a transactional snapshot or update checkpoint.
 See SPEC-mtproto-dialogs.md. User-only dialogs support Main and Archive API peer
 folders, distinct from custom chat filters.
+
+Upload and send one document intent, with an independently known content hash:
+
+```rust,no_run
+use tg_mtproto::{Account, ClientError, DocumentReceipt, Peer, SendDocument};
+
+async fn send_report(
+    account: &Account,
+    peer: &Peer,
+    protected_absolute_path: &std::path::Path,
+    expected_sha256: [u8; 32],
+) -> Result<DocumentReceipt, ClientError> {
+    let intent = SendDocument::path(
+        protected_absolute_path, "report.pdf", "application/pdf",
+    )?
+        .caption("Report")?
+        .expected_sha256(expected_sha256)
+        .max_bytes(64 * 1024 * 1024)
+        .parallelism(4);
+    account.send_document(peer, intent).await
+}
+```
+
+`SendDocument::bytes(name, mime, Vec<u8>)` transfers an owned buffer without a
+full source copy. Constructors perform no file/network I/O. Source reads and
+hashing are owned blocking work; preparation, upload and final SendMedia share
+one Client deadline and live-account guard. Defaults bound a document to 64 MiB
+and four active part calls; host options allow at most 4 GiB/eight calls. Server
+account limits still apply. Configure the Client deadline for large transfers.
+
+All parts must be confirmed, and the upload pass must match the prepared
+SHA-256 before the final message is dispatched. Small-file MD5 is only the
+legacy Telegram checksum. An ordinary error drains pre-admitted part futures
+before releasing action capacity. Caller cancellation leaves admitted work
+owned and can still result in a message; never replay an Unknown result.
+Receipts expose message metadata, size and an explicit SHA-256 accessor. Debug
+and static errors exclude content, paths and incidental metadata. Protected
+paths are trusted host input; OS I/O itself can block and joined close awaits
+owned reads. No agent tool accepts such a path. Downloads remain open in M2;
+see SPEC-mtproto-files.md.
 
 For a user account, the trusted host supplies UI callbacks and an independent
 expected ID. `NewAccount` is an explicit alternative for first login; it refuses

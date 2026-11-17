@@ -16,14 +16,10 @@ impl fmt::Debug for SendText {
 impl SendText {
     pub fn new(text: impl Into<String>) -> Result<Self> {
         let text = checked_text(text)?;
-        let mut bytes = [0; 8];
-        getrandom::fill(&mut bytes)
-            .map_err(|_| error(ClientErrorKind::Backend, Outcome::NotSent))?;
-        // A zero random value still produces a nonzero ID without a retry loop.
-        let random_id = i64::from_ne_bytes(bytes);
+        let random_id = new_random_id()?;
         Ok(Self {
             text,
-            random_id: if random_id == 0 { 1 } else { random_id },
+            random_id,
             silent: false,
         })
     }
@@ -46,6 +42,12 @@ impl SendText {
         self.silent = silent;
         self
     }
+}
+pub(super) fn new_random_id() -> Result<i64> {
+    let mut bytes = [0; 8];
+    getrandom::fill(&mut bytes).map_err(|_| error(ClientErrorKind::Backend, Outcome::NotSent))?;
+    let id = i64::from_ne_bytes(bytes);
+    Ok(if id == 0 { 1 } else { id })
 }
 fn checked_text(text: impl Into<String>) -> Result<Zeroizing<String>> {
     let text = Zeroizing::new(text.into());
@@ -135,35 +137,10 @@ impl Account {
                 .invoke::<tl::functions::messages::SendMessage>(std::mem::take(&mut *bytes))
                 .await?;
             match response {
-                tl::enums::Updates::UpdateShortSentMessage(sent) => {
-                    if !sent.out
-                        || sent.id <= 0
-                        || sent.date <= 0
-                        || sent.pts < 0
-                        || sent.pts_count < 0
-                    {
-                        return Err(malformed());
-                    }
-                    Ok(MessageReceipt {
-                        peer: peer.id,
-                        message_id: sent.id,
-                        date: sent.date,
-                    })
-                }
+                tl::enums::Updates::UpdateShortSentMessage(sent) => short_receipt(peer.id, &sent),
                 response => {
                     let updates = unpack(response, &session, references.expected).await?;
-                    let mut ids = updates.iter().filter_map(|update| match update {
-                        tl::enums::Update::MessageId(value)
-                            if value.random_id == intent.random_id =>
-                        {
-                            Some(value.id)
-                        }
-                        _ => None,
-                    });
-                    let id = ids.next().filter(|id| *id > 0).ok_or_else(malformed)?;
-                    if ids.next().is_some() {
-                        return Err(malformed());
-                    }
+                    let id = sent_id(&updates, intent.random_id)?;
                     matching_message(&updates, peer.id, id, &intent.text, false)
                 }
             }
@@ -218,7 +195,7 @@ impl Account {
     }
 }
 
-async fn unpack(
+pub(super) async fn unpack(
     response: tl::enums::Updates,
     session: &Session,
     expected: AccountIdentity,
@@ -242,7 +219,7 @@ async fn unpack(
     Ok(updates)
 }
 
-fn matching_message(
+pub(super) fn matching_message(
     updates: &[tl::enums::Update],
     peer: PeerId,
     id: i32,
@@ -307,4 +284,28 @@ fn matching_message(
         });
     }
     receipt.ok_or_else(malformed)
+}
+pub(super) fn short_receipt(
+    peer: PeerId,
+    sent: &tl::types::UpdateShortSentMessage,
+) -> Result<MessageReceipt> {
+    if !sent.out || sent.id <= 0 || sent.date <= 0 || sent.pts < 0 || sent.pts_count < 0 {
+        return Err(malformed());
+    }
+    Ok(MessageReceipt {
+        peer,
+        message_id: sent.id,
+        date: sent.date,
+    })
+}
+pub(super) fn sent_id(updates: &[tl::enums::Update], random_id: i64) -> Result<i32> {
+    let mut ids = updates.iter().filter_map(|update| match update {
+        tl::enums::Update::MessageId(value) if value.random_id == random_id => Some(value.id),
+        _ => None,
+    });
+    let id = ids.next().filter(|id| *id > 0).ok_or_else(malformed)?;
+    if ids.next().is_some() {
+        return Err(malformed());
+    }
+    Ok(id)
 }
