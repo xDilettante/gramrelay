@@ -171,12 +171,29 @@ packages, zero vulnerabilities/warnings. Evidence now lives in a sibling
 fixes an observed native cleanup refusal (missing CACHEDIR.TAG); metadata-only
 checking leaves the Cargo target absent, and a tiny real compile/clean proof
 passes with the corrected layout. Completed standalone and external caches are
-cleaned after their processes finish; compact workspace cache remains reusable.
+cleaned after their processes finish. The user's disk-space request also led to
+cleaning the completed root dev cache (6.2 GiB); current binaries and logs stay
+separate. Full incremental/debug snapshots remain disabled.
 
-The source ZIP tool and corruption/path/Git tests are implemented; actual export
-and relocated-consumer acceptance are pending at this checkpoint. All 35 Python
-tests pass. Review-driven RED-to-GREEN regressions cover local ZIP metadata,
+The source ZIP tool and corruption/path/Git tests are implemented. Candidate
+f754f79ac0fda1f14133f413f24ff01ac7796c71 exported twice with byte-identical ZIP
+and manifest: 641 files, 2,335,089 compressed bytes, archive SHA-256
+b61bebd94c494a15d78101da21fe6f27db8b03e65af6ebc3631dd86c41e756ed.
+Plain check passed. Its relocated five-SDK verification and separate public
+consumer compiled offline and passed Bot message/callback/upload/Unknown, MCP
+discovery and MT real-TL/joined close; all eight protected graph nodes came from
+the extracted tree. Registry cache availability is still required. Independently
+resolved external lock: 278 packages, audit clean; root lock: 337, audit clean.
+Evidence: target/source-bundle-consumer.log, target/source-consumer-evidence and
+the two source-bundle audit logs. No production Rust behavior changed here.
+
+All 35 Python tests pass, with deterministic protocol schema, five source
+verifiers and cargo fmt clean. Review-driven RED-to-GREEN regressions cover local ZIP metadata,
 underdeclared deflate output and normalize-after-casefold aliases. Configured
 fsmonitor helpers are disabled with an invocation-sentinel regression. The
 third scoped review found no remaining concrete failures; cross-model skipped
 in this autonomous continuation. This is no claim of a general ZIP extractor.
+The earlier 681 workspace tests/16 doctests remain the Rust regression baseline;
+the new executable check specifically validates this archive's public API.
+Source-candidate acceptance is complete locally; registry packaging, platform/
+MSRV and Q1/Q2/Q4 remain open, so neither Q3 nor the full goal is complete.
