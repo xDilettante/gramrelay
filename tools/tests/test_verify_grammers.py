@@ -1,7 +1,9 @@
 import hashlib
 import importlib.util
 import io
+import os
 from pathlib import Path
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -13,6 +15,43 @@ SPEC.loader.exec_module(verify)
 
 
 class VendorVerification(unittest.TestCase):
+    def test_bundled_release_needs_no_cache_and_corruption_cannot_fall_back(self):
+        name = "fixture"
+        prefix = f"{name}-{verify.VERSION}"
+        original = b"original manifest\n"
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+            entry = tarfile.TarInfo(f"{prefix}/Cargo.toml")
+            entry.size = len(original)
+            archive.addfile(entry, io.BytesIO(original))
+        data = buffer.getvalue()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bundled = root / "vendor/upstream" / f"{prefix}.crate"
+            bundled.parent.mkdir(parents=True)
+            bundled.write_bytes(data)
+            directory = root / "vendor" / name
+            directory.mkdir()
+            (directory / "Cargo.toml").write_bytes(original)
+            (directory / "record.patch").write_bytes(b"")
+            cache = root / "cache"
+            packages = {name: (hashlib.sha256(data).hexdigest(), {"Cargo.toml"}, {"record.patch"}, "record.patch")}
+            with patch.object(verify, "ROOT", root), patch.object(verify, "PACKAGES", packages), \
+                 patch.dict(os.environ, {"CARGO_HOME": str(cache)}), \
+                 patch.object(verify.urllib.request, "urlopen", side_effect=AssertionError("unexpected network")), \
+                 patch.object(sys, "argv", ["verify_grammers.py", "check"]):
+                self.assertEqual(verify.main(), 0)
+                cached = cache / "registry/cache/index" / bundled.name
+                cached.parent.mkdir(parents=True)
+                cached.write_bytes(data)
+                bundled.write_bytes(b"corrupt bundled input")
+                self.assertEqual(verify.main(), 1)
+                with patch.object(sys, "argv", ["verify_grammers.py", "check", "--package", name, "--archive", str(cached)]):
+                    self.assertEqual(verify.main(), 0)
+                bundled.unlink()
+                bundled.mkdir()
+                self.assertEqual(verify.main(), 1)
+
     def test_archive_is_authenticated_before_parsing(self):
         with self.assertRaisesRegex(ValueError, "checksum"):
             verify.upstream(b"not a trusted archive")

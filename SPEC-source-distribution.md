@@ -47,6 +47,13 @@ registry package. Do not silently ship a package that drops the safety patches.
   credentials, .git directory or untracked files. Preserve the checked-in lock,
   Cargo configuration, all runtime/build inputs, tests, docs, source verifiers
   and upstream licenses. Do not invent or grant a project license implicitly.
+- Include the five exact published SDK release archives under vendor/upstream,
+  authenticated by the verifiers' pinned SHA-256 values. These small immutable
+  comparison inputs are required for cache-independent offline patch checks;
+  they are not selected as Cargo dependencies. Prefer the bundled file to Cargo
+  or legacy download caches; a malformed/corrupt bundled input must fail, with no
+  silent fallback. Explicit --archive remains an override. Runtime dependencies
+  still use normal Cargo cache; this is not full dependency vendoring.
 - Deterministic archive plus manifest records commit, version, compressed digest
   and exact per-file size/hash inventory. Repeating the export at one commit must
   produce identical bytes. Digests detect corruption; they are not signatures.
@@ -205,3 +212,19 @@ Registry preparation must preserve this private status; it is still a separate
 local packaging gate and no registry endpoint is assumed. See
 docs/PRIVATE-DISTRIBUTION.md. The later Windows/MSRV acceptance is recorded in
 SPEC-compatibility.md; other native cells and the full goal remain open.
+
+Fresh Linux checking exposed an original SDK-archive cache prerequisite hidden
+by the warmed Windows environment. The selected Cargo graph uses patched SDK
+paths, so it does not fetch their original public releases. Bundle the exact five
+authenticated archives (under 1 MiB total) and make both verifiers prefer them.
+This must also fix fresh CI/relocated checks without adding implicit network
+access or changing upstream source/license bytes. Add cache-independent CLI,
+corrupt-input and explicit-override regressions before implementation.
+
+Implemented with 947,749 bytes of exact third-party input data, unchanged SDK
+source/lock/license bytes and one shared archive locator. The two CLI
+regressions failed before the fix; Windows43 and native Linux43 now pass, and
+both actual verifiers succeed with an empty CARGO_HOME. A corrupt/non-regular
+bundled input cannot silently use a valid cache; explicit --archive still works.
+Fresh scoped review found no concrete issues; cross-model skipped autonomous.
+The next source export must include these inputs and repeat relocated checking.

@@ -1,5 +1,6 @@
 import hashlib
 import io
+import os
 from pathlib import Path
 import sys
 import tarfile
@@ -12,6 +13,40 @@ import verify_rmcp as verify
 
 
 class McpVerification(unittest.TestCase):
+    def test_bundled_release_verifies_with_empty_cache_and_no_network(self):
+        original = {name: b"original\n" for name in verify.PATCHED}
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+            for name, content in original.items():
+                entry = tarfile.TarInfo(f"{verify.PREFIX}/{name}")
+                entry.size = len(content)
+                archive.addfile(entry, io.BytesIO(content))
+        data = buffer.getvalue()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bundled = root / "vendor/upstream" / f"{verify.PREFIX}.crate"
+            bundled.parent.mkdir(parents=True)
+            bundled.write_bytes(data)
+            directory = root / "vendor/rmcp"
+            for name in set(original) | verify.LOCAL:
+                destination = directory / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(original.get(name, b"local\n"))
+            verify.verify_patch(original, directory, generate=True)
+            cache = root / "cache"
+            with patch.object(verify, "ROOT", root), patch.object(verify, "SHA256", hashlib.sha256(data).hexdigest()), \
+                 patch.dict(os.environ, {"CARGO_HOME": str(cache)}), \
+                 patch.object(verify.urllib.request, "urlopen", side_effect=AssertionError("unexpected network")), \
+                 patch.object(sys, "argv", ["verify_rmcp.py", "check"]):
+                self.assertEqual(verify.main(), 0)
+                cached = cache / "registry/cache/index" / bundled.name
+                cached.parent.mkdir(parents=True)
+                cached.write_bytes(data)
+                bundled.write_bytes(b"corrupt bundled input")
+                self.assertEqual(verify.main(), 1)
+                with patch.object(sys, "argv", ["verify_rmcp.py", "check", "--archive", str(cached)]):
+                    self.assertEqual(verify.main(), 0)
+
     def test_release_checksum_is_required(self):
         with self.assertRaisesRegex(ValueError, "checksum"):
             verify.original_source(b"untrusted MCP source")

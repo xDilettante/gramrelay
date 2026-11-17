@@ -39,6 +39,20 @@ PACKAGES = {
 }
 
 
+def find_archive(prefix: str, root: Path) -> Path | None:
+    bundled = root / "vendor" / "upstream" / f"{prefix}.crate"
+    if bundled.is_symlink() or getattr(bundled, "is_junction", lambda: False)():
+        raise ValueError("bundled upstream archive cannot be a link")
+    if bundled.exists():
+        if not bundled.is_file():
+            raise ValueError("bundled upstream archive must be a regular file")
+        return bundled
+    cache = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo")) / "registry" / "cache"
+    cached = next(cache.glob(f"*/{prefix}.crate"), None)
+    downloaded = root / "target" / "upstream" / f"{prefix}.crate"
+    return cached if cached is not None else downloaded if downloaded.is_file() else None
+
+
 def upstream(data: bytes, *, prefix=None, checksum=None, patched=None) -> dict[str, bytes]:
     prefix = PREFIX if prefix is None else prefix
     checksum = SHA256 if checksum is None else checksum
@@ -102,13 +116,7 @@ def main() -> int:
         for name in PACKAGES if args.package == "all" else (args.package,):
             checksum, patched, local, patch_name = PACKAGES[name]
             prefix = f"{name}-{VERSION}"
-            path = args.archive
-            if path is None:
-                cache = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo")) / "registry" / "cache"
-                path = next(cache.glob(f"*/{prefix}.crate"), None)
-                downloaded = ROOT / "target" / "upstream" / f"{prefix}.crate"
-                if path is None and downloaded.is_file():
-                    path = downloaded
+            path = args.archive if args.archive is not None else find_archive(prefix, ROOT)
             if path is None and args.download:
                 path = ROOT / "target" / "upstream" / f"{prefix}.crate"
                 url = f"https://static.crates.io/crates/{name}/{prefix}.crate"

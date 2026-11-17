@@ -1,12 +1,11 @@
 """Verify the MCP timestamp patch against the authenticated official release."""
 import argparse
-import os
 from pathlib import Path
 import sys
 import tarfile
 import urllib.request
 
-from verify_grammers import LIMIT, ROOT, patch_text, upstream
+from verify_grammers import LIMIT, ROOT, find_archive, patch_text, upstream
 
 VERSION = "3.11.0"
 PREFIX = f"rmcp-{VERSION}"
@@ -45,13 +44,7 @@ def main() -> int:
     parser.add_argument("--download", action="store_true")
     args = parser.parse_args()
     try:
-        path = args.archive
-        if path is None:
-            cache = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo")) / "registry" / "cache"
-            path = next(cache.glob(f"*/{PREFIX}.crate"), None)
-            downloaded = ROOT / "target" / "upstream" / f"{PREFIX}.crate"
-            if path is None and downloaded.is_file():
-                path = downloaded
+        path = args.archive if args.archive is not None else find_archive(PREFIX, ROOT)
         if path is None and args.download:
             with urllib.request.urlopen(f"https://static.crates.io/crates/rmcp/{PREFIX}.crate", timeout=30) as response:
                 data = response.read(LIMIT + 1)

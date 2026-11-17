@@ -124,4 +124,10 @@ platform.platform() before rustc. Scope the guard mock to fake executor tests,
 add a real fail-closed low-space test, and use genuinely malformed Cargo
 manifests for the diagnostic fixture. Production guard and all Rust sources
 are unchanged. Windows41 and the six focused Linux tests pass; the complete
-Linux tool suite must be rechecked in the newly exported candidate.
+Linux tool suite passed all 41 tests from candidate c5299cc83aa1. A subsequent
+actual provenance check exposed missing original upstream SDK archives in a
+fresh Cargo home. Those authenticated comparison inputs are now bundled, with
+two further regressions: Windows43 and Linux43 plus actual no-cache verifier
+checks pass in the working tree. Fresh relocated checking is still required;
+see SPEC-source-distribution.md / ADR0023. Linux current-stable's Rust matrix
+is running independently from c5299cc; runtime Rust inputs remain unchanged.
