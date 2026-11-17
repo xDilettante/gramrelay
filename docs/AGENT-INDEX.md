@@ -9,6 +9,7 @@ rustdoc; ARCHITECTURE.md хранит проектные решения, вкл�
 |---|---|
 | Команда и callback | [START](START.md), [проверяемый пример](../examples/command_callback.rs); tg features bot,test-kit |
 | Отправить сообщение или файл | [рецепты](RECIPES.md), [test_kit](../examples/test_kit.rs), [upload_document](../examples/upload_document.rs) |
+| Загрузить одноразовый поток | `InputFile::reader(name, reader, length)` и локальный пример [test_kit](../examples/test_kit.rs) |
 | Полный метод Bot API | `bot.api()`; [методы](../src/generated/methods.rs), [типы](../src/generated/types.rs), [namespace](../src/generated/mod.rs) |
 | Ошибка, timeout, retry | [рецепты](RECIPES.md), [Error](../src/error.rs), [RetryPolicy](../src/retry.rs) |
 | Polling, маршруты, контекст | [polling](../examples/polling.rs), [Router](../src/routing.rs), [PollingOptions](../src/polling.rs) |

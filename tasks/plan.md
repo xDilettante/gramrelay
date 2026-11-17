@@ -28,6 +28,6 @@ remove or weaken any remaining completion gate.
 
 Q1 task documentation and the shared command/callback example now have local
 MSRV/stable acceptance. The 30-task corpus remains draft, with no LLM score.
-Its feasibility review exposed the missing public one-shot AsyncRead upload;
-implement that separate client capability before reference fixture acceptance
-and evaluation freeze, retaining the original task and full goal scope.
+Its feasibility review exposed a missing public one-shot AsyncRead upload.
+InputFile::reader is implemented and tested on Rust 1.89 and 1.100. Continue
+with executable behavioral fixtures, reference submissions and evaluation.

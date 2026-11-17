@@ -59,6 +59,12 @@ raw-stream tool or permission boundary for an untrusted agent.
   prefix. Preserve a confirmed remote Rejected result while cancelling the
   remaining source. Do not wait for an unread suffix. Do not let early success
   or a request future disappearing hide EOF/I/O failure or retain the reader.
+  Mark completion when the body adapter asks for the next chunk after the
+  prefix and receives clean EOF. A zero remaining byte count inside the last
+  AsyncRead call does not prove that ReaderStream handed that chunk to its caller.
+  After completion, the body still sees clean EOF if the request drops its guard.
+  This checks payload handoff to the transport rather than remote receipt of
+  the multipart trailer.
 - The private reader part uses reqwest Part::stream with an unknown HTTP part
   length, while length remains our enforced prefix/budget. The authenticated
   reqwest 0.13.5 source computes known Form lengths with unchecked u64 additions;
@@ -77,13 +83,15 @@ Add behavioral RED tests before implementation: happy exact prefix/no suffix
 read, zero, premature EOF/error redaction, !Unpin/!Sync reader, invalid/oversized
 preflight with zero polls, pending reader deadline/cancellation/drop/capacity,
 generated attachments and retry refusal. Use synthetic data and localhost or
-MockTransport, never Telegram. Verify both production HTTP and in-memory paths;
+MockTransport. Verify both production HTTP and in-memory paths.
 Add production localhost early-response RED tests: retain Incoming body at the
 server, respond ok:true after a client reader becomes Pending, assert no false
 success and reader release before returning/dropping the caller. Also exercise
 early confirmed refusal and a partial/short reader racing a successful response.
 MockTransport drains the body before replying and cannot prove these cases.
 MockTransport's body-capture ceiling is not a large-upload memory benchmark.
+Verify the adapter transition between reading the last bytes and reporting EOF
+and the result of polling the completed adapter after dropping its guard.
 Add compile assertions for preserved auto traits and a small runnable stream
 example/recipe. Keep schema/SDK source, dependencies and Cargo.lock unchanged.
 
@@ -113,4 +121,33 @@ above. Pinned hyper-util 0.1.21 legacy client may return response and spawn
 on_idle while an upload is outstanding; hyper 1.12.0 H1 dispatch retains body_rx
 separately from response delivery. The guard and completion state are required
 before implementation acceptance; a bare ReaderStream variant is insufficient.
-Cross-model skipped autonomous; no implementation or successful tests claimed yet.
+Cross-model skipped in the autonomous continuation.
+
+## Acceptance evidence
+
+InputFile::reader now accepts owned AsyncRead + Send + 'static values. Direct
+documents and generated attachments carry reader guards through the shared
+request and response path. Prefix reads use Tokio Take and an 8 KiB ReaderStream.
+Reader I/O errors enter the body as static diagnostics. HTTP/1.1 reader
+attachments can use chunked transfer, which keeps the declared u64 count out
+of multipart header and boundary length arithmetic.
+
+Windows x86_64 MSVC passed ten targeted tests on Rust 1.89.0 and 1.100.0. Cases
+include exact prefix and empty input, non-Sync and non-Unpin readers, total
+attachment budgets, retry refusal, short/I/O errors, early HTTP responses,
+timeout and caller drop. Disabling the completion check reproduced a false
+success in the localhost test. The finer transition test also failed before
+the EOF fix and now passes on both compilers. Scoped re-review found no
+remaining production issue. Its remaining test finding was addressed by the
+localhost short-EOF race using an actual duplex reader and an early ok:true.
+
+Stable workspace runs passed 408 default tests, 693 all-feature tests and
+16 doctests. The short-EOF race was added after the all-feature binaries were
+built and passed in the final default and both focused runs. Clippy with
+-D warnings, fmt, the test_kit offline example, 52 Python tests, schema and
+all five SDK verifiers passed. The fresh root lock audit scanned 337 packages
+with no advisories reported. Evidence lives in target/reader-upload-*.log.
+
+Cargo cleaned 8.8 GiB and 725.1 MiB from the two completed targets. The
+reference example and regression suite are available for the T15 harness.
+The 30-task corpus remains draft pending executable evaluation fixtures.

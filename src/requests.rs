@@ -284,7 +284,7 @@ impl<'a> IntoFuture for SendDocument<'a> {
                 validate_parse_mode(self.parse_mode, caption.entities())?;
             }
             self.bot
-                .perform_with_timeout(
+                .perform_upload(
                     "sendDocument",
                     async move {
                         let delivery = serde_json::to_value(&self.delivery)
@@ -315,8 +315,12 @@ impl<'a> IntoFuture for SendDocument<'a> {
                                 .map_err(|_| Error::local(ErrorKind::Validation, "parse_mode"))?;
                             form = form.text("parse_mode", mode.as_str().unwrap().to_owned());
                         }
-                        let form = self.file.attach(form, self.bot.upload_limit()).await?;
-                        Ok(self.bot.post("sendDocument")?.multipart(form))
+                        let mut readers = crate::files::UploadReaders::default();
+                        let form = self
+                            .file
+                            .attach(form, self.bot.upload_limit(), &mut readers)
+                            .await?;
+                        Ok((self.bot.post("sendDocument")?.multipart(form), readers))
                     },
                     timeout,
                 )

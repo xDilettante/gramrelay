@@ -4,16 +4,31 @@ use reqwest::{
     multipart::{Form, Part},
 };
 use std::path::{Path, PathBuf};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio_util::io::ReaderStream;
+
+mod reader;
+use reader::ReaderUpload;
+pub(crate) use reader::UploadReaders;
 
 /// A new upload or a previously returned Telegram file ID.
 /// Paths are opened lazily, when the request is awaited.
 pub struct InputFile(Source);
 
 enum Source {
-    Bytes { name: String, bytes: Vec<u8> },
-    Owned { name: String, bytes: bytes::Bytes },
+    Bytes {
+        name: String,
+        bytes: Vec<u8>,
+    },
+    Owned {
+        name: String,
+        bytes: bytes::Bytes,
+    },
+    Reader {
+        name: String,
+        length: u64,
+        upload: ReaderUpload,
+    },
     Path(PathBuf),
     FileId(String),
 }
@@ -34,6 +49,23 @@ impl InputFile {
             bytes: bytes.into(),
         })
     }
+    /// Streams exactly `length` bytes from an owned reader when the request runs.
+    ///
+    /// A shorter stream fails during upload. A longer stream's suffix is unread.
+    /// The declared length counts toward the upload limit before the first read.
+    /// The reader is consumed once and released on completion or cancellation.
+    /// An interruption after dispatch can leave an unknown remote effect.
+    pub fn reader(
+        name: impl Into<String>,
+        reader: impl AsyncRead + Send + 'static,
+        length: u64,
+    ) -> Self {
+        Self(Source::Reader {
+            name: name.into(),
+            length,
+            upload: ReaderUpload::new(reader, length),
+        })
+    }
     pub fn path(path: impl AsRef<Path>) -> Self {
         Self(Source::Path(path.as_ref().to_owned()))
     }
@@ -41,18 +73,27 @@ impl InputFile {
         Self(Source::FileId(id.into()))
     }
 
-    pub(crate) async fn attach(self, form: Form, max_bytes: u64) -> Result<Form> {
+    pub(crate) async fn attach(
+        self,
+        form: Form,
+        max_bytes: u64,
+        readers: &mut UploadReaders,
+    ) -> Result<Form> {
         if let Source::FileId(id) = self.0 {
             if id.is_empty() {
                 return Err(Error::local(ErrorKind::Validation, "file_id"));
             }
             return Ok(form.text("document", id));
         }
-        let (part, _) = self.into_part(max_bytes).await?;
+        let (part, _) = self.into_part(max_bytes, readers).await?;
         Ok(form.part("document", part))
     }
 
-    pub(crate) async fn into_part(self, max_bytes: u64) -> Result<(Part, u64)> {
+    pub(crate) async fn into_part(
+        self,
+        max_bytes: u64,
+        readers: &mut UploadReaders,
+    ) -> Result<(Part, u64)> {
         let (part, length) = match self.0 {
             Source::FileId(_) => {
                 return Err(Error::local(ErrorKind::Validation, "attachment_file"));
@@ -71,6 +112,17 @@ impl InputFile {
                     Part::stream_with_length(Body::from(bytes), length).file_name(name),
                     length,
                 )
+            }
+            Source::Reader {
+                name,
+                length,
+                upload,
+            } => {
+                check_size(length, max_bytes)?;
+                validate_name(&name)?;
+                let part = upload.part().file_name(name);
+                readers.push(upload);
+                (part, length)
             }
             Source::Path(path) => {
                 let name = path

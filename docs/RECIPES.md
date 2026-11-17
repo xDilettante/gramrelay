@@ -10,6 +10,7 @@
 | Прямую отправку | [send_message](../examples/send_message.rs) | Bot::send_message, результат Message.message_id |
 | Тест без сокетов | [test_kit](../examples/test_kit.rs) | features test-kit; очередь Step, проверка записи и assert_finished |
 | Документ с диска | [upload_document](../examples/upload_document.rs) | InputFile::path; живой пример только при явном запуске |
+| Документ из AsyncRead | [test_kit](../examples/test_kit.rs) | InputFile::reader с известной длиной отправляет указанный префикс потока |
 | Документ по host handle | [authorized_document](../tg-agent/examples/authorized_document.rs) | Хост фиксирует байты, scope и срок; агент не передаёт произвольный путь |
 | Ответить на callback | [answer_callback](../examples/answer_callback.rs) | ID из Update; answer подтверждает нажатие, прикладные права отдельно |
 | Polling | [polling](../examples/polling.rs) | Для критичного приёма добавьте долговечный feed |
@@ -21,6 +22,18 @@
 | MT текст/callback/файл | [text](../tg-agent/examples/mtproto_authorized_text.rs), [callback](../tg-agent/examples/mtproto_authorized_callback.rs), [document](../tg-agent/examples/mtproto_authorized_document.rs) | tg-agent feature mtproto-test-kit для offline-примеров; подготовленные сессии — [MT host](AGENT-MTPROTO.md) |
 
 ## Ошибка и повтор
+
+`InputFile::reader("report.bin", reader, length)` принимает принадлежащий
+приложению `AsyncRead + Send + 'static`. Источник читается при исполнении
+запроса. Если он короче указанной длины, запрос завершается ошибкой. Остаток
+длинного потока остаётся непрочитанным. Длина входит в общий лимит вложений.
+Раннее подтверждение при неполной загрузке даёт `Unknown`.
+
+В примере `test_kit` поток проверяется локально вместе с обычным сообщением.
+
+```powershell
+cargo run --locked --offline -p tg --features test-kit --example test_kit
+```
 
 | EffectOutcome | Значение для вызывающего кода |
 |---|---|

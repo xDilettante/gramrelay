@@ -77,7 +77,7 @@
     },
     {
       "id": "T15", "area": "files", "title": "One-shot stream",
-      "prerequisite": "public_input_file_async_reader",
+      "reference_example": "examples/test_kit.rs",
       "prompt": "Отправьте документ из предоставленного одноразового async-потока с известным размером. Не буферизуйте весь файл скрыто и не пытайтесь повторно открыть поток.",
       "acceptance": ["Поток и имя передаются через InputFile", "Заявленный и фактический размер проверяются", "Сбой после dispatch не вызывает replay upload"]
     },

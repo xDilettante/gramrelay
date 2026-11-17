@@ -108,7 +108,7 @@ impl<'a, M: Method> IntoFuture for Call<'a, M> {
                 .map(crate::RetryPolicy::stream_timeout)
                 .transpose()?;
             self.bot
-                .perform_with_timeout(
+                .perform_upload(
                     M::NAME,
                     async {
                         let params = serde_json::to_value(&self.params)
@@ -132,12 +132,13 @@ impl<'a, M: Method> IntoFuture for Call<'a, M> {
                             form = form.text(name.clone(), value);
                         }
                         let mut remaining = self.bot.upload_limit();
+                        let mut readers = crate::files::UploadReaders::default();
                         for (name, file) in self.attachments {
-                            let (part, length) = file.into_part(remaining).await?;
+                            let (part, length) = file.into_part(remaining, &mut readers).await?;
                             remaining -= length;
                             form = form.part(name, part);
                         }
-                        Ok(self.bot.post(M::NAME)?.multipart(form))
+                        Ok((self.bot.post(M::NAME)?.multipart(form), readers))
                     },
                     timeout,
                 )

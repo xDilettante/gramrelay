@@ -186,6 +186,35 @@ impl Bot {
         timeout: Option<Duration>,
         consume: impl FnOnce(reqwest::Response) -> F,
     ) -> Result<T> {
+        self.exchange_prepared(
+            method,
+            async { Ok((prepare.await?, Default::default())) },
+            timeout,
+            consume,
+        )
+        .await
+    }
+
+    pub(crate) async fn perform_upload<T: DeserializeOwned>(
+        &self,
+        method: &'static str,
+        prepare: impl Future<Output = Result<(RequestBuilder, crate::files::UploadReaders)>>,
+        timeout: Option<Duration>,
+    ) -> Result<T> {
+        let limit = self.inner.max_response_bytes;
+        self.exchange_prepared(method, prepare, timeout, move |response| {
+            decode_response(response, limit)
+        })
+        .await
+    }
+
+    async fn exchange_prepared<T, F: Future<Output = Result<T>>>(
+        &self,
+        method: &'static str,
+        prepare: impl Future<Output = Result<(RequestBuilder, crate::files::UploadReaders)>>,
+        timeout: Option<Duration>,
+        consume: impl FnOnce(reqwest::Response) -> F,
+    ) -> Result<T> {
         let mut attempt = crate::telemetry::Attempt::new(method);
         let result = async {
             let _permit = self
@@ -195,14 +224,14 @@ impl Bot {
                 .map_err(|_| Error::local(ErrorKind::Capacity, "max_in_flight"))?;
             let mut dispatched = false;
             let work = async {
-                let request = prepare
-                    .await?
+                let (request, readers) = prepare.await?;
+                let request = request
                     .build()
                     .map_err(|_| Error::local(ErrorKind::Validation, "request"))?;
                 dispatched = true;
                 attempt.dispatched();
                 let response = self.execute(method, request).await?;
-                consume(response).await
+                readers.finish(consume(response).await)
             };
             let timeout = timeout.map_or(self.inner.timeout, |limit| limit.min(self.inner.timeout));
             match tokio::time::timeout(timeout, work).await {
