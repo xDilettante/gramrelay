@@ -1,5 +1,17 @@
 use grammers_mtsender::InvocationError;
 use std::{error::Error, fmt};
+use zeroize::Zeroize;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RpcClass {
+    Other,
+    Migrate(i32),
+    PasswordNeeded,
+    CodeInvalid,
+    CodeExpired,
+    PasswordInvalid,
+    SrpExpired,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -24,6 +36,10 @@ pub enum ClientErrorKind {
     Decode,
     IdentityMismatch,
     Quarantined,
+    InvalidLoginCode,
+    LoginCodeExpired,
+    InvalidPassword,
+    InvalidChallenge,
 }
 
 /// Static diagnostic metadata. No upstream error or remote description is retained.
@@ -33,8 +49,12 @@ pub struct ClientError {
     outcome: Outcome,
     rpc_code: Option<i32>,
     retry_after_seconds: Option<u32>,
+    class: RpcClass,
 }
 impl ClientError {
+    pub(super) fn rpc_class(&self) -> RpcClass {
+        self.class
+    }
     pub fn kind(&self) -> ClientErrorKind {
         self.kind
     }
@@ -61,6 +81,10 @@ impl ClientError {
             ClientErrorKind::Decode => "mtproto_decode",
             ClientErrorKind::IdentityMismatch => "mtproto_identity_mismatch",
             ClientErrorKind::Quarantined => "mtproto_quarantined",
+            ClientErrorKind::InvalidLoginCode => "mtproto_invalid_login_code",
+            ClientErrorKind::LoginCodeExpired => "mtproto_login_code_expired",
+            ClientErrorKind::InvalidPassword => "mtproto_invalid_password",
+            ClientErrorKind::InvalidChallenge => "mtproto_invalid_challenge",
         }
     }
 }
@@ -77,12 +101,13 @@ pub(super) fn error(kind: ClientErrorKind, outcome: Outcome) -> ClientError {
         outcome,
         rpc_code: None,
         retry_after_seconds: None,
+        class: RpcClass::Other,
     }
 }
 pub(super) fn invocation(failure: InvocationError) -> ClientError {
     match failure {
         InvocationError::InvalidDc => error(ClientErrorKind::InvalidInput, Outcome::NotSent),
-        InvocationError::Rpc(rpc) => {
+        InvocationError::Rpc(mut rpc) => {
             let rejected = (300..500).contains(&rpc.code);
             let flood = rejected
                 && rpc.code == 420
@@ -91,11 +116,37 @@ pub(super) fn invocation(failure: InvocationError) -> ClientError {
                     "FLOOD_WAIT" | "FLOOD_PREMIUM_WAIT" | "SLOWMODE_WAIT"
                 )
                 && rpc.value.is_some();
-            ClientError {
+            let class = if rpc.code == 303
+                && matches!(
+                    rpc.name.as_str(),
+                    "PHONE_MIGRATE" | "NETWORK_MIGRATE" | "USER_MIGRATE"
+                ) {
+                rpc.value
+                    .and_then(|value| i32::try_from(value).ok())
+                    .filter(|value| *value > 0)
+                    .map_or(RpcClass::Other, RpcClass::Migrate)
+            } else if matches!(rpc.code, 400 | 401) {
+                match rpc.name.as_str() {
+                    "SESSION_PASSWORD_NEEDED" => RpcClass::PasswordNeeded,
+                    "PHONE_CODE_INVALID" | "PHONE_CODE_EMPTY" => RpcClass::CodeInvalid,
+                    "PHONE_CODE_EXPIRED" => RpcClass::CodeExpired,
+                    "PASSWORD_HASH_INVALID" => RpcClass::PasswordInvalid,
+                    "SRP_ID_INVALID" => RpcClass::SrpExpired,
+                    _ => RpcClass::Other,
+                }
+            } else {
+                RpcClass::Other
+            };
+            let result = ClientError {
                 kind: if flood {
                     ClientErrorKind::FloodWait
                 } else {
-                    ClientErrorKind::Rpc
+                    match class {
+                        RpcClass::CodeInvalid => ClientErrorKind::InvalidLoginCode,
+                        RpcClass::CodeExpired => ClientErrorKind::LoginCodeExpired,
+                        RpcClass::PasswordInvalid => ClientErrorKind::InvalidPassword,
+                        _ => ClientErrorKind::Rpc,
+                    }
                 },
                 outcome: if rejected {
                     Outcome::Rejected
@@ -104,7 +155,10 @@ pub(super) fn invocation(failure: InvocationError) -> ClientError {
                 },
                 rpc_code: (100..600).contains(&rpc.code).then_some(rpc.code),
                 retry_after_seconds: if flood { rpc.value } else { None },
-            }
+                class,
+            };
+            rpc.name.zeroize();
+            result
         }
         InvocationError::Deserialize(grammers_mtproto::mtp::DeserializeError::LimitExceeded) => {
             error(ClientErrorKind::Capacity, Outcome::Unknown)

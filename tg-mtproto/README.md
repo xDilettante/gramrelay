@@ -2,8 +2,8 @@
 
 Separate MTProto package, currently implementing M2. Encrypted local session
 storage and the owned network Client with typed raw TL calls are implemented.
-Bot login and live identity verification are also available. Interactive user
-authentication, common actions, files and observable update recovery remain open.
+Bot/user login, 2FA, confirmed login migration and live identity verification are
+also available. Common actions, files and observable update recovery remain open.
 This package does not route MTProto operations through the Bot API.
 
 ```rust,no_run
@@ -69,8 +69,52 @@ binding/token prefix and validates the returned self identity. Credential Debug
 is redacted; no plaintext getter or serialization is provided. Authorization
 transitions exclude raw/identity jobs until their final outcome is classified.
 An unknown transition fences the generation before waking waiting jobs. The
-phone/code, 2FA and DC migration flows remain in development; see
-SPEC-mtproto-auth.md. Agent tools cannot initiate login.
+interactive flow uses opaque RAM-only challenges; see SPEC-mtproto-auth.md.
+Agent tools cannot initiate login.
+
+For a user account, the trusted host supplies UI callbacks and an independent
+expected ID. `NewAccount` is an explicit alternative for first login; it refuses
+remembered accounts and does not grant an agent profile any authority.
+
+```rust,no_run
+use std::ops::AsyncFnOnce;
+use tg_mtproto::{AccountId, AppCredentials, Client, ClientError};
+use tg_mtproto::auth::{AuthStep, LoginCode, Password, PhoneNumber, UserLoginTarget};
+
+async fn login(
+    client: &Client,
+    app: AppCredentials,
+    phone: PhoneNumber,
+    expected: AccountId,
+    ask_code: impl AsyncFnOnce() -> LoginCode,
+    ask_password: impl AsyncFnOnce() -> Password,
+) -> Result<AuthStep, ClientError> {
+    let step = client.begin_user_login(app, phone, UserLoginTarget::Expected(expected)).await?;
+    let step = if let AuthStep::CodeRequired(ref challenge) = step {
+        client.submit_login_code(challenge, ask_code().await).await?
+    } else { step };
+    if let AuthStep::PasswordRequired(ref challenge) = step {
+        client.submit_password(challenge, ask_password().await).await
+    } else { Ok(step) }
+}
+```
+
+This example prompts once per stage. Retain a code challenge when handling a
+confirmed invalid code if the host wants an explicit retry. Expired/replaced or
+cross-generation capabilities refuse locally. Password refusals return a fresh
+`PasswordRequired` step with a static reason, without replaying the password
+check. Signup/payment/email/unsupported delivery or algorithms return an explicit
+`Unsupported` step. Password hints are untrusted text, exposed only by an explicit
+accessor; Debug stays redacted. Pass owned password strings/bytes to `Password::new`
+to move their allocation into zeroizing storage; host-retained copies remain the
+host's responsibility. Keep credentials out of command-line/tool arguments.
+
+SRP uses maintained grammers-crypto with checked parameters and OS randomness.
+Its owned blocking work keeps admission until completion/join, independently of
+the Session heartbeat. One allowlisted confirmed 303 migration per login job can
+change home DC and resend the same bounded request under the original deadline.
+Unknown, same/missing DC, unrecognized and repeated redirects never loop. Close
+the Client when the host finishes using the authenticated session.
 
 `sign_out(expected)` verifies the live account, durably quarantines the session
 before LogOut and ends the generation. Success waits for joined network jobs,

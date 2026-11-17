@@ -1,4 +1,4 @@
-mod auth;
+pub mod auth;
 mod error;
 mod runtime;
 #[cfg(test)]
@@ -16,7 +16,7 @@ use std::{
     pin::Pin,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -31,6 +31,8 @@ pub struct ClientOptions {
     before_fence: Option<Duration>,
     #[cfg(test)]
     before_accept: Option<Duration>,
+    #[cfg(test)]
+    before_compute: Option<Duration>,
     max_pending: usize,
     timeout: Duration,
     max_request_bytes: usize,
@@ -45,6 +47,8 @@ impl Default for ClientOptions {
             before_fence: None,
             #[cfg(test)]
             before_accept: None,
+            #[cfg(test)]
+            before_compute: None,
             max_pending: 16,
             timeout: Duration::from_secs(30),
             max_request_bytes: grammers_mtproto::MAX_REQUEST_SIZE.min(1024 * 1024),
@@ -108,6 +112,7 @@ struct Shared {
 struct Core {
     session: Session,
     authorization: Arc<tokio::sync::RwLock<()>>,
+    auth_epoch: Arc<AtomicU64>,
     options: ClientOptions,
     startup: Mutex<Option<Startup>>,
     sender: mpsc::Sender<Call>,
@@ -208,6 +213,7 @@ impl Client {
             inner: Arc::new(Core {
                 session,
                 authorization: Arc::new(tokio::sync::RwLock::new(())),
+                auth_epoch: Arc::new(AtomicU64::new(0)),
                 slots: Arc::new(Semaphore::new(options.max_pending)),
                 options,
                 startup: Mutex::new(Some(Startup {

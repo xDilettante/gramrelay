@@ -36,7 +36,7 @@ arms credential clearing, seals the generation and releases the gate only after
 publishing its stop. A late/failed result does not arm successful finalization.
 
 Cleanup order is: quit and join the whole driver tree; abort/join residual client
-jobs; close native admission and drain every already admitted storage mutation;
+jobs and join running blocking computations; close native admission and drain every already admitted storage mutation;
 then run a native close finalizer that atomically clears all DC keys, peers,
 identity and acknowledged/provisional update state and resets quarantine. This
 prevents a late backend key/peer mutation from resurrecting cleared credentials.

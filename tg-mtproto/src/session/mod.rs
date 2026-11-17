@@ -66,6 +66,14 @@ impl Session {
             .shared
             .read(|view| view.snapshot.quarantined)
     }
+    pub(crate) fn has_datacenter(&self, dc: i32) -> Result<bool> {
+        self.inner.database.shared.read(|view| {
+            view.snapshot
+                .datacenters
+                .iter()
+                .any(|option| option.id == dc)
+        })
+    }
     pub(crate) async fn quarantine_authorization(&self) -> Result<()> {
         self.inner
             .database

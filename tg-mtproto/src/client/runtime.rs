@@ -13,8 +13,97 @@ pub(super) struct Context {
     state: Arc<CallState>,
     shared: Arc<Shared>,
     deadline: tokio::time::Instant,
+    blocking: Arc<tokio::sync::Mutex<JoinSet<()>>>,
+    #[cfg(test)]
+    before_compute: Option<Duration>,
 }
 impl Context {
+    pub async fn invoke_auth<R: tl::RemoteCall>(&self, body: &[u8]) -> Result<R::Return>
+    where
+        R::Return: Send,
+    {
+        loop {
+            match self.invoke::<R>(body.to_vec()).await {
+                Err(failure) => {
+                    let super::error::RpcClass::Migrate(dc) = failure.rpc_class() else {
+                        return Err(failure);
+                    };
+                    self.check_active()?;
+                    let old_dc = self
+                        .handle
+                        .session
+                        .home_dc_id()
+                        .map_err(|_| error(ClientErrorKind::Session, self.state.seal()))?;
+                    if dc == old_dc
+                        || !self
+                            .session
+                            .has_datacenter(dc)
+                            .map_err(|_| error(ClientErrorKind::Session, self.state.seal()))?
+                    {
+                        return Err(failure);
+                    }
+                    if self.state.migration_used.swap(true, Ordering::AcqRel) {
+                        return Err(failure);
+                    }
+                    self.handle
+                        .session
+                        .set_home_dc_id(dc)
+                        .await
+                        .map_err(|_| error(ClientErrorKind::Session, self.state.seal()))?;
+                    self.handle.disconnect_from_dc(old_dc);
+                }
+                result => return result,
+            }
+        }
+    }
+    fn check_active(&self) -> Result<()> {
+        if tokio::time::Instant::now() >= self.deadline {
+            return Err(error(ClientErrorKind::Timeout, self.state.seal()));
+        }
+        if self.shared.closed.load(Ordering::Acquire) {
+            return Err(error(ClientErrorKind::Closed, self.state.seal()));
+        }
+        if self
+            .session
+            .is_quarantined()
+            .map_err(|_| error(ClientErrorKind::Session, self.state.seal()))?
+        {
+            return Err(error(ClientErrorKind::Quarantined, self.state.seal()));
+        }
+        Ok(())
+    }
+    pub async fn compute<T, F>(&self, function: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T> + Send + 'static,
+    {
+        self.check_active()?;
+        let (reply, waiting) = oneshot::channel();
+        {
+            let mut jobs = self.blocking.lock().await;
+            // Serialize computation and reap its tail before admitting another.
+            while let Some(result) = jobs.join_next().await {
+                if result.is_err_and(|error| error.is_panic()) {
+                    return Err(error(ClientErrorKind::Backend, self.state.seal()));
+                }
+            }
+            self.check_active()?;
+            #[cfg(test)]
+            let before_compute = self.before_compute;
+            jobs.spawn_blocking(move || {
+                #[cfg(test)]
+                if let Some(delay) = before_compute {
+                    std::thread::sleep(delay);
+                }
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(function))
+                    .unwrap_or_else(|_| Err(error(ClientErrorKind::Decode, Outcome::Unknown)));
+                let _ = reply.send(result);
+            });
+        }
+        waiting
+            .await
+            .map_err(|_| error(ClientErrorKind::Backend, self.state.seal()))?
+    }
     pub fn stop_after_action(&self) {
         self.state.stop_generation.store(true, Ordering::Release);
     }
@@ -132,6 +221,7 @@ struct CallState {
     stop_generation: AtomicBool,
     logout_confirmed: AtomicBool,
     completion: Mutex<Completion>,
+    migration_used: AtomicBool,
 }
 impl CallState {
     fn is_pending(&self) -> bool {
@@ -286,6 +376,7 @@ pub(super) async fn run(
     let _updates = pool.updates;
     let mut health = startup.claim.health();
     let mut jobs = JoinSet::new();
+    let blocking = Arc::new(tokio::sync::Mutex::new(JoinSet::<()>::new()));
     let mut active = HashMap::<u64, Pending>::new();
     let mut next_id = 0u64;
     let mut driver_exit = None;
@@ -333,7 +424,7 @@ pub(super) async fn run(
                 let slot=Arc::new(Mutex::new(Some(call.permit)));
                 let state=Arc::new(CallState::default());
                 active.insert(id,Pending {reply:reply.clone(),_slot:slot.clone(),deadline:call.deadline,state:state.clone()});
-                let context=Context {handle:handle.clone(),session:startup.claim.session(),max_response_bytes:options.max_response_bytes,state:state.clone(),shared:shared.clone(),deadline:call.deadline};
+                let context=Context {handle:handle.clone(),session:startup.claim.session(),max_response_bytes:options.max_response_bytes,state:state.clone(),shared:shared.clone(),deadline:call.deadline,blocking:blocking.clone(),#[cfg(test)]before_compute:options.before_compute};
                 let shared=shared.clone();
                 let session_health=context.handle.session.clone();
                 #[cfg(test)]
@@ -410,6 +501,14 @@ pub(super) async fn run(
     };
     jobs.abort_all();
     while jobs.join_next().await.is_some() {}
+    let mut blocking_failed = false;
+    {
+        let mut jobs = blocking.lock().await;
+        jobs.abort_all();
+        while let Some(result) = jobs.join_next().await {
+            blocking_failed |= result.is_err_and(|error| error.is_panic());
+        }
+    }
     drop(active);
     drop(handle);
     let stored = if shared.logout_confirmed.load(Ordering::Acquire) {
@@ -420,7 +519,12 @@ pub(super) async fn run(
     .map_err(|_| error(ClientErrorKind::Session, Outcome::Unknown));
     let result = driver_result
         .map_err(|_| error(ClientErrorKind::Backend, Outcome::Unknown))
-        .and(stored);
+        .and(stored)
+        .and(if blocking_failed {
+            Err(error(ClientErrorKind::Backend, Outcome::Unknown))
+        } else {
+            Ok(())
+        });
     shared.exited.send_replace(Some(result));
     exit.complete();
 }

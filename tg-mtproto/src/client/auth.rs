@@ -3,6 +3,23 @@ use crate::{AccountId, AccountIdentity, AccountKind, Session};
 use grammers_session::types::{PeerAuth, PeerInfo};
 use std::fmt;
 use zeroize::{Zeroize, Zeroizing};
+mod interactive;
+mod srp;
+pub use interactive::{
+    AuthStep, CodeChallenge, CodeDelivery, LoginCode, Password, PasswordChallenge,
+    PasswordPromptReason, PhoneNumber, UnsupportedAuthFlow, UserLoginTarget,
+};
+
+fn advance_epoch(epoch: &std::sync::atomic::AtomicU64) -> Result<u64> {
+    epoch
+        .fetch_update(
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+            |value| value.checked_add(1),
+        )
+        .map(|old| old + 1)
+        .map_err(|_| error(ClientErrorKind::Capacity, Outcome::NotSent))
+}
 
 /// Application credentials supplied by the trusted host, never by agent tools.
 pub struct AppCredentials {
@@ -153,10 +170,12 @@ impl Client {
         check_stored(&self.inner.session, expected)?;
         let session = self.inner.session.clone();
         let authorization = self.inner.authorization.clone();
+        let epoch = self.inner.auth_epoch.clone();
         let limit = self.inner.options.max_request_bytes;
         self.submit(reservation, move |context| async move {
             context.hold_authorization_write(authorization).await;
             check_stored(&session, expected)?;
+            advance_epoch(&epoch)?;
             let request = BotRequest(tl::functions::auth::ImportBotAuthorization {
                 flags: 0,
                 api_id: credentials.api_id,
@@ -167,9 +186,9 @@ impl Client {
             drop(request);
             drop(credentials);
             drop(token);
-            let mut bytes = encoded?;
+            let bytes = encoded?;
             let response = context
-                .invoke::<tl::functions::auth::ImportBotAuthorization>(std::mem::take(&mut *bytes))
+                .invoke_auth::<tl::functions::auth::ImportBotAuthorization>(&bytes)
                 .await?;
             let tl::enums::auth::Authorization::Authorization(mut auth) = response else {
                 return Err(error(ClientErrorKind::Decode, Outcome::Unknown));
@@ -194,11 +213,13 @@ impl Client {
         check_stored(&self.inner.session, expected)?;
         let session = self.inner.session.clone();
         let authorization = self.inner.authorization.clone();
+        let epoch = self.inner.auth_epoch.clone();
         let limit = self.inner.options.max_request_bytes;
         let result: Result<()> = self
             .submit(reservation, move |context| async move {
                 context.hold_authorization_write(authorization).await;
                 verify_in_context(&context, &session, expected, limit).await?;
+                advance_epoch(&epoch)?;
                 context.stop_after_action();
                 session
                     .quarantine_authorization()

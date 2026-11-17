@@ -1,6 +1,8 @@
 use super::*;
 use crate::{AccountId, AccountIdentity, AccountKind, AppCredentials, BotToken};
 use std::sync::atomic::AtomicUsize;
+#[path = "interactive_tests.rs"]
+mod interactive;
 #[path = "logout_tests.rs"]
 mod logout;
 
@@ -419,4 +421,107 @@ async fn an_inconsistent_login_fences_before_waking_waiting_raw_jobs() {
         "no raw dispatch after inconsistent authorization"
     );
     assert_eq!(raw.unwrap_err().outcome(), Outcome::NotSent);
+}
+
+#[tokio::test]
+async fn bot_login_follows_one_confirmed_known_migration_and_persists_the_home_dc() {
+    let (directory, session) = session().await;
+    let datacenters = Arc::new(Mutex::new(Vec::new()));
+    let seen = datacenters.clone();
+    let client = fixture(session, ClientOptions::default(), move |dc, _| {
+        let first = {
+            let mut calls = seen.lock().unwrap();
+            calls.push(dc);
+            calls.len() == 1
+        };
+        async move {
+            if first {
+                Err(grammers_mtsender::InvocationError::Rpc(
+                    grammers_mtsender::RpcError {
+                        code: 303,
+                        name: "USER_MIGRATE".into(),
+                        value: Some(3),
+                        caused_by: None,
+                    },
+                ))
+            } else {
+                Ok(authorization(user(42, 1 | (1 << 10) | (1 << 14))))
+            }
+        }
+    });
+    client
+        .sign_in_bot(
+            credentials(),
+            BotToken::new("42:secret").unwrap(),
+            expected(true),
+        )
+        .await
+        .unwrap();
+    assert_eq!(*datacenters.lock().unwrap(), vec![2, 3]);
+    client.close().await.unwrap();
+    let restored = Session::open(
+        directory.path().join("session.sqlite"),
+        crate::SessionBinding::new("demo", 1).unwrap(),
+        crate::SessionKey::from_bytes([7; 32]),
+        crate::SessionOptions::default(),
+    )
+    .await
+    .unwrap();
+    let client = fixture(restored, ClientOptions::default(), |dc, bytes| async move {
+        assert_eq!(dc, 3);
+        Ok(pong(&bytes))
+    });
+    client
+        .invoke(&tl::functions::Ping { ping_id: 1 })
+        .await
+        .unwrap();
+    client.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn unrecognized_same_missing_and_repeated_migrations_never_loop() {
+    for (code, name, value, attempts) in [
+        (303, "PHONE_MIGRATE", Some(3), 2),
+        (303, "PHONE_MIGRATE", Some(2), 1),
+        (303, "PHONE_MIGRATE", Some(0), 1),
+        (303, "PHONE_MIGRATE", Some(99999), 1),
+        (303, "PHONE_MIGRATE", None, 1),
+        (303, "FILE_MIGRATE", Some(3), 1),
+        (500, "PHONE_MIGRATE", Some(3), 1),
+    ] {
+        let (_directory, session) = session().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen = calls.clone();
+        let client = fixture(session, ClientOptions::default(), move |_, _| {
+            let attempt = seen.fetch_add(1, Ordering::SeqCst);
+            async move {
+                Err(grammers_mtsender::InvocationError::Rpc(
+                    grammers_mtsender::RpcError {
+                        code,
+                        name: name.into(),
+                        value: if attempt == 0 { value } else { Some(4) },
+                        caused_by: None,
+                    },
+                ))
+            }
+        });
+        let failure = client
+            .sign_in_bot(
+                credentials(),
+                BotToken::new("42:secret").unwrap(),
+                expected(true),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            failure.outcome(),
+            if code == 500 {
+                Outcome::Unknown
+            } else {
+                Outcome::Rejected
+            }
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), attempts);
+        client.close().await.unwrap();
+    }
 }

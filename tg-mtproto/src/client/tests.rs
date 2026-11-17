@@ -72,6 +72,67 @@ async fn typed_raw_rpc_uses_the_pinned_wire_path_and_close_affects_every_clone()
 }
 
 #[tokio::test]
+async fn timed_out_blocking_work_is_joined_without_stalling_session_heartbeat() {
+    let directory = tempfile::tempdir().unwrap();
+    let session = Session::open(
+        directory.path().join("session.sqlite"),
+        crate::SessionBinding::new("demo", 1).unwrap(),
+        crate::SessionKey::from_bytes([7; 32]),
+        crate::SessionOptions::default().lease(Duration::from_millis(300)),
+    )
+    .await
+    .unwrap();
+    let client = fixture(
+        session.clone(),
+        ClientOptions::default()
+            .max_pending(1)
+            .request_timeout(Duration::from_millis(100)),
+        |_, _| async { panic!("CPU work must not dispatch an RPC") },
+    );
+    let (started, waiting) = tokio::sync::oneshot::channel();
+    let (release, blocked) = std::sync::mpsc::channel();
+    let caller = tokio::spawn({
+        let client = client.clone();
+        async move {
+            client
+                .submit(client.reserve().unwrap(), move |context| async move {
+                    context
+                        .compute(move || {
+                            let _ = started.send(());
+                            blocked.recv().unwrap();
+                            Ok(42u32)
+                        })
+                        .await
+                })
+                .await
+        }
+    });
+    waiting.await.unwrap();
+    let failure: ClientError = caller.await.unwrap().unwrap_err();
+    assert_eq!(failure.kind(), ClientErrorKind::Timeout);
+    assert_eq!(failure.outcome(), Outcome::NotSent);
+    let closing = tokio::spawn({
+        let client = client.clone();
+        async move { client.close().await }
+    });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let heartbeat_live = session.remembered_account().is_ok();
+    let early_close = closing.is_finished();
+    let retained = client.inner.slots.available_permits();
+    release.send(()).unwrap();
+    closing.await.unwrap().unwrap();
+    assert!(
+        heartbeat_live,
+        "CPU work cannot starve the encrypted store owner heartbeat"
+    );
+    assert!(
+        !early_close,
+        "close must join already running blocking work"
+    );
+    assert_eq!(retained, 0, "admission stays owned through the CPU barrier");
+}
+
+#[tokio::test]
 async fn cancelling_a_caller_keeps_the_admitted_slot_until_real_rpc_completion() {
     let (_directory, session) = session().await;
     let entered = Arc::new(tokio::sync::Notify::new());
