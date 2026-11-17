@@ -1,6 +1,7 @@
 # Observable MTProto updates (M2)
 
-Status: implementing. Extends SPEC-mtproto-session.md. This specification covers
+Status: receiver and recovery implemented and locally verified. Extends
+SPEC-mtproto-session.md. This specification covers
 the complete receiver/recovery path; incremental storage work alone does not
 complete M2. No live session or Telegram dispatch is authorized.
 
@@ -76,9 +77,32 @@ and output batches, channel/entity counts and encoded size. Suppress SDK tracing
 that formats event contents; diagnostics may carry bounded reason/count metadata.
 No custom MTProto sequencing, cryptography or secret-chat decryption is added.
 
+Public API: Account::updates(UpdateMode), UpdateReceiver::next_batch(wait),
+acknowledge(batch), resync_from_current(gap) and retire_channel(gap). StartNow
+only establishes an absent initial baseline; saved checkpoints resume. Pending
+data is replayed before update/difference RPCs, following the required live self
+check. Stable hashed ID getters are deduplication metadata, not ACK authority.
+
+An explicit ChannelAccessLost resync decision may omit only that gap's channel;
+other channels/global counters remain monotone. This removes the current recovery
+checkpoint, not a permanent ignore policy; later channel events require an
+explicit baseline. Overflow requires joined restart before resync. SDK's zero-as-
+absent load is bypassed through maintained set_state/control handling, preserving
+acknowledged zeros and starting difference. Counter metadata is checked before
+SDK's zero filter; comparison intermediates are widened without changing sequence
+rules. SDK normalization/counter/backlog observations are pinned and verified.
+
+All raw/difference inputs first validate the complete bounded peer list against
+the independently expected account. Copy only minimal fixed-size routing records
+and durably cache them before publishing either a data batch or a gap. This
+preserves a newly observed private channel's access hash when sequencing requires
+an explicit baseline. Invalid/duplicate/foreign-self metadata is never partially
+cached. The full envelope budget is checked independently; metadata cache writes
+do not advance the acknowledged checkpoint.
+
 ## Implemented storage evidence
 
-The internal Session journal is implemented; the network receiver remains open.
+The preceding storage increment implemented the internal Session journal.
 Payload v3 stores explicit required nullable fields and validates ID ordinal
 relationships as well as account/base/checkpoint constraints. Baseline and
 Resync are empty decisions: newer loss invalidates either; earlier Events remain
@@ -101,7 +125,34 @@ success after post-commit lease expiry. Windows / Rust 1.98.0: 492 all-feature /
 328 default workspace tests, 11 doctests, Clippy/fmt, 25 Python checks, deterministic
 schemas, pinned SDK verification and audit of 363 dependencies pass. Focused
 fresh-context review findings were fixed; cross-model review was skipped in the
-non-interactive goal continuation. Receiver/M3/Q1–Q4 are not declared complete.
+non-interactive goal continuation. That storage increment alone did not complete
+the receiver, M3 or Q1–Q4.
+
+## Implemented receiver evidence
+
+Twenty-four additional Rust tests bring tg-mtproto to 173 checks. Thirteen
+public receiver cases cover baseline decisions, whole/sliced/empty differences,
+encrypted restart and replay IDs, caller cancellation and claim ownership,
+timeouts/join, checkpoint failure, raw loss/malformed input, channel hints,
+access loss/retirement and scoped resync. The private-channel regression proves
+that routing data survives a MissingBaseline gap before recovery. Nine engine
+cases cover known zero counters, normalization, actual adapted byte limits,
+retained backlog, short-sent channel forms, pre-filter invalid counters,
+large duplicate comparisons, explicit TooLong and trace privacy. Source closure
+is a backend failure unless the sticky loss signal is actually true. A storage
+case verifies that only the exact inaccessible channel can be retired.
+
+Fresh-context reviews covered engine, receiver ownership/recovery and minimal
+routing metadata. Valid findings have RED-to-GREEN regressions. Ten optimized
+engine/source tests and the twenty original MessageBoxes tests pass; comparison
+arithmetic is widened in the verified SDK patch. Four pinned SDK archive/diff
+checks, 25 Python checks and audit of 363 dependencies pass. Workspace evidence
+on Windows/Rust 1.98.0: 516 all-feature and 352 default tests, 12 doctests,
+deterministic agent schemas and clean Clippy/fmt. The private-channel recovery
+regression also passes in an optimized build.
+This completes the local M2 contract; M3 and Q1–Q4 remain open, including decoded
+heap/stack bounds, inherited panic paths, packaging, platform and live-server
+compatibility evidence. Live Telegram access was not used.
 
 ## Required evidence
 

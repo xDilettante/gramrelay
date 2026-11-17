@@ -4,6 +4,7 @@ mod error;
 mod runtime;
 #[cfg(test)]
 mod tests;
+mod updates;
 use crate::{Session, session::ClientClaim};
 pub use auth::{AppCredentials, BotToken};
 pub use common::{
@@ -28,6 +29,10 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch};
+pub use updates::{
+    ResyncRequired, UpdateBatch, UpdateBatchKind, UpdateGapReason, UpdateItem, UpdateMode,
+    UpdateReceiver, UpdateScope,
+};
 use zeroize::Zeroizing;
 
 #[derive(Clone, Debug)]
@@ -110,6 +115,7 @@ struct Call {
     deadline: tokio::time::Instant,
 }
 struct Startup {
+    updates: Arc<updates::Hub>,
     claim: ClientClaim,
     receiver: mpsc::Receiver<Call>,
     factory: Factory,
@@ -121,6 +127,7 @@ struct Shared {
     logout_confirmed: AtomicBool,
 }
 struct Core {
+    updates: Arc<updates::Hub>,
     session: Session,
     authorization: Arc<tokio::sync::RwLock<()>>,
     dc_authorization: Arc<tokio::sync::Mutex<()>>,
@@ -215,6 +222,7 @@ impl Client {
             return Err(error(ClientErrorKind::Quarantined, Outcome::NotSent));
         }
         let (sender, receiver) = mpsc::channel(options.max_pending);
+        let update_hub = Arc::new(updates::Hub::default());
         let shared = Arc::new(Shared {
             closed: AtomicBool::new(false),
             stop: watch::channel(false).0,
@@ -223,6 +231,7 @@ impl Client {
         });
         Ok(Self {
             inner: Arc::new(Core {
+                updates: update_hub.clone(),
                 session,
                 authorization: Arc::new(tokio::sync::RwLock::new(())),
                 dc_authorization: Arc::new(tokio::sync::Mutex::new(())),
@@ -230,6 +239,7 @@ impl Client {
                 slots: Arc::new(Semaphore::new(options.max_pending)),
                 options,
                 startup: Mutex::new(Some(Startup {
+                    updates: update_hub,
                     claim,
                     receiver,
                     factory,
@@ -356,6 +366,19 @@ fn encode_request<R: tl::Serializable>(request: &R, limit: usize) -> Result<Zero
         {
             overflow = true;
         } else {
+            let required = bytes.len() + part.len();
+            if required > bytes.capacity() {
+                let capacity = bytes
+                    .capacity()
+                    .max(32)
+                    .saturating_mul(2)
+                    .max(required)
+                    .min(limit);
+                let mut grown = Zeroizing::new(Vec::with_capacity(capacity));
+                grown.extend_from_slice(&bytes);
+                // Dropping the previous owner wipes its allocation before free.
+                bytes = grown;
+            }
             bytes.extend_from_slice(part);
         }
     });

@@ -1,5 +1,12 @@
 # Vendored source
 
+grammers-session has source-verified normalization/counter/backlog observations
+and widened mathematical comparison intermediates. Preserve its sequencing and
+storage logic and the remaining archive bytes; check tools/verify_grammers.py.
+Its safe standalone command is --no-default-features --features serde --lib,
+using root target/vendor-session as CARGO_TARGET_DIR. Do not run tests/deps.rs,
+which assumes the full upstream repository layout.
+
 grammers-mtsender is pinned to the published 0.12.0 archive and has a narrow
 downstream lifecycle/fixture patch. A separate grammers-mtproto 0.12.0 patch
 enforces bounded incoming parsing. Keep parser validation changes isolated

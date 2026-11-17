@@ -41,6 +41,64 @@ fn draft(kind: BatchKind, base: Option<UpdatesState>, pts: i32) -> UpdateDraft {
 }
 
 #[tokio::test]
+async fn resync_may_retire_only_its_exact_inaccessible_channel_after_explicit_ack() {
+    for access_lost in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let session = open(
+            &directory.path().join("updates.sqlite"),
+            SessionOptions::default(),
+        )
+        .await;
+        verified(&session).await;
+        let baseline = session
+            .stage_updates(draft(BatchKind::Baseline, None, 10))
+            .await
+            .unwrap();
+        session
+            .acknowledge_updates(identity(), baseline.id)
+            .await
+            .unwrap();
+        let gap = session
+            .record_update_gap(
+                identity(),
+                GapScope::Channel(9),
+                if access_lost {
+                    GapReason::ChannelAccessLost
+                } else {
+                    GapReason::ChannelTooLong
+                },
+            )
+            .await
+            .unwrap();
+        let mut decision = draft(BatchKind::Resync { gap: gap.id }, Some(checkpoint(10)), 10);
+        decision.checkpoint.channels.clear();
+        let result = session.stage_updates(decision).await;
+        if !access_lost {
+            assert!(result.is_err());
+        } else {
+            let decision = result.unwrap();
+            assert_eq!(
+                session
+                    .updates_view(identity())
+                    .unwrap()
+                    .acknowledged
+                    .unwrap()
+                    .channels
+                    .len(),
+                1
+            );
+            session
+                .acknowledge_updates(identity(), decision.id)
+                .await
+                .unwrap();
+            let view = session.updates_view(identity()).unwrap();
+            assert!(view.gap.is_none() && view.acknowledged.unwrap().channels.is_empty());
+        }
+        session.close().await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn prepared_batch_replays_after_restart_and_only_exact_ack_advances_checkpoint() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("updates.sqlite");

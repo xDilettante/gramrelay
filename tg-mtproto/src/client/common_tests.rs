@@ -9,6 +9,8 @@ mod dialogs;
 mod files;
 #[path = "history_tests.rs"]
 mod history;
+#[path = "update_receiver_tests.rs"]
+mod updates;
 
 fn expected() -> AccountIdentity {
     AccountIdentity {

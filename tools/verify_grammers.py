@@ -17,6 +17,12 @@ LIMIT = 4 * 1024 * 1024
 PATCHED = {"Cargo.toml", "src/sender_pool.rs", "src/sender.rs", "src/configuration.rs"}
 LOCAL = {"Cargo.lock", "src/tg_safety_tests.rs", "src/tg_rpc_fixture.rs", "src/tg_sender_receive_tests.rs", "PATCH.md", "tg-safety.patch", "LICENSE-APACHE"}
 PACKAGES = {
+    "grammers-session": (
+        "221a58eaf6bfb61ecd1cb8bc58c20d2bc7ec3749b968bc90d52bcf9a8547d4e6",
+        {"Cargo.toml", "src/message_box/mod.rs", "src/message_box/adaptor.rs"},
+        {"PATCH.md", "tg-backlog.patch", "LICENSE-APACHE", "Cargo.lock"},
+        "tg-backlog.patch",
+    ),
     "grammers-mtsender": (SHA256, PATCHED, LOCAL, "tg-safety.patch"),
     "grammers-mtproto": (
         "fc95dd02ac37101d8121e5098706a9c9b342e855ca7d7b8b5daa91ec7b119649",

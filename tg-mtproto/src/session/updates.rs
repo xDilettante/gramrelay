@@ -1,5 +1,4 @@
-//! Durable whole-batch boundary. The M2 receiver is integrated separately.
-#![cfg_attr(not(test), allow(dead_code))]
+//! Durable whole-batch boundary used by the observable owned receiver.
 use super::{
     AccountIdentity, Session, SessionErrorKind, SessionOptions,
     data::{Snapshot, validate_updates},
@@ -18,6 +17,14 @@ pub(crate) struct UpdateId {
     nonce: [u8; 16],
 }
 impl UpdateId {
+    pub(crate) fn fingerprint(self) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        let mut hash = Sha256::new();
+        hash.update(b"tg-mtproto/update-id/v1");
+        hash.update(self.serial.to_le_bytes());
+        hash.update(self.nonce);
+        hash.finalize().into()
+    }
     fn valid(self, serial: u64) -> bool {
         self.serial != 0 && self.serial <= serial && self.nonce != [0; 16]
     }
@@ -104,15 +111,17 @@ pub(crate) struct PendingUpdates {
     pub id: UpdateId,
     pub draft: UpdateDraft,
 }
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub(crate) enum GapScope {
+#[non_exhaustive]
+pub enum GapScope {
     Account,
     Channel(i64),
 }
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum GapReason {
+#[non_exhaustive]
+pub enum GapReason {
     AccountTooLong,
     ChannelTooLong,
     MissingHash,
@@ -224,7 +233,9 @@ impl UpdateDraft {
         validate_updates(&self.checkpoint, options)?;
         if let Some(base) = &self.base {
             validate_updates(base, options)?;
-            monotone(base, &self.checkpoint)?;
+            if !matches!(self.kind, BatchKind::Resync { .. }) {
+                monotone(base, &self.checkpoint, None)?;
+            }
         }
         match self.kind {
             BatchKind::Baseline if self.base.is_some() || !self.payload.is_empty() => {
@@ -241,7 +252,7 @@ impl UpdateDraft {
         Ok(())
     }
 }
-fn monotone(base: &UpdatesState, next: &UpdatesState) -> Result<()> {
+fn monotone(base: &UpdatesState, next: &UpdatesState, retired: Option<i64>) -> Result<()> {
     if next.pts < base.pts || next.qts < base.qts || next.date < base.date || next.seq < base.seq {
         return Err(error(SessionErrorKind::InvalidInput));
     }
@@ -253,7 +264,10 @@ fn monotone(base: &UpdatesState, next: &UpdatesState) -> Result<()> {
     if base
         .channels
         .iter()
-        .any(|channel| next.get(&channel.id).is_none_or(|pts| *pts < channel.pts))
+        .any(|channel| match next.get(&channel.id) {
+            Some(pts) => *pts < channel.pts,
+            None => Some(channel.id) != retired,
+        })
     {
         return Err(error(SessionErrorKind::InvalidInput));
     }
@@ -275,10 +289,20 @@ fn check_draft(snapshot: &Snapshot, draft: &UpdateDraft) -> Result<()> {
         return Err(error(SessionErrorKind::InvalidInput));
     }
     match draft.kind {
-        BatchKind::Resync { gap }
-            if snapshot.updates.gap.is_none_or(|current| current.id != gap) =>
-        {
-            Err(error(SessionErrorKind::InvalidInput))
+        BatchKind::Resync { gap } => {
+            let current = snapshot
+                .updates
+                .gap
+                .filter(|current| current.id == gap)
+                .ok_or_else(|| error(SessionErrorKind::InvalidInput))?;
+            let retired = match (current.scope, current.reason) {
+                (GapScope::Channel(id), GapReason::ChannelAccessLost) => Some(id),
+                _ => None,
+            };
+            if let Some(base) = &draft.base {
+                monotone(base, &draft.checkpoint, retired)?;
+            }
+            Ok(())
         }
         BatchKind::Baseline if snapshot.updates.gap.is_some() => {
             Err(error(SessionErrorKind::InvalidInput))

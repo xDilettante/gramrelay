@@ -1,12 +1,13 @@
 # tg-mtproto
 
-Separate MTProto package, currently implementing M2. Encrypted local session
+Separate MTProto package with the M2 client foundation implemented. Encrypted local session
 storage and the owned network Client with typed raw TL calls are implemented.
 Bot/user login, 2FA, confirmed login migration, live identity verification,
 opaque peer lookup/cache references, text send/edit, bounded paginated history
 and Main/Archive dialogs are available. Document upload/sending from owned bytes
 or protected host files is implemented. Document downloads support verified DC
-authorization and protected destinations. Observable update recovery remains open.
+authorization and protected destinations. Observable batch updates have durable
+ACK, bounded catch-up and explicit scoped recovery. Release gates remain open.
 This package does not route MTProto operations through the Bot API.
 
 ```rust,no_run
@@ -336,13 +337,70 @@ backup rollback and copied credentials cannot be prevented by a per-file owner
 lease. Zeroization covers owned key/plaintext buffers on a best-effort basis;
 the runtime, operating system and upstream copies are outside that guarantee.
 
-The internal update journal durably stages one bounded batch before ACK,
-replays its exact ID/content after restart, and commits only its immutable
-checkpoint after an exact acknowledgement. It preserves explicit gaps and binds
-resync decisions to the current gap. This storage boundary is implemented and
-tested, including killed-process recovery. The observable network receiver and
-public update API remain in development; this is not yet a complete recovery
-implementation. See SPEC-mtproto-updates.md.
+Claim one lazy receiver with `account.updates(UpdateMode::Resume)?`. With no
+acknowledged baseline, Resume returns a durable MissingBaseline gap. An initial
+`UpdateMode::StartNow` explicitly chooses the current server state; that empty
+baseline batch must still be acknowledged. Existing saved checkpoints always
+resume, even with StartNow. Neither mode silently drops a pending batch.
+
+Keep the receiver alive and process whole batches, committing the application
+store (deduplicated by `batch.id()`) before ACK:
+
+```rust,no_run
+use std::time::Duration;
+use tg_mtproto::{ClientError, ResyncRequired, UpdateBatch, UpdateItem, UpdateReceiver};
+
+trait DurableSink {
+    // Atomically persist the complete batch and its ID before returning success.
+    async fn commit(&mut self, batch: &UpdateBatch) -> Result<(), ClientError>;
+}
+
+async fn receive_step(
+    receiver: &mut UpdateReceiver,
+    sink: &mut impl DurableSink,
+) -> Result<Option<ResyncRequired>, ClientError> {
+    match receiver.next_batch(Duration::from_secs(1)).await? {
+        Some(UpdateItem::Batch(batch)) => {
+            sink.commit(&batch).await?;
+            receiver.acknowledge(&batch).await?;
+            Ok(None)
+        }
+        Some(UpdateItem::Gap(required)) => Ok(Some(required)),
+        None => Ok(None),
+    }
+}
+```
+
+One encrypted pending batch survives caller cancellation/restart with the same
+ID/content. Checkpoints advance only after exact whole-batch ACK. SDK provisional
+state, per-item iteration and peer metadata reads never acknowledge events. Raw
+update/user/chat getters are trusted Rust access and must not become agent JSON
+authority. Batch/gap capabilities bind the originating client/account/auth epoch;
+their deduplication IDs are intentionally non-authorizing public metadata.
+
+Gaps preserve old checkpoints. After host reconstruction or explicitly accepting
+skipped history, `receiver.resync_from_current(&required).await?` stages an empty
+decision batch; ACK it to commit. Account gaps refresh common counters while
+preserving channel checkpoints; channel gaps refresh only that channel through
+GetFullChannel. Missing hashes need host peer resolution first. An explicit
+`retire_channel` decision can remove only the inaccessible channel named by a
+ChannelAccessLost gap; later channel events require a new explicit baseline.
+New loss invalidates stale decisions. On queue overflow, `restart_required()` is
+true: close/join and reopen the Client/Session before choosing recovery; the
+current driver's sticky signal cannot be cleared by ACK.
+
+Validated routing metadata from updates and difference replies is durably cached
+before exposing either a batch or a gap. This preserves a new private channel's
+access hash for explicit recovery; peer caching itself never advances ACK.
+
+Reception uses the same owned admission/auth/deadline/NoRetries pipeline as other
+actions. Polling may return None before `wait` to bound internal work (64 steps)
+and retain deadline margin. Applied packets and retained SDK backlog are bounded
+to 4096 updates, 1024 total entities and 1 MiB encoded data, with at most 10000
+channel checkpoints. The sender queue remains bounded at 100 envelopes; encoded
+limits do not establish decoded heap/stack or performance targets. No secret-chat
+decryption or exactly-once external side effect is claimed. See
+SPEC-mtproto-updates.md; M3 agent integration and release gates remain open.
 
 Run `cargo test --locked -p tg-mtproto --all-targets` from the workspace root.
 Tests use synthetic keys, actual encrypted SQLite files, a killed child process,

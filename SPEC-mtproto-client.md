@@ -1,8 +1,8 @@
 # MTProto implementation (M2)
 
 Implement the separate tg-mtproto package against SPEC-mtproto.md,
-SPEC-mtproto-session.md and ADR 0016. The complete M2 remains open until every
-capability below has a real backend and meaningful mock/loopback coverage.
+SPEC-mtproto-session.md and ADR 0016. All M2 capabilities below now have a real
+backend and meaningful mock/loopback coverage. M3 and release gates remain open.
 
 ## Implementation order and boundaries
 
@@ -180,4 +180,8 @@ SPEC-mtproto-dialogs.md and SPEC-mtproto-files.md,
 using this owned pipeline.
 No authenticated Telegram compatibility, generated decoded-heap/stack bound,
 external-consumer packaging or cross-platform claim follows from this increment.
-Downloads/DC authorization, observable updates, M3 and release gates remain open.
+Subsequent downloads/DC authorization and observable updates are implemented in
+SPEC-mtproto-download.md and SPEC-mtproto-updates.md. Together with the earlier
+increments this completes M2 locally: 173 package checks, 516 all-feature and
+352 default workspace tests. M3 and release gates remain open; mock/loopback
+evidence does not claim authenticated live-server compatibility.

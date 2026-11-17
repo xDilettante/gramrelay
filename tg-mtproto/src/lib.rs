@@ -9,6 +9,10 @@ pub use client::{
     HistoryMessage, HistoryMessageKind, HistoryPage, MessageReceipt, Outcome, Peer, PeerId,
     PeerKind, RemoteDocument, SendDocument, SendText,
 };
+pub use client::{
+    ResyncRequired, UpdateBatch, UpdateBatchKind, UpdateGapReason, UpdateItem, UpdateMode,
+    UpdateReceiver, UpdateScope,
+};
 pub use grammers_tl_types as tl;
 pub use session::{
     AccountId, AccountIdentity, AccountKind, Session, SessionBinding, SessionError,

@@ -20,6 +20,10 @@ pub(super) struct Context {
     before_dc_confirm: Option<Duration>,
 }
 impl Context {
+    pub(super) fn polling_deadline(&self, wait: Duration) -> tokio::time::Instant {
+        let now = tokio::time::Instant::now();
+        now + wait.min(self.deadline.saturating_duration_since(now) / 2)
+    }
     pub async fn invoke_auth<R: tl::RemoteCall>(&self, body: &[u8]) -> Result<R::Return>
     where
         R::Return: Send,
@@ -464,8 +468,10 @@ pub(super) async fn run(
     let _stop_driver = StopDriver(pool.handle.thin.clone());
     let mut driver = tokio::spawn(pool.runner.run());
     let handle = pool.handle;
-    // Updates stay owned until the observable receiver is installed in the next increment.
-    let _updates = pool.updates;
+    startup
+        .updates
+        .install(pool.updates, handle.thin.update_loss())
+        .await;
     let mut health = startup.claim.health();
     let mut jobs = JoinSet::new();
     let blocking = Arc::new(tokio::sync::Mutex::new(JoinSet::<()>::new()));
@@ -602,6 +608,7 @@ pub(super) async fn run(
         }
     }
     drop(active);
+    startup.updates.close().await;
     drop(handle);
     let stored = if shared.logout_confirmed.load(Ordering::Acquire) {
         startup.claim.finish_logged_out().await

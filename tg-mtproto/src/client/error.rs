@@ -13,6 +13,8 @@ pub(super) enum RpcClass {
     SrpExpired,
     Unregistered,
     FileMigrate(i32),
+    ChannelAccessLost,
+    TimestampUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -50,6 +52,9 @@ pub enum ClientErrorKind {
     File,
     Integrity,
     FileReferenceExpired,
+    InvalidUpdate,
+    UpdateReceiverOwned,
+    RestartRequired,
 }
 
 /// Static diagnostic metadata. No upstream error or remote description is retained.
@@ -103,6 +108,9 @@ impl ClientError {
             ClientErrorKind::File => "mtproto_file",
             ClientErrorKind::Integrity => "mtproto_integrity",
             ClientErrorKind::FileReferenceExpired => "mtproto_file_reference_expired",
+            ClientErrorKind::InvalidUpdate => "mtproto_invalid_update",
+            ClientErrorKind::UpdateReceiverOwned => "mtproto_update_receiver_owned",
+            ClientErrorKind::RestartRequired => "mtproto_restart_required",
         }
     }
 }
@@ -148,6 +156,19 @@ pub(super) fn invocation(failure: InvocationError) -> ClientError {
                     .and_then(|value| i32::try_from(value).ok())
                     .filter(|dc| *dc > 0)
                     .map_or(RpcClass::Other, RpcClass::FileMigrate)
+            } else if rpc.code == 400
+                && matches!(
+                    rpc.name.as_str(),
+                    "PERSISTENT_TIMESTAMP_EMPTY" | "PERSISTENT_TIMESTAMP_INVALID"
+                )
+                && rpc.value.is_none()
+            {
+                RpcClass::TimestampUnavailable
+            } else if ((rpc.code == 406 && rpc.name == "CHANNEL_PRIVATE")
+                || (rpc.code == 403 && rpc.name == "CHANNEL_PUBLIC_GROUP_NA"))
+                && rpc.value.is_none()
+            {
+                RpcClass::ChannelAccessLost
             } else if rpc.code == 401 && rpc.name == "AUTH_KEY_UNREGISTERED" && rpc.value.is_none()
             {
                 RpcClass::Unregistered

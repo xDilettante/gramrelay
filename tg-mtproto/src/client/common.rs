@@ -160,10 +160,13 @@ impl Client {
     }
 }
 impl Account {
+    pub(super) fn request_limit(&self) -> usize {
+        self.client.inner.options.max_request_bytes
+    }
     pub fn identity(&self) -> AccountIdentity {
         self.expected
     }
-    async fn run<T, F, Fut>(&self, action: F) -> Result<T>
+    pub(super) async fn run<T, F, Fut>(&self, action: F) -> Result<T>
     where
         T: Send + 'static,
         F: FnOnce(Context, Session) -> Fut + Send + 'static,
@@ -189,6 +192,14 @@ impl Account {
             expected: self.expected,
             epoch: self.client.inner.auth_epoch.clone(),
         }
+    }
+    /// Claim one observable update receiver. No I/O occurs until it is polled.
+    /// StartNow establishes only a missing initial baseline; saved state resumes.
+    pub fn updates(
+        &self,
+        mode: super::updates::UpdateMode,
+    ) -> Result<super::updates::UpdateReceiver> {
+        super::updates::UpdateReceiver::open(self.client.clone(), self.expected, mode)
     }
     /// Resolve a Telegram username and durably cache only peer routing metadata.
     pub async fn resolve_username(&self, username: &str) -> Result<Peer> {
@@ -242,9 +253,16 @@ fn malformed() -> super::ClientError {
     error(ClientErrorKind::Decode, Outcome::Unknown)
 }
 
-fn checked_entities(
+pub(super) fn checked_entities(
     users: Vec<tl::enums::User>,
     chats: Vec<tl::enums::Chat>,
+    expected: AccountIdentity,
+) -> Result<Vec<PeerInfo>> {
+    checked_entities_ref(&users, &chats, expected)
+}
+pub(super) fn checked_entities_ref(
+    users: &[tl::enums::User],
+    chats: &[tl::enums::Chat],
     expected: AccountIdentity,
 ) -> Result<Vec<PeerInfo>> {
     let count = users
@@ -255,7 +273,7 @@ fn checked_entities(
     let mut seen = HashSet::with_capacity(count);
     let mut peers = Vec::with_capacity(count);
     for user in users {
-        let peer = PeerInfo::from(&user);
+        let peer = PeerInfo::from(user);
         let id = PeerId::from_info(&peer)?;
         if !seen.insert(id) {
             return Err(malformed());
@@ -273,7 +291,7 @@ fn checked_entities(
         }
     }
     for chat in chats {
-        let peer = PeerInfo::from(&chat);
+        let peer = PeerInfo::from(chat);
         if !seen.insert(PeerId::from_info(&peer)?) {
             return Err(malformed());
         }
