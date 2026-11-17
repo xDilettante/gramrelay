@@ -514,6 +514,54 @@ async fn observation_and_aliases_require_current_owner_bot_profile_and_exact_jou
 }
 
 #[tokio::test]
+async fn trusted_event_alias_supports_exact_preconfigured_approval_without_refreshing_time() {
+    let f = Fixture::new(ExecutorOptions::default()).await;
+    f.policy
+        .replace_mtproto(
+            &actor(),
+            "personal",
+            grant().require_approval(Action::AnswerCallbackQuery),
+        )
+        .unwrap();
+    let alias = format!("mtcb_{}", "a".repeat(32));
+    let reference = f
+        .executor
+        .observe_callback_as(&actor(), "personal", &f.events[1], &alias)
+        .unwrap();
+    let expiry = reference.expires_at_ms();
+    let exact = answer(&alias, "host-configured");
+    let approval = f
+        .executor
+        .approve(&actor(), &exact, (now() + 1000).min(expiry - 100))
+        .await
+        .unwrap();
+    let again = f
+        .executor
+        .observe_callback_as(&actor(), "personal", &f.events[1], &alias)
+        .unwrap();
+    assert_eq!(again.reference(), alias);
+    assert_eq!(again.expires_at_ms(), expiry);
+    for _ in 0..2 {
+        let result = f
+            .executor
+            .execute(&actor(), &exact, Some(&approval))
+            .await
+            .unwrap();
+        assert_eq!(result.operation().unwrap().acknowledged(), Some(true));
+    }
+    assert_eq!(f.control.writes.load(Ordering::SeqCst), 1);
+    let other = format!("mtcb_{}", "b".repeat(32));
+    assert_eq!(
+        f.executor
+            .observe_callback_as(&actor(), "personal", &f.events[1], &other)
+            .unwrap_err()
+            .kind(),
+        ExecutorErrorKind::Conflict
+    );
+    f.close().await;
+}
+
+#[tokio::test]
 async fn confirmed_ack_is_cached_and_canonical_query_is_fenced_across_aliases_keys_and_principals()
 {
     let f = Fixture::new(ExecutorOptions::default()).await;

@@ -464,6 +464,21 @@ fn validate(request: &Request, response: &Value) {
     validate_shape(request, response);
     assert_eq!(response["ok"], true, "{response}");
 }
+fn confirmed(response: &Value) {
+    let Some(operation) = response["result"].get("operation") else {
+        return;
+    };
+    assert_eq!(operation["state"], "succeeded");
+    assert_eq!(operation["result_availability"], "stored");
+    if operation["action"] == "mtproto_answer_callback_query" {
+        assert_eq!(operation["acknowledged"], true);
+    } else {
+        assert_eq!(
+            operation["message"],
+            json!({"peer":{"kind":"user","id":"42"},"message_id":"1"})
+        );
+    }
+}
 fn validate_shape(request: &Request, response: &Value) {
     let definition = extended_catalog()
         .tools
@@ -503,7 +518,9 @@ async fn all_eight_actions_use_embedded_cli_and_exact_cached_receipts() {
             .await
             .unwrap()
         );
-        validate(request, &serde_json::from_slice::<Value>(&output).unwrap());
+        let response = serde_json::from_slice::<Value>(&output).unwrap();
+        validate(request, &response);
+        confirmed(&response);
     }
     assert_eq!(f.control.writes.load(Ordering::SeqCst), 4);
     f.executor
@@ -518,7 +535,9 @@ async fn all_eight_actions_use_embedded_cli_and_exact_cached_receipts() {
                 ExecutionMode::Execute,
             )
             .await;
-        validate(request, &serde_json::to_value(output).unwrap());
+        let response = serde_json::to_value(output).unwrap();
+        validate(request, &response);
+        confirmed(&response);
     }
     for request in &requests {
         let dry = f
@@ -592,6 +611,7 @@ async fn all_eight_actions_use_official_mcp_and_the_session_catalog() {
             .unwrap();
         assert_eq!(output.is_error, Some(false));
         validate(&request, output.structured_content.as_ref().unwrap());
+        confirmed(output.structured_content.as_ref().unwrap());
     }
     assert_eq!(f.control.writes.load(Ordering::SeqCst), 4);
     client.cancel().await.unwrap();

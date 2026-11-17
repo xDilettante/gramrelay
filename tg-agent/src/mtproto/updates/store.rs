@@ -170,6 +170,24 @@ impl Feed {
         self.read_with_budget(cursor, limit, self.options.max_batch_bytes)
             .await
     }
+    #[cfg(feature = "host")]
+    pub(crate) async fn event_at(&self, cursor: &Cursor) -> Result<Option<StoredEvent>> {
+        if cursor.profile != self.profile || cursor.sequence <= 0 {
+            return Err(invalid());
+        }
+        let previous = Cursor {
+            profile: self.profile.clone(),
+            sequence: cursor.sequence - 1,
+        };
+        let page = self
+            .read_with_budget(Some(&previous), 1, self.options.max_event_bytes)
+            .await?;
+        Ok(page
+            .into_events()
+            .into_iter()
+            .next()
+            .filter(|event| event.cursor() == cursor))
+    }
     pub(crate) async fn read_with_budget(
         &self,
         cursor: Option<&Cursor>,

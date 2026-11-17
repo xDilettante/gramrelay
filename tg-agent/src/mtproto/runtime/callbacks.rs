@@ -52,6 +52,13 @@ pub struct CallbackReference {
     pub(super) context: Context,
 }
 impl CallbackReference {
+    pub(crate) fn valid_alias(value: &str) -> bool {
+        value.strip_prefix("mtcb_").is_some_and(|v| {
+            v.len() == 32
+                && v.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
+    }
     pub fn reference(&self) -> &str {
         &self.id
     }
@@ -87,10 +94,24 @@ impl Registry {
         &mut self,
         principal: &Principal,
         profile: &str,
-        mut context: Context,
+        context: Context,
         limit: usize,
         time: i64,
     ) -> Result<CallbackReference> {
+        self.register_as(principal, profile, context, limit, time, None)
+    }
+    fn register_as(
+        &mut self,
+        principal: &Principal,
+        profile: &str,
+        mut context: Context,
+        limit: usize,
+        time: i64,
+        alias: Option<&str>,
+    ) -> Result<CallbackReference> {
+        if alias.is_some_and(|v| !CallbackReference::valid_alias(v)) {
+            return Err(ExecutorError::new(ExecutorErrorKind::InvalidInput));
+        }
         let time = self
             .clock
             .observe(time.max(context.deadline.clock.highest()));
@@ -102,7 +123,8 @@ impl Registry {
             context.scope.reference_hash.ok_or_else(unavailable)?,
         );
         if let Some(old) = self.entries.get(&key) {
-            if old.context.query != context.query
+            if alias.is_some_and(|v| v != old.id)
+                || old.context.query != context.query
                 || old.context.scope != context.scope
                 || old.context.deadline.received_at_ms != context.deadline.received_at_ms
                 || old.context.deadline.expires_at_ms != context.deadline.expires_at_ms
@@ -112,11 +134,23 @@ impl Registry {
             old.context.deadline.remaining(time)?;
             return Ok(old.clone());
         }
+        if alias.is_some_and(|id| self.ids.contains_key(id)) {
+            return Err(ExecutorError::new(ExecutorErrorKind::Conflict));
+        }
         if self.entries.len() >= limit {
             self.prune(time);
             if self.entries.len() >= limit {
                 return Err(capacity());
             }
+        }
+        if let Some(id) = alias {
+            let reference = CallbackReference {
+                id: id.to_owned(),
+                context,
+            };
+            self.ids.insert(id.to_owned(), key.clone());
+            self.entries.insert(key, reference.clone());
+            return Ok(reference);
         }
         for _ in 0..4 {
             use std::fmt::Write;
@@ -233,6 +267,30 @@ impl Executor {
         profile: &str,
         event: &updates::StoredEvent,
     ) -> Result<CallbackReference> {
+        self.observe_callback_inner(principal, profile, event, None)
+    }
+    /// Host-only observation under a retained alias, using the same event proof.
+    /// A host must reuse an alias only for its original event across lifetimes.
+    /// Conflicting live aliases refuse; this never refreshes source time/TTL.
+    pub fn observe_callback_as(
+        &self,
+        principal: &Principal,
+        profile: &str,
+        event: &updates::StoredEvent,
+        reference: &str,
+    ) -> Result<CallbackReference> {
+        if !CallbackReference::valid_alias(reference) {
+            return Err(ExecutorError::new(ExecutorErrorKind::InvalidInput));
+        }
+        self.observe_callback_inner(principal, profile, event, Some(reference))
+    }
+    fn observe_callback_inner(
+        &self,
+        principal: &Principal,
+        profile: &str,
+        event: &updates::StoredEvent,
+        alias: Option<&str>,
+    ) -> Result<CallbackReference> {
         crate::executor::valid_id(profile)?;
         let jobs = self.jobs.try_lock().map_err(|_| capacity())?;
         if jobs.closed {
@@ -263,12 +321,13 @@ impl Executor {
             .map_err(|_| invalid_policy())?;
         let time = now()?;
         registry.prune(time);
-        registry.register(
+        registry.register_as(
             principal,
             profile,
             context,
             self.options.max_callback_references,
             time,
+            alias,
         )
     }
     pub fn prune_callback_references(&self) -> Result<usize> {

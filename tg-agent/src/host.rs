@@ -17,11 +17,15 @@ use std::{
     time::Duration,
 };
 use tokio::io::AsyncReadExt;
+#[cfg(feature = "mtproto")]
+mod mtproto;
 
 /// Owns the journal lifetime of a host-configured session. Drain callers before close.
 pub struct Host {
     session: ToolSession,
     journal: Journal,
+    #[cfg(feature = "mtproto")]
+    mtproto: Option<mtproto::Resources>,
 }
 impl fmt::Debug for Host {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -31,12 +35,49 @@ impl fmt::Debug for Host {
 impl Host {
     /// Loads at most 1 MiB from an absolute regular config file. No Telegram RPC.
     pub async fn load(path: impl AsRef<Path>) -> Result<Self, ToolError> {
-        let bytes = read_regular(path.as_ref(), 1024 * 1024).await?;
+        #[cfg(feature = "mtproto")]
+        return Self::load_inner(path.as_ref(), Box::new(tg_mtproto::Client::new)).await;
+        #[cfg(not(feature = "mtproto"))]
+        Self::load_inner(path.as_ref()).await
+    }
+    /// Development-only lazy M2 factory. No config field selects this factory.
+    #[cfg(feature = "mtproto-test-kit")]
+    pub async fn load_with_mtproto_factory<F>(
+        path: impl AsRef<Path>,
+        factory: F,
+    ) -> Result<Self, ToolError>
+    where
+        F: FnMut(
+                tg_mtproto::Session,
+                tg_mtproto::ClientOptions,
+            ) -> Result<tg_mtproto::Client, tg_mtproto::ClientError>
+            + Send
+            + 'static,
+    {
+        Self::load_inner(path.as_ref(), Box::new(factory)).await
+    }
+    async fn load_inner(
+        path: &Path,
+        #[cfg(feature = "mtproto")] factory: mtproto::Factory,
+    ) -> Result<Self, ToolError> {
+        let bytes = read_regular(path, 1024 * 1024).await?;
         let config: Strict<Config> = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
         let prepared = config.0.prepare()?;
-        let journal = Journal::open(&prepared.journal_path, JournalOptions::default())
-            .await
-            .map_err(|_| invalid())?;
+        #[cfg(feature = "mtproto")]
+        let mut mtproto = match prepared.mtproto {
+            Some(prepared_mt) => Some(prepared_mt.open(&prepared.journal_path, factory).await?),
+            None => None,
+        };
+        let journal = match Journal::open(&prepared.journal_path, JournalOptions::default()).await {
+            Ok(journal) => journal,
+            Err(_) => {
+                #[cfg(feature = "mtproto")]
+                if let Some(mt) = &mtproto {
+                    let _ = mt.resources.close().await;
+                }
+                return Err(invalid());
+            }
+        };
         let session = async {
             let mut feeds = BTreeMap::new();
             for profile in prepared.profiles {
@@ -80,19 +121,33 @@ impl Host {
                     .await
                     .map_err(|_| invalid())?;
             }
-            let session = ToolSession::new(prepared.executor, prepared.principal);
+            let session = ToolSession::new(prepared.executor, prepared.principal.clone());
             for Strict(approval) in prepared.approvals {
                 session
                     .approve(&approval.request, approval.expires_at_ms)
                     .await
                     .map_err(|_| invalid())?;
             }
+            #[cfg(feature = "mtproto")]
+            let session = match &mut mtproto {
+                Some(mt) => mt.attach(&journal, &prepared.principal, session).await?,
+                None => session,
+            };
             Ok::<_, ToolError>(session)
         }
         .await;
         match session {
-            Ok(session) => Ok(Self { session, journal }),
+            Ok(session) => Ok(Self {
+                session,
+                journal,
+                #[cfg(feature = "mtproto")]
+                mtproto: mtproto.map(|mt| mt.resources),
+            }),
             Err(error) => {
+                #[cfg(feature = "mtproto")]
+                if let Some(mt) = &mtproto {
+                    let _ = mt.resources.close().await;
+                }
                 let _ = journal.close().await;
                 Err(error)
             }
@@ -101,11 +156,22 @@ impl Host {
     pub fn session(&self) -> &ToolSession {
         &self.session
     }
-    pub async fn close(self) -> Result<(), ToolError> {
-        self.journal
+    /// Drain adapter calls first. A cancelled close wait can be resumed.
+    pub async fn close(&self) -> Result<(), ToolError> {
+        #[cfg(feature = "mtproto")]
+        let mt_closed = match &self.mtproto {
+            Some(mt) => mt.close().await,
+            None => Ok(()),
+        };
+        let journal_closed = self
+            .journal
             .close()
             .await
-            .map_err(|_| ToolError::new("agent_storage", "Host journal close failed."))
+            .map_err(|_| ToolError::new("agent_storage", "Host journal close failed."));
+        #[cfg(feature = "mtproto")]
+        return mt_closed.and(journal_closed);
+        #[cfg(not(feature = "mtproto"))]
+        journal_closed
     }
 }
 async fn read_regular(path: &Path, limit: u64) -> Result<Vec<u8>, ToolError> {
@@ -168,8 +234,17 @@ struct Config {
     callback_clock_policy: ClockPolicy,
     #[serde(default)]
     callback_observations: Vec<Strict<Observation>>,
+    #[cfg(feature = "mtproto")]
+    #[serde(default, deserialize_with = "present_mtproto")]
+    mtproto: Option<Strict<mtproto::Config>>,
 }
-#[derive(Default, Deserialize)]
+#[cfg(feature = "mtproto")]
+fn present_mtproto<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Strict<mtproto::Config>>, D::Error> {
+    Strict::deserialize(d).map(Some)
+}
+#[derive(Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum ClockPolicy {
     #[default]
@@ -309,14 +384,24 @@ struct Prepared {
     restorations: Vec<Strict<Restoration>>,
     approvals: Vec<Strict<Confirmation>>,
     observations: Vec<Strict<Observation>>,
+    #[cfg(feature = "mtproto")]
+    mtproto: Option<mtproto::Prepared>,
 }
 impl Config {
     fn prepare(self) -> Result<Prepared, ToolError> {
-        if self.schema_version != 1
-            || self.profiles.len() > 64
-            || self.approvals.len() > 256
-            || self.file_restorations.len() > 1024
-            || self.callback_observations.len() > 1024
+        let counts: (usize, usize, usize, usize) = (0, 0, 0, 0);
+        #[cfg(not(feature = "mtproto"))]
+        let has_mt = false;
+        #[cfg(feature = "mtproto")]
+        let (has_mt, counts) = (
+            self.mtproto.is_some(),
+            self.mtproto.as_ref().map_or(counts, |v| v.0.counts()),
+        );
+        if self.schema_version != if has_mt { 2 } else { 1 }
+            || self.profiles.len() + counts.0 > 64
+            || self.approvals.len() + counts.1 > 256
+            || self.file_restorations.len() + counts.2 > 1024
+            || self.callback_observations.len() + counts.3 > 1024
         {
             return Err(invalid());
         }
@@ -425,6 +510,11 @@ impl Config {
             ClockPolicy::JournalMonotonic => CallbackClockPolicy::JournalMonotonic,
             ClockPolicy::TrustedWallClock => CallbackClockPolicy::TrustedWallClock,
         };
+        #[cfg(feature = "mtproto")]
+        let mtproto = self
+            .mtproto
+            .map(|v| v.0.prepare(&policy, &principal, &names, clock))
+            .transpose()?;
         let executor = Executor::new(
             policy,
             ExecutorOptions::default().callback_clock_policy(clock),
@@ -438,6 +528,8 @@ impl Config {
             restorations: self.file_restorations,
             approvals: self.approvals,
             observations: self.callback_observations,
+            #[cfg(feature = "mtproto")]
+            mtproto,
         })
     }
 }
@@ -464,20 +556,7 @@ impl GrantConfig {
         {
             return Err(invalid());
         }
-        let BudgetConfig {
-            id,
-            window_seconds,
-            limits: Strict(caps),
-        } = self.budget.0;
-        let budget = Budget::new(id)
-            .map_err(|_| invalid())?
-            .window(Duration::from_secs(window_seconds))
-            .limits(BudgetLimits {
-                invocations: caps.invocations,
-                write_attempts: caps.write_attempts,
-                upload_bytes: caps.upload_bytes,
-                cost_units: caps.cost_units,
-            });
+        let budget = self.budget.0.build()?;
         let chats = if self.all_chats {
             ChatScope::All
         } else {
@@ -504,5 +583,21 @@ impl GrantConfig {
             grant = grant.expires_at_ms(expiry);
         }
         Ok(grant)
+    }
+}
+impl BudgetConfig {
+    fn build(self) -> Result<Budget, ToolError> {
+        let caps = self.limits.0;
+        let budget = Budget::new(self.id)
+            .map_err(|_| invalid())?
+            .window(Duration::from_secs(self.window_seconds))
+            .limits(BudgetLimits {
+                invocations: caps.invocations,
+                write_attempts: caps.write_attempts,
+                upload_bytes: caps.upload_bytes,
+                cost_units: caps.cost_units,
+            });
+        budget.validate().map_err(|_| invalid())?;
+        Ok(budget)
     }
 }

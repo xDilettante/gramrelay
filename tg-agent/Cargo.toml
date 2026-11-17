@@ -7,7 +7,7 @@ description = "Durable and authorized Telegram actions for agents"
 
 [features]
 executor = ["tokio/time"]
-mtproto = ["executor", "dep:tg-mtproto"]
+mtproto = ["executor", "dep:tg-mtproto", "dep:zeroize", "dep:same-file"]
 mtproto-test-kit = ["mtproto", "tg-mtproto/test-kit"]
 host = ["executor", "tokio/io-util", "tokio/fs"]
 cli = ["host", "tokio/io-std", "tokio/rt-multi-thread"]
@@ -27,6 +27,8 @@ serde_json = "1"
 sha2 = { version = "0.11", default-features = false }
 tg = { path = "..", default-features = false }
 tg-mtproto = { path = "../tg-mtproto", optional = true }
+zeroize = { version = "1.9", optional = true }
+same-file = { version = "1.0", optional = true }
 tokio = { version = "1", features = ["rt", "sync"] }
 tokio-util = { version = "0.7", features = ["rt"], optional = true }
 
@@ -46,6 +48,11 @@ unsafe_code = "forbid"
 name = "tg-agent"
 path = "src/bin/tg-agent.rs"
 required-features = ["cli"]
+
+[[bin]]
+name = "tg-agent-mtproto-fixture"
+path = "src/bin/tg-agent-mtproto-fixture.rs"
+required-features = ["cli", "mtproto-test-kit"]
 
 [[example]]
 name = "durable_bot"

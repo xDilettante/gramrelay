@@ -5,6 +5,90 @@ use tg_mtproto::{
 fn actor() -> Principal {
     Principal::new("alice").unwrap()
 }
+#[tokio::test]
+async fn trusted_named_aliases_preserve_original_context_and_refuse_conflicts_both_ways() {
+    let f = Fixture::new().await;
+    let options = ExecutorOptions::default();
+    let observation = f.observation();
+    let time = observation.received_at_ms;
+    let context = candidate(&f.profile, &observation, &options, time).unwrap();
+    let original_expiry = context.deadline.expires_at_ms;
+    let mut registry = Registry::default();
+    let alias = format!("mtcb_{}", "a".repeat(32));
+    let other = format!("mtcb_{}", "b".repeat(32));
+    let first = registry
+        .register_as(
+            &actor(),
+            "personal",
+            context.clone(),
+            10,
+            time,
+            Some(&alias),
+        )
+        .unwrap();
+    assert_eq!(first.reference(), alias);
+    assert_eq!(first.expires_at_ms(), original_expiry);
+    let again = registry
+        .register_as(
+            &actor(),
+            "personal",
+            context.clone(),
+            10,
+            time + 1,
+            Some(&alias),
+        )
+        .unwrap();
+    assert_eq!(again.reference(), alias);
+    assert_eq!(again.expires_at_ms(), original_expiry);
+    assert_eq!(
+        registry
+            .register_as(
+                &actor(),
+                "personal",
+                context.clone(),
+                10,
+                time,
+                Some(&other)
+            )
+            .unwrap_err()
+            .kind(),
+        ExecutorErrorKind::Conflict
+    );
+    let mut foreign = context.clone();
+    foreign.query = 2;
+    foreign.scope.reference_hash = Some(callback_hash(2));
+    assert_eq!(
+        registry
+            .register_as(&actor(), "personal", foreign, 10, time, Some(&alias))
+            .unwrap_err()
+            .kind(),
+        ExecutorErrorKind::Conflict
+    );
+    let bob = Principal::new("bob").unwrap();
+    assert_eq!(
+        registry
+            .register_as(&bob, "personal", context.clone(), 10, time, Some(&alias))
+            .unwrap_err()
+            .kind(),
+        ExecutorErrorKind::Conflict
+    );
+    for invalid in ["mtcb_short".to_owned(), format!("mtcb_{}", "A".repeat(32))] {
+        assert_eq!(
+            registry
+                .register_as(&bob, "personal", context.clone(), 10, time, Some(&invalid))
+                .unwrap_err()
+                .kind(),
+            ExecutorErrorKind::InvalidInput
+        );
+    }
+    assert_eq!(registry.entries.len(), 1);
+    assert_eq!(registry.ids.len(), 1);
+    registry
+        .register_as(&bob, "personal", context, 10, time, Some(&other))
+        .unwrap();
+    assert_eq!(registry.entries.len(), 2);
+    f.close().await;
+}
 fn cursor(profile: &str) -> updates::Cursor {
     use base64::Engine;
     format!(

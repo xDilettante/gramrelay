@@ -87,8 +87,9 @@ The first two increments are implemented: typed ToolRequest, explicit provider
 attachment and session-selected catalog, shared bounded approval/dispatch/output
 paths, embedded CLI and official MCP, explicit credential-free extended discovery
 and three separate reproducible schemas/v2 artifacts. The original schemas/v1
-and dependency lock are byte-identical. No standalone MT host bootstrap is
-claimed; that remains increment 3 and keeps M3 open.
+and dependency lock were byte-identical at this checkpoint. Standalone MT host
+bootstrap followed in SPEC-mtproto-agent-host.md and completes increment 3;
+the earlier shared-adapter evidence below remains historical.
 
 Thirteen additional test cases cover all eight actual TL actions through CLI
 and MCP, same-key cached writes after file discard, all eight actual dry runs,

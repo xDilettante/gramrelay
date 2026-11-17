@@ -1,5 +1,17 @@
 # Implementation sources
 
+- MT Host native file-identity preflight uses the already-pinned same-file 1.0.6
+  [Handle contract](https://docs.rs/same-file/1.0.6/same_file/struct.Handle.html).
+  Read-only handles compare native identities on Unix/Windows and remain alive
+  through the bounded comparison batch. Ordinary canonical paths alone cannot
+  identify hard links. Windows std MetadataExt file-index access remains unstable
+  in the checked [standard-library documentation](https://doc.rust-lang.org/std/os/windows/fs/trait.MetadataExt.html);
+  the host uses the existing safe dependency instead of custom platform FFI.
+  Temporary hex-key storage uses already-pinned zeroize 1.9.1; no package version
+  or SDK vendor source changed in this increment. Session open_existing enforces
+  SQLite READ_WRITE without CREATE and rejects empty schema before WAL/init,
+  repeating the refusal inside the acquisition transaction.
+
 - Shared file-profile migration follows SQLite's primary
   [table reconstruction procedure](https://www.sqlite.org/lang_altertable.html#making_other_kinds_of_table_schema_changes):
   trusted new table, exact column copy, old-table drop, rename and index recreation

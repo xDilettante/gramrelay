@@ -2,6 +2,24 @@
 
 The crate is unpublished and pre-release. These changes replace the initial prototype surface before the first public release.
 
+## MT host configuration v2
+
+Bot host v1 and both checked tool-schema inventories retain their wire meaning.
+With `host,mtproto`, v2 requires a nonempty `mtproto.profiles` section alongside
+the existing Bot `profiles` array. See [MT host setup](AGENT-MTPROTO.md) for exact
+account/session/environment/grant fields, file restoration and explicit callback
+aliases. Tool requests remain version 1. Config cannot select an RPC fixture.
+
+`Session::open_existing` rejects missing/uninitialized stores instead of creating
+them. Normal Session::open remains the provisioning API. `Host::close` now borrows
+the Host so its wait can resume after cancellation; existing `host.close().await`
+call syntax continues to work. Keep the Host alive and drain adapter calls first.
+MT Executor/all Clients finish before Journal, including on startup failure.
+The journal schema remains v9; key/receipt/scope/byte-expiry meaning is unchanged.
+Live observation aliases must remain assigned to their original events when a
+trusted host restores them across registry lifetimes; this adds no alias-history
+ledger. Cross-lifetime callbacks retain the explicit wall-clock trust choice.
+
 ## Complete wire model
 
 Root Message, Update, User, Chat, Document, CallbackQuery and WebhookInfo now re-export api::types. Mixing convenience methods and bot.api() no longer requires DTO conversion.

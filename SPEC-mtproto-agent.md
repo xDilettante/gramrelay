@@ -1,8 +1,8 @@
 # MTProto agent integration (M3)
 
-Status: implementation in progress. Extends SPEC-executor.md,
+Status: implemented locally. Extends SPEC-executor.md,
 SPEC-mtproto-session.md and SPEC-mtproto-updates.md. M2 is complete locally;
-this module and Q1–Q4 remain required by the full goal. No live Telegram calls,
+Q1–Q4 remain required by the full goal. No live Telegram calls,
 private credential discovery, publishing or remote push are authorized.
 
 ## Capability map and order
@@ -51,7 +51,7 @@ cannot reinterpret a MTProto account as a bot with a matching number. Later
 MTProto grants, scope rows and file/update storage must check the exact binding
 at admission and disclosure, never only the old bot_id column.
 
-## Remaining M3 contracts
+## M3 contracts
 
 The optional `mtproto` agent feature adds separate `mtproto_*` request variants
 with explicitly tagged peer kind and canonical decimal-string bare IDs, validated
@@ -95,6 +95,35 @@ original scope. Unknown is retained and never blindly replayed under any key.
 The M2 owned deadline, NoRetries, live self verification and joined shutdown
 remain authoritative. Callback actions require real host-observed provenance
 and the correct bot capability; a user account cannot answer a bot query.
+
+## Completion evidence
+
+The profile/policy, intake, authorized actions and shared tools modules all have
+production paths and reviewed local acceptance. Host v2 completes standalone
+bootstrap; see SPEC-mtproto-agent-host.md and docs/AGENT-MTPROTO.md. Earlier
+increment evidence below records historical checkpoints rather than remaining
+work. This closes M3 locally, not the full release goal.
+
+| Capability | Authoritative executable evidence |
+|---|---|
+| Exact kinds, immutable profiles and current shared grants | tests/profiles.rs, migrations.rs, mtproto_policy.rs; exact v6–v9 schemas and rollback |
+| Bounded intake and commit-before-ACK/crash replay | tests/mtproto_updates.rs and reviewed intake/native source tests |
+| Durable scope/quota/key ownership and safe disclosures | tests/mtproto_executor.rs, mtproto_callbacks.rs, mtproto_files.rs plus admission/migration tests |
+| Eight typed actions through shared CLI/MCP | tests/mtproto_tools.rs and 14 standalone Host cases; real TL callbacks and immutable upload bytes |
+| Exact approvals, restored alias/file authority and refusal | Host changed-payload/key, hash, peer, clock and expiry cases; lower provider scope/revocation checks |
+| Bootstrap/close/no-RPC/compatibility | Existing-only Session tests, retained Client-clone probes before child exit, resumed close, zero loopback connections, mixed v2/Bot v1 and unchanged v1/v2 schemas |
+
+Final Windows/Rust 1.98.0 evidence: 673 all-feature / 391 default workspace tests,
+16 doctests, clean Clippy/fmt, isolated feature checks, 25 Python checks,
+193-method/425-type inventory and four pinned SDK verifiers. Both agent schema
+inventories and final all-feature binaries pass. New direct edges use existing
+same-file 1.0.6 and zeroize 1.9.1 only; no package version or SDK vendor source
+changed. Fresh audit scans 363 dependencies with the known chrono informational
+warning, which Q3 must remove. Configuration/lifecycle/execution reviews have no
+unresolved findings; cross-model was skipped in the autonomous continuation.
+
+No live-server, measured performance/agent-evaluation, decoded-memory, packaging
+or cross-platform completion claim follows from these local gates. Q1–Q4 remain.
 
 ## Evidence and commands
 

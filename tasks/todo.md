@@ -44,7 +44,7 @@ See tasks/goal.md. The active goal includes every unchecked module below.
   - Document downloads/DC authorization implemented against SPEC-mtproto-download.md: exact peer/message lookup mints opaque client/account/epoch-bound file capabilities, bounded ordered getFile chunks, explicit reference expiry/CDN refusals, one verified file migration and no-clobber file publication after exact size/optional SHA-256 validation. Serialized live self/export/import supports users and bots without changing home/epoch; uncertain imports fence before waking waiters. Seventeen further tests bring tg-mtproto to 133 checks, including caller Drop, timeout/join/cleanup, concurrent copy/migration, failure drain, malformed source, destination races and preflight authority. Reviews found deadline-confirmation and aligned-tail bugs; both have RED-to-GREEN regressions and clean focused follow-ups. Workspace: 476 all-feature / 312 default tests, 11 doctests, clean Clippy/fmt, 25 Python checks, deterministic schemas, verified SDK patches and audit of 363 dependencies. M2 remains open for observable updates/recovery; M3/Q1–Q4 remain open.
   - Durable update-journal foundation implemented against SPEC-mtproto-updates.md: strict authenticated payload-v3 migration from v1/v2, one bounded wiping pending batch, serial/nonce IDs, exact account/base/monotone checkpoint staging, append-before-ACK, latest-ACK idempotence, durable gaps and exact resync decisions. Sixteen more tests bring tg-mtproto to 149 checks, including real process termination at three boundaries, caller cancellation, conflicts, quarantine/discard, late commit, strict nested fields and private partial decoding. Review-driven fixes cover decision invalidation, decoded vector capacity, conflict-induced fencing, ordinal validation and wiping. An intermediate full-limit allocation caused nine existing timing regressions; exact-size allocation fixes them without changing test deadlines. Workspace: 492 all-feature / 328 default tests, 11 doctests, clean Clippy/fmt, 25 Python checks, deterministic schemas, SDK verification and audit of 363 dependencies. Storage work alone does not complete M2: the observable receiver/recovery integration remains next, followed by M3 and Q1–Q4.
   - Observable receiver/recovery implemented against SPEC-mtproto-updates.md: one owned lazy receiver, whole encrypted batches before ACK, explicit baseline/resync/retirement, maintained MessageBoxes with bounded catch-up and observable loss, same-job identity/auth/deadline/NoRetries and joined close. Twenty-four further tests bring tg-mtproto to 173 checks. Review-driven regressions cover zero checkpoints, normalization/counter arithmetic, actual adapted byte bounds, source EOF and private-channel routing metadata before gaps. Workspace: 516 all-feature / 352 default tests, 12 doctests; optimized engine/source/private-channel checks and twenty original MessageBoxes tests pass, with clean Clippy, 25 Python checks, deterministic protocol/agent artifacts, four verified SDK patches and audit of 363 dependencies. Capability audit against SPEC-mtproto-client.md closes M2 locally; M3 and Q1–Q4 remain open, with no live-server, decoded-memory or cross-platform claim.
-- [ ] M3: integrate agent profiles/policies and shared operational semantics. Depends M2/A3.
+- [x] M3: integrate agent profiles/policies and shared operational semantics. Depends M2/A3. Completed locally through Host v2 and both standalone adapters; release acceptance remains Q1–Q4. See SPEC-mtproto-agent.md completion evidence.
   - Exact profile-storage foundation implemented against SPEC-mtproto-agent.md: host-only BotApi/MtprotoBot/MtprotoUser identities, immutable globally bounded bindings, strict transactional journal-v6 migration preserving known Bot feeds and legacy keys/usage, cross-worker alias/name exclusion and atomic Bot feed binding. Nine further tests pass (six profile and three migration cases), with 525 all-feature / 361 default workspace tests, 13 doctests, clean Clippy/fmt, 25 Python checks, deterministic schemas, four SDK verifiers and audit of the unchanged 363 dependencies (`--no-fetch` after one registry timeout). Fresh review has no unresolved findings. M3 remains open for exact-kind grants/resource scopes, MTProto update ingestion, authorized actions/files and CLI/MCP integration.
   - Policy/resource provider implemented: optional typed mtproto_* requests, explicit peer kind/bare ID, exact account grants, one shared protocol-tagged PolicyStore entry/revision and domain-bound approvals; retained scope checks preserve original action/peer/file authority without reconfirming a write. Bot scopes validate exact durable BotApi binding. Eleven further regressions bring the workspace to 536 all-feature / 362 default tests and 14 doctests; Clippy, isolated builds/dependency graphs, Python/schema/SDK checks and audit 363 pass. Reviews exposed direct-Serde diagnostic reflection and SDK eager peer-ID arithmetic; both have RED-to-GREEN fixes, with optimized ID coverage. M3 remains open for MTProto update ingestion, persistent write scopes/admission, callback/file providers, executor and CLI/MCP integration; local policy checks are not execution permits.
 
@@ -127,6 +127,28 @@ schema validation and separating notification cancellation from EOF evidence.
 An observed CLI-only E0282 has a passing isolated build/discovery regression.
 Cross-model skipped in this autonomous continuation. Fresh audit: unchanged 363
 dependencies, known chrono warning. M3 Host bootstrap, Q1–Q4 and full goal remain.
+
+Standalone MT Host v2 implemented against SPEC-mtproto-agent-host.md. It preserves
+Bot v1, validates exact provisioned encrypted sessions/keys and global limits,
+loads current grants/restorations/observations/approvals without startup RPC,
+and joins Executor → every Client → Journal with resumable close. Session
+open_existing refuses missing/empty stores natively. Named callback observation
+retains actual event/source/TTL proof and checks aliases both ways. Native file
+identity preflight catches hard links before acquisition.
+
+Verified: 14 Host process cases plus six foundation unit/integration cases;
+673 all-feature / 391 default workspace tests, 16 doctests, fmt/Clippy, isolated
+storage/executor/MT/host+MT/MCP and CLI-only Clippy, 25 Python checks, both agent
+schema inventories, protocol inventory, four SDK verifiers and final binaries.
+All eight writes/read tools require exact successful receipts; cached receipts
+compare equal. Extra Client clones stay alive during in-child Session reuse,
+including failed startup/resumed close. Ordinary binary dry/seeded reads/status/
+discovery observe zero loopback connections. Host negative approval/hash/callback
+scope/clock/expiry cases pass; undeclared alias has observed RED→GREEN proof.
+Three fresh reviews and scoped re-reviews are clear; cross-model skipped.
+Audit: 363 packages, unchanged versions, known chrono warning. Only direct edges
+to already-pinned same-file/zeroize were added. M3 is complete locally; full goal
+continues through every Q1–Q4 gate.
 
 ## Release gates
 

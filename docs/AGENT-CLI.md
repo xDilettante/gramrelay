@@ -23,9 +23,10 @@ Embedded `run_json`/`serve_jsonl` accept both typed protocols when their trusted
 `ToolSession` has `.with_mtproto(executor)`. Authority still comes from the
 registered exact profile and shared current PolicyStore. Use host-only
 `approve_mtproto` for an exact request. MT write recovery is
-`mtproto_get_operation` with the original operation key. This does not enable
-standalone MT configuration: protected Session/Client bootstrap in Host remains
-the next M3 increment. The configuration below is the supported Bot configuration.
+`mtproto_get_operation` with the original operation key. Standalone Host v2 loads
+provisioned encrypted MT Sessions without startup RPC; see
+[MT configuration and lifecycle](AGENT-MTPROTO.md). The v1 configuration below
+remains supported for Bot profiles.
 
 ## Configure the trusted host
 
