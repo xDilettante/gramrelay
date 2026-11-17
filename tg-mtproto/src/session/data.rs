@@ -18,20 +18,24 @@ pub(super) struct Snapshot {
     pub home_dc: i32,
     pub datacenters: Vec<DcOption>,
     pub peers: Vec<PeerInfo>,
+    #[serde(deserialize_with = "super::updates::required_option")]
     pub acknowledged: Option<UpdatesState>,
+    #[serde(deserialize_with = "super::updates::required_option")]
     pub account: Option<super::AccountIdentity>,
+    pub updates: super::updates::UpdateJournal,
 }
 impl Default for Snapshot {
     fn default() -> Self {
         let data = SessionData::default();
         Self {
-            version: 2,
+            version: 3,
             quarantined: false,
             home_dc: data.home_dc,
             datacenters: data.dc_options.into_values().collect(),
             peers: vec![],
             acknowledged: None,
             account: None,
+            updates: super::updates::UpdateJournal::default(),
         }
     }
 }
@@ -46,7 +50,7 @@ impl Drop for Snapshot {
 }
 impl Snapshot {
     pub fn validate(&self, options: &SessionOptions) -> Result<()> {
-        if self.version != 2 {
+        if self.version != 3 {
             return Err(error(SessionErrorKind::UnsupportedSchema));
         }
         if self.datacenters.len() > options.max_datacenters || self.peers.len() > options.max_peers
@@ -85,6 +89,7 @@ impl Snapshot {
         if let Some(state) = &self.acknowledged {
             validate_updates(state, options)?;
         }
+        self.updates.validate(self, options)?;
         Ok(())
     }
 }

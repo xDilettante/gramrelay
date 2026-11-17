@@ -318,8 +318,9 @@ that local policy state; ordinary Client construction/admission then refuses.
 After closing/reopening, a trusted host may explicitly call
 `forget_quarantined_authorization` to discard local keys and checkpoints. This
 does not revoke unresolved remote authorizations and never replays logout.
-See SPEC-mtproto-logout.md. Snapshot payload v2 requires quarantine state; old v1
-payloads migrate strictly while the encrypted envelope/SQLite format stays v1.
+See SPEC-mtproto-logout.md. Snapshot payload v3 requires quarantine and update
+journal state; old v1/v2 payloads migrate strictly while the encrypted
+envelope/SQLite format stays v1.
 
 Snapshots use full-round XChaCha20Poly1305 with a fresh OS nonce and authenticated
 profile, application ID, storage ID and revision. A native SQLite worker commits
@@ -334,6 +335,14 @@ Login, peer caching and reads cannot commit a provisional checkpoint. Whole-file
 backup rollback and copied credentials cannot be prevented by a per-file owner
 lease. Zeroization covers owned key/plaintext buffers on a best-effort basis;
 the runtime, operating system and upstream copies are outside that guarantee.
+
+The internal update journal durably stages one bounded batch before ACK,
+replays its exact ID/content after restart, and commits only its immutable
+checkpoint after an exact acknowledgement. It preserves explicit gaps and binds
+resync decisions to the current gap. This storage boundary is implemented and
+tested, including killed-process recovery. The observable network receiver and
+public update API remain in development; this is not yet a complete recovery
+implementation. See SPEC-mtproto-updates.md.
 
 Run `cargo test --locked -p tg-mtproto --all-targets` from the workspace root.
 Tests use synthetic keys, actual encrypted SQLite files, a killed child process,

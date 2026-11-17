@@ -46,6 +46,8 @@ The implementation uses reqwest 0.13.5, Tokio 1.54.1, tokio-util 0.7.20 and wire
 
 Unknown effect handling is our conservative contract, not a Telegram idempotency guarantee. It intentionally treats connection and decode failures after dispatch as ambiguous.
 
+- MTProto update sequences and explicit gaps: https://core.telegram.org/api/updates , https://core.telegram.org/constructor/updateChannelTooLong , https://core.telegram.org/method/updates.getDifference and https://core.telegram.org/constructor/updates.channelDifferenceTooLong ; installed pinned grammers-session/mtsender 0.12.0 MessageBoxes/updates_receiver.rs. The internal append-before-ACK journal and gap-bound resync decisions are local contracts; observable receiver integration remains M2.
+
 - MTProto file download and reference expiry: https://core.telegram.org/method/upload.getFile and https://core.telegram.org/api/files ; pinned grammers-client 0.12.0 client/files.rs and client/net.rs. Our exact-size/EOF/hash checks and one-migration cap are stricter local contracts.
 - DC authorization copying (users and bots): https://core.telegram.org/method/auth.exportAuthorization and https://core.telegram.org/method/auth.importAuthorization . Live self identity and serialized ambiguous-import fencing are local safeguards.
 - Temporary owned files and no-clobber publication: pinned tempfile 3.27.0 NamedTempFile implementation (Windows MoveFileExW without replacement; Unix no-replace/hard-link fallback), https://docs.rs/tempfile/3.27.0/tempfile/struct.NamedTempFile.html#method.persist_noclobber . File data is synced before publication; directory power-loss durability is not promised.

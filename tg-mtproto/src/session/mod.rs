@@ -4,6 +4,7 @@ mod data;
 #[cfg(test)]
 mod tests;
 mod types;
+pub(crate) mod updates;
 mod worker;
 pub(crate) use backend::BackendSession;
 use data::Snapshot;

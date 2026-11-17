@@ -6,6 +6,11 @@ remain mandatory. Use synthetic accounts and temporary encrypted stores only.
 
 ## Persistent state and compatibility
 
+The subsequent update-journal increment (SPEC-mtproto-updates.md) upgrades this
+payload to v3 while preserving required quarantine and the v1 envelope. The v2
+description below records the logout migration; current readers accept exact
+v1/v2 upgrades and exact v3, with no fallback or unknown-field acceptance.
+
 Snapshot payload v2 adds a required `quarantined: bool`. SQLite schema, encrypted
 envelope format and AEAD context stay v1. Decode an authenticated version first,
 then use the exact v1 or v2 structure with recursive unknown-field rejection and

@@ -176,6 +176,10 @@ impl Database {
     pub fn request_credential_clear(&self) {
         self.clear_on_close.store(true, Ordering::Release);
     }
+    #[cfg(test)]
+    pub fn available_slots(&self) -> usize {
+        self.pending.available_permits()
+    }
 }
 
 pub(super) struct Native {
@@ -477,6 +481,7 @@ impl Native {
             snapshot.peers.clear();
             snapshot.account = None;
             snapshot.acknowledged = None;
+            snapshot.updates.clear_authorization();
             snapshot.quarantined = false;
             Ok(())
         })?;

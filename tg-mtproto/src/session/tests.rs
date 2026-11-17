@@ -4,6 +4,8 @@ use grammers_session::{
     types::{ChannelState, PeerAuth, PeerId, PeerInfo, UpdateState, UpdatesState},
 };
 use std::time::Duration;
+#[path = "update_tests.rs"]
+mod updates;
 
 async fn open(path: &Path, options: SessionOptions) -> Session {
     Session::open(
