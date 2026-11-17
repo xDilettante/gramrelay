@@ -2,6 +2,8 @@ pub mod auth;
 mod common;
 mod error;
 mod runtime;
+#[cfg(feature = "test-kit")]
+pub mod test_kit;
 #[cfg(test)]
 mod tests;
 mod updates;

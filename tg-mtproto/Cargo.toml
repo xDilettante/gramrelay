@@ -5,6 +5,9 @@ edition = "2024"
 publish = false
 description = "Explicit Telegram MTProto sessions and client for humans and agents"
 
+[features]
+test-kit = ["grammers-mtsender/tg-test-kit"]
+
 [dependencies]
 chacha20poly1305 = { version = "=0.11.0", default-features = false, features = ["alloc", "zeroize"] }
 getrandom = "0.4"

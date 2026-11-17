@@ -60,6 +60,11 @@ impl Session {
     pub fn binding(&self) -> &SessionBinding {
         &self.inner.database.binding
     }
+    /// Stable non-authorizing source metadata, including after close/reopen.
+    /// This identifies a store, not its live authorization or rollback freshness.
+    pub fn storage_fingerprint(&self) -> [u8; 32] {
+        self.inner.database.storage_fingerprint
+    }
     /// Local quarantine policy only; false is not proof of remote authorization.
     pub fn is_quarantined(&self) -> Result<bool> {
         self.inner

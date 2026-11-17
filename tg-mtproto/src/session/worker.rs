@@ -28,6 +28,7 @@ pub(super) struct Database {
     pub shared: Arc<Shared>,
     pub binding: SessionBinding,
     pub options: SessionOptions,
+    pub storage_fingerprint: [u8; 32],
     pending: Arc<Semaphore>,
     stopped: watch::Receiver<Exit>,
     clear_on_close: Arc<AtomicBool>,
@@ -57,7 +58,13 @@ impl Database {
                         if live.is_ok() {
                             state.health.send_replace(Health::Ready);
                         }
-                        let _ = ready.send(live);
+                        let _ = ready.send(live.map(|_| {
+                            use sha2::{Digest, Sha256};
+                            let mut hash = Sha256::new();
+                            hash.update(b"tg-mtproto/storage-id/v1\0");
+                            hash.update(native.storage_id);
+                            <[u8; 32]>::from(hash.finalize())
+                        }));
                         loop {
                             match receiver.recv_timeout(native.wait_duration()) {
                                 Ok(job) => job(&mut native),
@@ -97,13 +104,14 @@ impl Database {
                 let _ = exited.send(Some(result.map_err(|error| error.kind())));
             })
             .map_err(storage)?;
-        waiting.await.map_err(storage)??;
+        let storage_fingerprint = waiting.await.map_err(storage)??;
         shared.read(|_| ())?;
         Ok(Self {
             sender: Mutex::new(Some(sender)),
             shared,
             binding: metadata.0,
             options: metadata.1,
+            storage_fingerprint,
             pending: Arc::new(Semaphore::new(capacity)),
             stopped,
             clear_on_close,

@@ -17,6 +17,9 @@ pub(crate) struct UpdateId {
     nonce: [u8; 16],
 }
 impl UpdateId {
+    pub(crate) fn ordinal(self) -> u64 {
+        self.serial
+    }
     pub(crate) fn fingerprint(self) -> [u8; 32] {
         use sha2::{Digest, Sha256};
         let mut hash = Sha256::new();

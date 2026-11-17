@@ -335,7 +335,7 @@ fn initialize(connection: &mut Connection) -> Result<()> {
         transaction
             .pragma_update(None, "application_id", APPLICATION)
             .map_err(|_| storage())?;
-    } else if application != APPLICATION || !(1..=6).contains(&version) {
+    } else if application != APPLICATION || !(1..=7).contains(&version) {
         return Err(JournalError::new(JournalErrorKind::UnsupportedSchema));
     }
     if version < 2 {
@@ -414,6 +414,25 @@ fn initialize(connection: &mut Connection) -> Result<()> {
             .pragma_update(None, "user_version", 6)
             .map_err(|_| storage())?;
     }
+    if version < 7 {
+        verify_schema(
+            &transaction,
+            &[
+                include_str!("journal/schema.sql"),
+                include_str!("updates/schema.sql"),
+                include_str!("updates/consumers.sql"),
+                include_str!("journal/authorization.sql"),
+                include_str!("journal/files.sql"),
+                include_str!("journal/profiles.sql"),
+            ],
+        )?;
+        transaction
+            .execute_batch(include_str!("journal/mtproto-updates.sql"))
+            .map_err(|_| storage())?;
+        transaction
+            .pragma_update(None, "user_version", 7)
+            .map_err(|_| storage())?;
+    }
     verify_schema(
         &transaction,
         &[
@@ -423,6 +442,7 @@ fn initialize(connection: &mut Connection) -> Result<()> {
             include_str!("journal/authorization.sql"),
             include_str!("journal/files.sql"),
             include_str!("journal/profiles.sql"),
+            include_str!("journal/mtproto-updates.sql"),
         ],
     )?;
     transaction.commit().map_err(|_| storage())?;

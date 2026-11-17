@@ -8,6 +8,7 @@ description = "Durable and authorized Telegram actions for agents"
 [features]
 executor = ["tokio/time"]
 mtproto = ["executor", "dep:tg-mtproto"]
+mtproto-test-kit = ["mtproto", "tg-mtproto/test-kit"]
 host = ["executor", "tokio/io-util", "tokio/fs"]
 cli = ["host", "tokio/io-std", "tokio/rt-multi-thread"]
 mcp = ["cli", "dep:rmcp", "dep:tokio-util"]

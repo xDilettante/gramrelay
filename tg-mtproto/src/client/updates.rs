@@ -27,6 +27,7 @@ pub enum UpdateBatchKind {
 }
 #[derive(Clone)]
 struct Binding {
+    source_id: [u8; 32],
     owner: Weak<Core>,
     expected: AccountIdentity,
     epoch: u64,
@@ -65,6 +66,16 @@ impl fmt::Debug for UpdateBatch {
     }
 }
 impl UpdateBatch {
+    /// Non-authorizing source/account/order metadata for durable deduplication.
+    pub fn source_id(&self) -> [u8; 32] {
+        self.binding.source_id
+    }
+    pub fn identity(&self) -> AccountIdentity {
+        self.binding.expected
+    }
+    pub fn ordinal(&self) -> u64 {
+        self.pending.id.ordinal()
+    }
     /// Stable non-authorizing deduplication metadata, including after restart.
     pub fn id(&self) -> [u8; 32] {
         self.pending.id.fingerprint()
@@ -102,6 +113,15 @@ impl fmt::Debug for ResyncRequired {
     }
 }
 impl ResyncRequired {
+    pub fn source_id(&self) -> [u8; 32] {
+        self.binding.source_id
+    }
+    pub fn identity(&self) -> AccountIdentity {
+        self.binding.expected
+    }
+    pub fn ordinal(&self) -> u64 {
+        self.gap.id.ordinal()
+    }
     pub fn id(&self) -> [u8; 32] {
         self.gap.id.fingerprint()
     }
@@ -204,6 +224,16 @@ where
     context.invoke::<R>(std::mem::take(&mut *bytes)).await
 }
 impl UpdateReceiver {
+    pub fn source_id(&self) -> [u8; 32] {
+        self.state.binding.source_id
+    }
+    pub fn identity(&self) -> AccountIdentity {
+        self.state.binding.expected
+    }
+    /// Absolute owned budget for each receive/ACK stage, not an idle wait.
+    pub fn request_budget(&self) -> Duration {
+        self.account.request_budget()
+    }
     pub(super) fn open(
         client: Client,
         expected: AccountIdentity,
@@ -212,6 +242,7 @@ impl UpdateReceiver {
         let hub = client.inner.updates.clone();
         let state = Arc::new(ReceiverState {
             binding: Binding {
+                source_id: client.inner.session.storage_fingerprint(),
                 owner: Arc::downgrade(&client.inner),
                 expected,
                 epoch: client.inner.auth_epoch.load(Ordering::Acquire),

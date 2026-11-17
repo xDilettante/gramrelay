@@ -83,7 +83,7 @@ impl UpdateFeed {
             }else{
                 let alias:bool=transaction.query_row("SELECT EXISTS(SELECT 1 FROM update_feeds WHERE bot_id=?1)",[bot_id],|row|row.get(0)).map_err(|_|storage())?;
                 if alias{return Err(JournalError::new(JournalErrorKind::Conflict));}
-                let count:i64=transaction.query_row("SELECT COUNT(*) FROM update_feeds",[],|row|row.get(0)).map_err(|_|storage())?;
+                let count=feed_count(&transaction)?;
                 if count>=limits.max_update_feeds as i64{return Err(JournalError::new(JournalErrorKind::Capacity));}
                 transaction.execute("INSERT INTO update_feeds(profile,bot_id,retention_ms,max_event_bytes,max_batch_bytes) VALUES(?1,?2,?3,?4,?5)",params![name,bot_id,millis(policy.retention)?,policy.max_event_bytes as i64,policy.max_batch_bytes as i64]).map_err(|_|storage())?;
             }
@@ -439,13 +439,7 @@ fn persist_updates(
                 .ok_or_else(storage)?;
         }
     }
-    let (entries, bytes): (i64, i64) = connection
-        .query_row(
-            "SELECT COALESCE(SUM(entry_count),0),COALESCE(SUM(byte_count),0) FROM update_feeds",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(|_| storage())?;
+    let (entries, bytes) = storage_usage(connection)?;
     if entries as u128 + fresh.len() as u128 > limits.max_update_entries as u128
         || bytes as u128 + new_bytes as u128 > limits.max_update_bytes as u128
     {
@@ -483,6 +477,12 @@ fn persist_updates(
 fn lost() -> JournalError {
     JournalError::new(JournalErrorKind::LeaseLost)
 }
+pub(crate) fn feed_count(connection: &Connection) -> Result<i64> {
+    connection.query_row("SELECT (SELECT COUNT(*) FROM update_feeds)+(SELECT COUNT(*) FROM mtproto_update_feeds)",[],|r|r.get(0)).map_err(|_|storage())
+}
+pub(crate) fn storage_usage(connection: &Connection) -> Result<(i64, i64)> {
+    connection.query_row("SELECT COALESCE(SUM(entry_count),0),COALESCE(SUM(byte_count),0) FROM (SELECT entry_count,byte_count FROM update_feeds UNION ALL SELECT entry_count,byte_count FROM mtproto_update_feeds)",[],|r|Ok((r.get(0)?,r.get(1)?))).map_err(|_|storage())
+}
 fn verify_source(
     connection: &Connection,
     feed: &UpdateFeed,
@@ -505,16 +505,18 @@ impl Journal {
         self.run(move |connection,_,_|{
             let transaction=connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_|storage())?;
             let expired={
-                let mut statement=transaction.prepare("SELECT profile,sequence,length(payload) FROM updates WHERE expires_at_ms<=?1 ORDER BY expires_at_ms,profile,sequence LIMIT ?2").map_err(|_|storage())?;
-                statement.query_map(params![now()?,limit as i64],|row|Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,i64>(2)?))).map_err(|_|storage())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|_|storage())?
+                let mut statement=transaction.prepare("SELECT 0 AS family,profile,sequence,length(payload),expires_at_ms FROM updates WHERE expires_at_ms<=?1 UNION ALL SELECT 1,profile,sequence,byte_size,expires_at_ms FROM mtproto_updates WHERE expires_at_ms<=?1 ORDER BY 5,1,2,3 LIMIT ?2").map_err(|_|storage())?;
+                statement.query_map(params![now()?,limit as i64],|row|Ok((row.get::<_,bool>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?,row.get::<_,i64>(3)?))).map_err(|_|storage())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|_|storage())?
             };
-            let mut groups:BTreeMap<String,(i64,i64,i64)>=BTreeMap::new();
-            for (profile,sequence,bytes) in &expired{
-                transaction.execute("DELETE FROM updates WHERE profile=?1 AND sequence=?2",params![profile,sequence]).map_err(|_|storage())?;
-                let group=groups.entry(profile.clone()).or_default();group.0+=1;group.1+=bytes;group.2=group.2.max(*sequence);
+            let mut groups:BTreeMap<(bool,String),(i64,i64,i64)>=BTreeMap::new();
+            for (mtproto,profile,sequence,bytes) in &expired{
+                let delete=if *mtproto { "DELETE FROM mtproto_updates WHERE profile=?1 AND sequence=?2" } else { "DELETE FROM updates WHERE profile=?1 AND sequence=?2" };
+                transaction.execute(delete,params![profile,sequence]).map_err(|_|storage())?;
+                let group=groups.entry((*mtproto,profile.clone())).or_default();group.0+=1;group.1+=bytes;group.2=group.2.max(*sequence);
             }
-            for (profile,(count,bytes,floor)) in groups{
-                transaction.execute("UPDATE update_feeds SET entry_count=entry_count-?1,byte_count=byte_count-?2,floor_sequence=max(floor_sequence,?3) WHERE profile=?4",params![count,bytes,floor,profile]).map_err(|_|storage())?;
+            for ((mtproto,profile),(count,bytes,floor)) in groups{
+                let update=if mtproto { "UPDATE mtproto_update_feeds SET entry_count=entry_count-?1,byte_count=byte_count-?2,floor_sequence=max(floor_sequence,?3) WHERE profile=?4" } else { "UPDATE update_feeds SET entry_count=entry_count-?1,byte_count=byte_count-?2,floor_sequence=max(floor_sequence,?3) WHERE profile=?4" };
+                transaction.execute(update,params![count,bytes,floor,profile]).map_err(|_|storage())?;
             }
             transaction.commit().map_err(|_|storage())?;Ok(expired.len())
         }).await

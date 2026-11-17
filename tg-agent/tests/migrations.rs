@@ -40,6 +40,132 @@ fn version_five(path: &std::path::Path) -> Connection {
 }
 
 #[tokio::test]
+async fn version_six_adds_mtproto_storage_without_rebinding_accounts_or_changing_keys() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("v6-updates.sqlite");
+    let connection = version_five(&path);
+    connection
+        .execute_batch(include_str!("../src/journal/profiles.sql"))
+        .unwrap();
+    connection.pragma_update(None, "user_version", 6).unwrap();
+    connection
+        .execute(
+            "INSERT INTO account_profiles VALUES('personal','mtproto_user',42)",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO executor_budgets VALUES('personal','alice','quota',60000,0,3,2,17,4)",
+            [],
+        )
+        .unwrap();
+    drop(connection);
+    let journal = Journal::open(&path, JournalOptions::default())
+        .await
+        .unwrap();
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        7
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT kind,account_id FROM account_profiles", [], |r| Ok(
+                (r.get::<_, String>(0)?, r.get::<_, i64>(1)?)
+            ))
+            .unwrap(),
+        ("mtproto_user".into(), 42)
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT upload_bytes FROM executor_budgets", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        17
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM mtproto_update_feeds", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    drop(connection);
+    journal.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn malformed_version_six_does_not_partially_create_mtproto_tables() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("bad-v6.sqlite");
+    let connection = version_five(&path);
+    connection
+        .execute_batch(include_str!("../src/journal/profiles.sql"))
+        .unwrap();
+    connection.pragma_update(None, "user_version", 6).unwrap();
+    connection
+        .execute("DROP INDEX executor_files_owner", [])
+        .unwrap();
+    drop(connection);
+    assert_eq!(
+        Journal::open(&path, JournalOptions::default())
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::UnsupportedSchema
+    );
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        6
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE name='mtproto_update_feeds'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn current_mtproto_schema_is_verified_even_in_storage_only_builds() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("bad-v7.sqlite");
+    let journal = Journal::open(&path, JournalOptions::default())
+        .await
+        .unwrap();
+    journal.close().await.unwrap();
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute("DROP INDEX mtproto_updates_retention", [])
+        .unwrap();
+    drop(connection);
+    assert_eq!(
+        Journal::open(&path, JournalOptions::default())
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::UnsupportedSchema
+    );
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        7
+    );
+}
+
+#[tokio::test]
 async fn malformed_version_five_cannot_partially_create_account_bindings() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("bad-v5.sqlite");
@@ -114,7 +240,7 @@ async fn version_six_binding_constraints_and_exact_schema_are_checked_on_reopen(
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        6
+        7
     );
     assert_eq!(
         connection
@@ -149,7 +275,7 @@ async fn version_five_binds_only_known_feeds_and_preserves_legacy_operation_keys
     let version: i64 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     let binding: (String, i64) = connection
         .query_row(
             "SELECT kind,account_id FROM account_profiles WHERE profile='known-bot'",
@@ -213,7 +339,7 @@ async fn migration_preserves_receipts_hashes_versions_and_another_workers_flight
         .unwrap()
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     let request = OperationRequest::new("bot", "alice", "done", "send_message", &payload).unwrap();
     assert!(
         matches!(journal.prepare(request).await.unwrap(),Preparation::Existing(record) if record.state() == OperationState::Succeeded && record.revision() == 7 && record.result().unwrap()["message_id"] == 42)
@@ -298,7 +424,7 @@ async fn version_two_migrates_without_rewinding_update_or_poll_positions() {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        6
+        7
     );
     let feed = UpdateFeed::open(journal.clone(), "bot", 1, UpdateOptions::default())
         .await
@@ -341,7 +467,7 @@ async fn version_three_keeps_active_consumer_ownership_and_validates_the_new_uni
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        6
+        7
     );
     let retained: (String, i64, i64) = connection
         .query_row(
@@ -435,7 +561,7 @@ async fn version_four_preserves_durable_usage_and_creates_validated_file_metadat
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        6
+        7
     );
     assert_eq!(
         connection

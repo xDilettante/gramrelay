@@ -403,6 +403,11 @@ decryption or exactly-once external side effect is claimed. See
 SPEC-mtproto-updates.md; M3 agent integration and release gates remain open.
 
 Run `cargo test --locked -p tg-mtproto --all-targets` from the workspace root.
+The optional `test-kit` feature adds `test_kit::client` for synthetic socket-free
+RPC scripts through the real TL/owned runner path; production `Client::new` never
+selects it implicitly. `Session::storage_fingerprint` and receiver/batch/gap
+source/account/ordinal getters are stable metadata, not ACK or login authority.
+They support the separate agent journal without exposing keys or raw storage IDs.
 Tests use synthetic keys, actual encrypted SQLite files, a killed child process,
 the SDK-backed RPC fixture and an encrypted loopback connection. No Telegram
 account or live server is contacted. The full contract is

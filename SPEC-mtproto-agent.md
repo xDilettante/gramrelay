@@ -163,3 +163,20 @@ The Bot v1 CLI catalog still has eight tools and its all-feature binary is
 rebuilt after schema checking. These local policy/provider checks do not yet
 implement MTProto journal ingestion, durable MTProto write admission, callback
 provenance/file registration, an executor or CLI/MCP dispatch; those remain M3.
+
+## Update intake evidence
+
+SPEC-mtproto-agent-updates.md is implemented: safe allowlisted records, strict v7
+migration, shared Bot/MT storage limits, fixed-size source watermark, fenced
+source ownership and real M2 commit-before-ACK ingestion. Nineteen further tests
+include encrypted restart, caller cancellation and actual process kills at all
+three append/ACK boundaries. Private callback query/provenance never becomes
+serialized authority; replay and restart do not refresh observation time.
+
+Windows/Rust 1.98.0: 555 all-feature / 365 default workspace tests, 15 doctests,
+Clippy/fmt, isolated builds, deterministic schemas, 25 Python checks, four SDK
+verifiers and audit of 363 dependencies pass. Fresh storage/source and projection
+reviews have no unresolved findings; external cross-model review was skipped in
+the autonomous continuation. Authorized reads, persistent action scopes/admission,
+callback/file providers, executor and CLI/MCP integration remain M3. See the intake
+spec for source-replacement and backup-restore host preconditions.

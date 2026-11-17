@@ -8,9 +8,9 @@ use std::{fmt, str::FromStr, time::Duration};
 
 #[derive(Debug, Clone)]
 pub struct UpdateOptions {
-    pub(super) retention: Duration,
-    pub(super) max_event_bytes: usize,
-    pub(super) max_batch_bytes: usize,
+    pub(crate) retention: Duration,
+    pub(crate) max_event_bytes: usize,
+    pub(crate) max_batch_bytes: usize,
 }
 impl Default for UpdateOptions {
     fn default() -> Self {

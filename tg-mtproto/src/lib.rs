@@ -2,6 +2,8 @@
 mod client;
 mod session;
 pub use client::auth;
+#[cfg(feature = "test-kit")]
+pub use client::test_kit;
 pub use client::{
     Account, AppCredentials, BotToken, Client, ClientError, ClientErrorKind, ClientOptions, Dialog,
     DialogContinuation, DialogCursor, DialogFolder, DialogId, DialogPage, DialogPageIssue,

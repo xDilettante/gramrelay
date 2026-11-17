@@ -15,6 +15,7 @@
 //! ```
 mod grant;
 mod types;
+pub mod updates;
 pub use crate::executor::{
     Approval, Budget, BudgetLimits, MtprotoDryRun as DryRun, PolicyStore, Principal,
 };

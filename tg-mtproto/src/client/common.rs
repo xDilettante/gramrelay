@@ -167,6 +167,9 @@ impl Client {
     }
 }
 impl Account {
+    pub(super) fn request_budget(&self) -> std::time::Duration {
+        self.client.inner.options.timeout
+    }
     pub(super) fn request_limit(&self) -> usize {
         self.client.inner.options.max_request_bytes
     }
