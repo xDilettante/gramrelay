@@ -176,12 +176,15 @@ def inspect_package(archive, directory, versions, registry):
         path.name.startswith("LICENSE") or path.name in ("build.rs", "PATCH.md", "Cargo.upstream.toml") or path.suffix == ".patch")}
     mandatory |= {path.relative_to(directory).as_posix() for path in (directory / "tl").rglob("*") if path.is_file()}
     for folder in ("examples", "tests", "benches"):
-        mandatory |= {path.relative_to(directory).as_posix() for path in (directory / folder).rglob("*") if path.is_file()}
+        # Cargo never packages its VCS selection policies; the complete source
+        # ZIP retains these. All actual source/fixture assets remain mandatory.
+        mandatory |= {path.relative_to(directory).as_posix() for path in (directory / folder).rglob("*")
+                      if path.is_file() and path.name not in (".gitignore", ".gitattributes")}
     for kind in ("lib", "bin", "example", "test", "bench"):
         targets = [data[kind]] if kind == "lib" and kind in data else data.get(kind, [])
         mandatory |= {target["path"] for target in targets if "path" in target}
     if not mandatory <= files.keys() or "Cargo.toml.orig" not in files:
-        raise ValueError("package omitted source/license/patch assets")
+        raise ValueError(f"package omitted source/license/patch assets: {name}: {sorted(mandatory - files.keys())[:16]}")
     return data
 
 

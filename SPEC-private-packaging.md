@@ -37,6 +37,8 @@ publish or a claim that an unknown production registry has been configured.
   Compare Cargo's complete staged/registry package target models (build script,
   library/binary/example/test targets, edition, feature gates and attributes),
   with source paths relative to each package. Keep declared/example/test assets.
+  Cargo's omitted .gitignore/.gitattributes selection policies stay in the full
+  source ZIP; this exception does not exclude Rust code or test fixture payloads.
 - Prepare a minimal local Git registry index with file-URL downloads using the
   exact .crate checksums. No HTTP service, network publish API or token exists.
   The registry URL is tied to the candidate directory; these archives are local

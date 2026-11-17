@@ -178,6 +178,8 @@ class PrivatePackages(unittest.TestCase):
             # Keep this synthetic archive's selected manifest consistent with its
             # source; actual full-manifest semantics are covered by the rehearsal.
             (directory / "Cargo.toml").write_text(manifest.replace('license-file="LICENSE"', 'license-file="../LICENSE"'))
+            (directory / "tests").mkdir()
+            (directory / "tests/.gitignore").write_text("node_modules")
             archive(output, directory, manifest)
             packages.inspect_package(output, directory, versions, "file:///local/index")
             bad = manifest.replace('registry-index="file:///local/index"', 'registry-index="https://github.com/rust-lang/crates.io-index"')
@@ -187,6 +189,10 @@ class PrivatePackages(unittest.TestCase):
             archive(output, directory, manifest)
             (directory / "src/lib.rs").write_text("changed")
             with self.assertRaisesRegex(ValueError, "bytes|content"):
+                packages.inspect_package(output, directory, versions, "file:///local/index")
+            (directory / "src/lib.rs").write_bytes(b"pub fn fixture() {}\n")
+            (directory / "tests/required.rs").write_text("required source")
+            with self.assertRaisesRegex(ValueError, "omitted.*required.rs"):
                 packages.inspect_package(output, directory, versions, "file:///local/index")
 
     def test_public_cache_authenticates_bytes_and_copies_no_credentials(self):
