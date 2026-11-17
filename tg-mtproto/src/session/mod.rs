@@ -40,13 +40,32 @@ impl Session {
         key: SessionKey,
         options: SessionOptions,
     ) -> Result<Self> {
+        Self::open_inner(path.as_ref(), binding, key, options, true).await
+    }
+    /// Opens an initialized encrypted store without creating a file or schema.
+    /// Stored identity remains metadata; Client actions still verify live self.
+    pub async fn open_existing(
+        path: impl AsRef<Path>,
+        binding: SessionBinding,
+        key: SessionKey,
+        options: SessionOptions,
+    ) -> Result<Self> {
+        Self::open_inner(path.as_ref(), binding, key, options, false).await
+    }
+    async fn open_inner(
+        path: &Path,
+        binding: SessionBinding,
+        key: SessionKey,
+        options: SessionOptions,
+        create: bool,
+    ) -> Result<Self> {
         options.validate()?;
-        if !path.as_ref().is_absolute() {
+        if !path.is_absolute() {
             return Err(error(SessionErrorKind::InvalidInput));
         }
         Ok(Self {
             inner: Arc::new(backend::BackendSession::new(
-                worker::Database::open(path.as_ref().to_owned(), binding, key, options).await?,
+                worker::Database::open(path.to_owned(), binding, key, options, create).await?,
             )),
         })
     }
@@ -64,6 +83,35 @@ impl Session {
     /// This identifies a store, not its live authorization or rollback freshness.
     pub fn storage_fingerprint(&self) -> [u8; 32] {
         self.inner.database.storage_fingerprint
+    }
+    #[cfg(feature = "test-kit")]
+    pub(crate) async fn route_fixture_loopback(
+        &self,
+        endpoint: std::net::SocketAddrV4,
+    ) -> Result<()> {
+        if !endpoint.ip().is_loopback() || endpoint.port() == 0 {
+            return Err(error(SessionErrorKind::InvalidInput));
+        }
+        let claim = self.claim_client()?;
+        self.inner
+            .database
+            .call(move |native| {
+                let result = native.mutate(|snapshot| {
+                    for dc in &mut snapshot.datacenters {
+                        dc.ipv4 = endpoint;
+                        dc.ipv6 = std::net::SocketAddrV6::new(
+                            endpoint.ip().to_ipv6_mapped(),
+                            endpoint.port(),
+                            0,
+                            0,
+                        );
+                    }
+                    Ok(())
+                });
+                drop(claim);
+                result
+            })
+            .await
     }
     /// Local quarantine policy only; false is not proof of remote authorization.
     pub fn is_quarantined(&self) -> Result<bool> {

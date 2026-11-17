@@ -18,6 +18,98 @@ async fn open(path: &Path, options: SessionOptions) -> Session {
     .unwrap()
 }
 #[tokio::test]
+async fn existing_only_open_never_creates_or_initializes_a_missing_or_empty_store() {
+    let dir = tempfile::tempdir().unwrap();
+    for empty in [false, true] {
+        let path = dir.path().join(if empty {
+            "empty.sqlite"
+        } else {
+            "missing.sqlite"
+        });
+        if empty {
+            std::fs::write(&path, []).unwrap();
+        }
+        let result = Session::open_existing(
+            &path,
+            SessionBinding::new("demo", 1).unwrap(),
+            SessionKey::from_bytes([7; 32]),
+            SessionOptions::default(),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(path.exists(), empty);
+        if empty {
+            assert!(std::fs::read(&path).unwrap().is_empty());
+        }
+        assert!(!path.with_extension("sqlite-wal").exists());
+        assert!(!path.with_extension("sqlite-shm").exists());
+    }
+}
+#[tokio::test]
+async fn existing_only_open_preserves_identity_fingerprint_and_key_binding() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.sqlite");
+    let initial = open(&path, SessionOptions::default()).await;
+    let fingerprint = initial.storage_fingerprint();
+    initial.close().await.unwrap();
+    for (profile, key) in [("foreign", [7; 32]), ("demo", [8; 32])] {
+        assert!(
+            Session::open_existing(
+                &path,
+                SessionBinding::new(profile, 1).unwrap(),
+                SessionKey::from_bytes(key),
+                SessionOptions::default()
+            )
+            .await
+            .is_err()
+        );
+    }
+    let restored = Session::open_existing(
+        &path,
+        SessionBinding::new("demo", 1).unwrap(),
+        SessionKey::from_bytes([7; 32]),
+        SessionOptions::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(restored.storage_fingerprint(), fingerprint);
+    assert!(restored.remembered_account().unwrap().is_none());
+    restored.close().await.unwrap();
+}
+#[cfg(feature = "test-kit")]
+#[tokio::test]
+async fn loopback_fixture_route_is_local_only_and_requires_unattached_session_ownership() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(
+        &dir.path().join("session.sqlite"),
+        SessionOptions::default(),
+    )
+    .await;
+    let external = std::net::SocketAddrV4::new(std::net::Ipv4Addr::new(192, 0, 2, 1), 1);
+    assert_eq!(
+        crate::test_kit::route_loopback(&session, external)
+            .await
+            .unwrap_err()
+            .kind(),
+        SessionErrorKind::InvalidInput
+    );
+    let local = std::net::SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 12345);
+    crate::test_kit::route_loopback(&session, local)
+        .await
+        .unwrap();
+    let home = session.inner.home_dc_id().unwrap();
+    assert_eq!(session.inner.dc_option(home).unwrap().unwrap().ipv4, local);
+    let client = crate::Client::new(session.clone(), crate::ClientOptions::default()).unwrap();
+    assert_eq!(
+        crate::test_kit::route_loopback(&session, local)
+            .await
+            .unwrap_err()
+            .kind(),
+        SessionErrorKind::Owned
+    );
+    client.close().await.unwrap();
+}
+#[tokio::test]
 async fn production_client_uses_encrypted_loopback_once_and_joins_after_io_loss() {
     use tokio::{io::AsyncReadExt, net::TcpListener, time::timeout};
     let dir = tempfile::tempdir().unwrap();

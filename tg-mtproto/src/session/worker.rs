@@ -39,6 +39,7 @@ impl Database {
         binding: SessionBinding,
         key: SessionKey,
         options: SessionOptions,
+        create: bool,
     ) -> Result<Self> {
         let shared = Arc::new(Shared::new());
         let state = shared.clone();
@@ -52,7 +53,8 @@ impl Database {
         std::thread::Builder::new()
             .name("tg-mtproto-session".into())
             .spawn(move || {
-                let result = match Native::open(path, binding, key, options, state.clone()) {
+                let result = match Native::open(path, binding, key, options, state.clone(), create)
+                {
                     Ok(mut native) => {
                         let live = native.live();
                         if live.is_ok() {
@@ -212,8 +214,9 @@ impl Native {
         key: SessionKey,
         options: SessionOptions,
         shared: Arc<Shared>,
+        create: bool,
     ) -> Result<Self> {
-        secure_file(&path)?;
+        secure_file(&path, create)?;
         let mut connection = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -228,7 +231,9 @@ impl Native {
                 (options.max_snapshot_bytes + 1024) as i32,
             )
             .map_err(storage)?;
-        let _ = schema(&connection)?;
+        if schema(&connection)? && !create {
+            return Err(error(SessionErrorKind::UnsupportedSchema));
+        }
         let mode: String = connection
             .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
             .map_err(storage)?;
@@ -255,6 +260,9 @@ impl Native {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
         let fresh = schema(&transaction)?;
+        if fresh && !create {
+            return Err(error(SessionErrorKind::UnsupportedSchema));
+        }
         let (storage_id, revision, snapshot) = if fresh {
             transaction
                 .execute_batch(include_str!("schema.sql"))
@@ -571,7 +579,16 @@ fn schema(connection: &Connection) -> Result<bool> {
     }
     Ok(false)
 }
-fn secure_file(path: &Path) -> Result<()> {
+fn secure_file(path: &Path, create: bool) -> Result<()> {
+    if !create {
+        let meta = std::fs::symlink_metadata(path).map_err(storage)?;
+        if !meta.file_type().is_file() || meta.file_type().is_symlink() {
+            return Err(error(SessionErrorKind::InvalidInput));
+        }
+        // SQLite is also opened READ_WRITE without CREATE. A path removed
+        // after this check cannot become a fresh empty store on that path.
+        return Ok(());
+    }
     let mut options = FileOptions::new();
     options.read(true).write(true).create_new(true);
     #[cfg(unix)]

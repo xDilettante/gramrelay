@@ -1,5 +1,10 @@
 # tg-mtproto
 
+`Session::open_existing` открывает только существующее инициализированное
+зашифрованное хранилище: отсутствующий или пустой файл не создаётся/не
+инициализируется. Применяется при загрузке готовых профилей CLI/MCP;
+`Session::open` остаётся API создания сессии перед доверенным входом.
+
 Separate MTProto package with the M2 client foundation implemented. Encrypted local session
 storage and the owned network Client with typed raw TL calls are implemented.
 Bot/user login, 2FA, confirmed login migration, live identity verification,
