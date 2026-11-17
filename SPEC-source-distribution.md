@@ -53,7 +53,41 @@ registry package. Do not silently ship a package that drops the safety patches.
 - Verification/extraction rejects malformed inventories, duplicate/unsafe paths,
   links and special entries, mismatched hashes, excessive file count/size/total
   uncompressed bytes. Write only into a new owned directory after validation;
-  never overwrite an existing tree or trust tar extractall on external data.
+  never overwrite an existing tree or use generic archive extraction on external data.
+- Archive profile v1 uses native Git ZIP (store/deflate only), compressed 16 MiB,
+  expanded files 64 MiB, individual file 16 MiB, 10,000 entries and 1 MiB JSON
+  manifest. Preflight central-directory framing/count/name/extra limits before
+  ZipFile allocates its member list. Reject ZIP64, encryption, multi-disk,
+  unsupported modes and non-comment trailing data. Validate local headers against
+  the directory, contiguous non-overlapping records and optional descriptors.
+  Decode raw deflate with a bounded output and require its genuine end, exact
+  size and CRC; ZipExtFile's advertised-size truncation is insufficient.
+  All checks precede materialization. TAR/PAX is not a supported input format.
+- Paths <=512 UTF-8 bytes, components <=255 bytes, depth <=16 including the
+  prefix. Reject case/Unicode-normalization collisions, implicit parent aliases,
+  Windows reserved/ambiguous names, file-as-parent conflicts and all links or
+  special files. This profile excludes tilde-based 8.3 aliases and env/key files.
+  Extract only verified regular file bytes into a new directory.
+- Export native Git ZIP at explicit compression level 6 with replacement objects
+  disabled, autocrlf=false, core.eol=lf, global attributes and fsmonitor disabled,
+  automatic GC disabled, terminal prompts disabled and TZ=UTC. Status ignores
+  submodules; the captured tree rejects gitlinks rather than inspecting helpers.
+  Preserve the commit ZIP comment; source version/prefix and committed
+  file inventory must agree. The manifest is derived from actual bytes, not
+  working-tree timestamps or archive filenames.
+  Reproducibility is checked twice on one commit with the same Git/Python tools.
+- Capture the commit OID once; disable Git replacement objects on every read.
+  Derive version and expected files from that OID's tree. Compare export paths,
+  file modes and Git blob hashes independently (including export-ignore/subst
+  injected through untracked info/attributes). Bound Git output/native child
+  lifetime as well as archive data. Read archive/manifest once with bounded
+  reads; materialize only the exact verified immutable byte snapshot.
+- Plain check parses/verifies data only. --consumer is an explicit execution
+  option for a trusted candidate built/reviewed by the operator: a checksum is
+  not an authenticity proof and Cargo build scripts are executable code. The
+  acceptance run here uses only our own committed candidate, extracted into an
+  owned private temp directory. It invokes the relocated verifiers/checker, not
+  code or Cargo config from the original source checkout.
 - Test relocated source with the same external checker, verify all five SDK
   diffs and perform offline compilation/run. Do not rely on the original
   checkout or its root patch/config files. The registry cache may supply normal
@@ -101,6 +135,15 @@ repository profile, while the actual consumer workspace is a separate temp tree.
 - https://doc.rust-lang.org/cargo/reference/config.html#hierarchical-structure
 - Pinned SDK manifests and existing source verifiers define the hardened edge
   inventory; grammers-crypto has no dependency on the patched TL/session crates.
+- https://git-scm.com/docs/git-archive (commit timestamps/pax, tar.umask, attributes)
+- https://docs.python.org/3/library/tarfile.html#extraction-filters (resource and extraction boundaries)
+- https://docs.python.org/3/library/zipfile.html (native ZIP reader/CRC and metadata)
+- https://docs.python.org/3/library/zlib.html#zlib.Decompress.decompress (bounded output and genuine stream termination)
+- https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file (reserved names, streams, case and trailing characters)
+
+The initial TAR/PAX proposal was replaced after fresh review identified parser
+allocation/extension recursion before ordinary member limits. ZIP retains the
+complete source-candidate objective with a smaller bounded metadata preflight.
 
 ## Increment status
 
@@ -118,8 +161,7 @@ with no chrono or consumer patch rules. It ran the same public fixture after
 offline locked compilation; initial local Git metadata refreshed the public
 registry index. Audit the external lock separately because its broad registry
 requirements may resolve newer compatible versions than the workspace lock.
-Source archive stage and registry packaging remain unimplemented; those are
-still required release work. Fresh implementation review's internal-library
+Registry packaging remains required release work. Fresh implementation review's internal-library
 fallback gap was fixed, regression covered and scoped re-review is clear.
 Cross-model skipped: autonomous continuation.
 
@@ -130,3 +172,11 @@ fixes an observed native cleanup refusal (missing CACHEDIR.TAG); metadata-only
 checking leaves the Cargo target absent, and a tiny real compile/clean proof
 passes with the corrected layout. Completed standalone and external caches are
 cleaned after their processes finish; compact workspace cache remains reusable.
+
+The source ZIP tool and corruption/path/Git tests are implemented; actual export
+and relocated-consumer acceptance are pending at this checkpoint. All 35 Python
+tests pass. Review-driven RED-to-GREEN regressions cover local ZIP metadata,
+underdeclared deflate output and normalize-after-casefold aliases. Configured
+fsmonitor helpers are disabled with an invocation-sentinel regression. The
+third scoped review found no remaining concrete failures; cross-model skipped
+in this autonomous continuation. This is no claim of a general ZIP extractor.
