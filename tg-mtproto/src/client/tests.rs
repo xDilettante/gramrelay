@@ -2,6 +2,8 @@ use super::*;
 use tl::{Deserializable, Identifiable, Serializable};
 #[path = "auth_tests.rs"]
 mod auth;
+#[path = "common_tests.rs"]
+mod common;
 
 async fn session() -> (tempfile::TempDir, Session) {
     let directory = tempfile::tempdir().unwrap();

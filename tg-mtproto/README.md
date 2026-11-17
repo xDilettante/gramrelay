@@ -2,8 +2,9 @@
 
 Separate MTProto package, currently implementing M2. Encrypted local session
 storage and the owned network Client with typed raw TL calls are implemented.
-Bot/user login, 2FA, confirmed login migration and live identity verification are
-also available. Common actions, files and observable update recovery remain open.
+Bot/user login, 2FA, confirmed login migration, live identity verification,
+opaque peer lookup/cache references and text send/edit are available.
+Dialogs/history, files and observable update recovery remain open.
 This package does not route MTProto operations through the Bot API.
 
 ```rust,no_run
@@ -25,8 +26,8 @@ async fn open_session(
 Provision a cryptographically random 32-byte key through a host secret store.
 Keep it outside this database, tool arguments and logs. The host protects the
 database directory and backups. Opening performs no network request; remembered
-account metadata is not proof of current authorization. The forthcoming common
-actions must verify the expected identity before accessing account data.
+account metadata is not proof of current authorization. Common actions verify
+the expected identity before accessing account data, within the same owned job.
 
 Trusted Rust code can invoke the pinned TL layer directly:
 
@@ -71,6 +72,37 @@ transitions exclude raw/identity jobs until their final outcome is classified.
 An unknown transition fences the generation before waking waiting jobs. The
 interactive flow uses opaque RAM-only challenges; see SPEC-mtproto-auth.md.
 Agent tools cannot initiate login.
+
+Use a host account facade and an opaque peer reference for common actions:
+
+```rust,no_run
+use tg_mtproto::{AccountIdentity, Client, ClientError, MessageReceipt, SendText};
+
+async fn greet(
+    client: &Client,
+    independently_expected: AccountIdentity,
+) -> Result<MessageReceipt, ClientError> {
+    let account = client.account(independently_expected);
+    let peer = account.resolve_username("example").await?;
+    let sent = account.send_text(&peer, SendText::new("Hello")?).await?;
+    account.edit_text(&peer, sent.message_id(), "Hello again").await
+}
+```
+
+The facade is not an agent grant. Each action verifies the current self account.
+`Peer` exposes only its typed ID; access hashes stay in encrypted session metadata.
+References cannot move between clients/accounts or survive an auth transition;
+after reopening, use `cached_peer(id)` to obtain a fresh reference. Missing full
+hashes return `None` from the cache, or `PeerUnavailable` from username lookup.
+Minimal/empty objects do not invent an access hash.
+
+`SendText` generates one immutable random ID, redacts Debug and limits plain text
+to 1..4096 UTF-16 units. Silent sends are explicit; previews, paid sends and
+scheduling are disabled. `with_random_id` lets a trusted host restore a journaled
+intent; it does not make retrying `Unknown` safe. Send/edit receipts require
+matching response evidence; unrelated, duplicate and malformed updates cannot
+produce guessed success. These actions do not advance update acknowledgement.
+See SPEC-mtproto-common.md for the complete current contract.
 
 For a user account, the trusted host supplies UI callbacks and an independent
 expected ID. `NewAccount` is an explicit alternative for first login; it refuses

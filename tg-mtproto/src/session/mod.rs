@@ -74,6 +74,18 @@ impl Session {
                 .any(|option| option.id == dc)
         })
     }
+    pub(crate) async fn cached_peer(
+        &self,
+        id: grammers_session::types::PeerId,
+    ) -> Result<Option<grammers_session::types::PeerInfo>> {
+        grammers_session::Session::peer(&*self.inner, id).await
+    }
+    pub(crate) async fn cache_peers(
+        &self,
+        peers: Vec<grammers_session::types::PeerInfo>,
+    ) -> Result<()> {
+        grammers_session::Session::cache_peers(&*self.inner, peers).await
+    }
     pub(crate) async fn quarantine_authorization(&self) -> Result<()> {
         self.inner
             .database

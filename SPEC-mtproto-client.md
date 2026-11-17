@@ -166,12 +166,15 @@ containers restore receive state and queued results/acknowledgements without
 replenishing the expansion budget. Malformed own-updates/control failures remain
 observable. Source verification checks all three archives, unchanged files and
 recorded diffs; crypto/key derivation, schemas and generators are untouched.
-There are 59 core, three TL primitive and 11 sender unit tests (15 with its
+There are 59 core, three TL primitive and 12 sender unit tests (16 with its
 development fixture), plus 24 upstream TL doctests. Focused independent reviews
 found and fixed lifecycle, early parsing and rollback gaps with regressions.
 
-Whole-workspace evidence on Windows/Rust 1.98.0, 17 November 2026: 373 all-feature
-and 209 default tests, clean Clippy, 25 Python checks and audit of 362 dependencies.
+Whole-workspace evidence on Windows/Rust 1.98.0, 17 November 2026: 426 all-feature
+and 262 default tests, seven doctests, clean Clippy, 25 Python checks and audit of
+362 dependencies. Follow-up auth/code/2FA/logout and peer/text actions are
+implemented in SPEC-mtproto-auth.md, SPEC-mtproto-interactive.md,
+SPEC-mtproto-logout.md and SPEC-mtproto-common.md, using this owned pipeline.
 No authenticated Telegram compatibility, generated decoded-heap/stack bound,
 external-consumer packaging or cross-platform claim follows from this increment.
-Auth, common actions, files, history, observable updates and M3 remain open.
+Dialogs/history, files, observable updates, M3 and release gates remain open.

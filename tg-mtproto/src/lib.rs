@@ -3,7 +3,8 @@ mod client;
 mod session;
 pub use client::auth;
 pub use client::{
-    AppCredentials, BotToken, Client, ClientError, ClientErrorKind, ClientOptions, Outcome,
+    Account, AppCredentials, BotToken, Client, ClientError, ClientErrorKind, ClientOptions,
+    MessageReceipt, Outcome, Peer, PeerId, PeerKind, SendText,
 };
 pub use grammers_tl_types as tl;
 pub use session::{

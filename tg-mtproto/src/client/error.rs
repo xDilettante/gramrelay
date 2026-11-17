@@ -40,6 +40,8 @@ pub enum ClientErrorKind {
     LoginCodeExpired,
     InvalidPassword,
     InvalidChallenge,
+    PeerUnavailable,
+    InvalidPeer,
 }
 
 /// Static diagnostic metadata. No upstream error or remote description is retained.
@@ -85,6 +87,8 @@ impl ClientError {
             ClientErrorKind::LoginCodeExpired => "mtproto_login_code_expired",
             ClientErrorKind::InvalidPassword => "mtproto_invalid_password",
             ClientErrorKind::InvalidChallenge => "mtproto_invalid_challenge",
+            ClientErrorKind::PeerUnavailable => "mtproto_peer_unavailable",
+            ClientErrorKind::InvalidPeer => "mtproto_invalid_peer",
         }
     }
 }

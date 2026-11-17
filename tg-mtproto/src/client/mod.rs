@@ -1,10 +1,12 @@
 pub mod auth;
+mod common;
 mod error;
 mod runtime;
 #[cfg(test)]
 mod tests;
 use crate::{Session, session::ClientClaim};
 pub use auth::{AppCredentials, BotToken};
+pub use common::{Account, MessageReceipt, Peer, PeerId, PeerKind, SendText};
 pub use error::{ClientError, ClientErrorKind, Outcome};
 use error::{Result, error};
 use grammers_mtsender::{ConnectionParams, NoRetries, SenderPool};

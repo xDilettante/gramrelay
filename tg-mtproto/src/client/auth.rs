@@ -81,7 +81,7 @@ impl Drop for BotRequest {
     }
 }
 
-fn check_stored(session: &Session, expected: AccountIdentity) -> Result<()> {
+pub(super) fn check_stored(session: &Session, expected: AccountIdentity) -> Result<()> {
     let stored = session
         .remembered_account()
         .map_err(|_| error(ClientErrorKind::Session, Outcome::NotSent))?;
@@ -112,7 +112,7 @@ fn checked_peer(user: tl::enums::User, expected: AccountIdentity) -> Result<Peer
     })
 }
 
-async fn verify_in_context(
+pub(super) async fn verify_in_context(
     context: &super::runtime::Context,
     session: &Session,
     expected: AccountIdentity,
