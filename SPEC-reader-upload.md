@@ -22,9 +22,11 @@ pub fn reader(
 
 The reader is owned once; no Clone/reopen/replay factory or full-file RAM copy.
 Accept !Unpin and !Sync readers by boxing/pinning internally. Preserve existing
-InputFile Send+Sync auto traits: a private std Mutex can store the owned pinned
-reader until into_part consumes it, before any await/poll. No lock is held across
-network work. Other source behavior and all agent file-handle APIs stay unchanged.
+InputFile Send+Sync auto traits with private per-reader shared state. A std Mutex
+may protect the pinned reader/progress and a registered body waker during a
+nonblocking poll/state transition; never hold it across await. No global lock
+or background cancellation task. Other source behavior and all agent file-handle
+APIs stay unchanged.
 Arbitrary AsyncRead implementations are trusted Rust code; this is not a new
 raw-stream tool or permission boundary for an untrusted agent.
 
@@ -45,6 +47,18 @@ raw-stream tool or permission boundary for an untrusted agent.
 - Attachment retry refusal applies before reading this source, for direct
   send_document and generated named/nested attachment calls. No automatic
   replay, detached library producer task or widening agent grants.
+- A request-scoped guard must survive preparation/send/response handling for
+  every reader attachment in direct and generated calls. On completion or drop
+  (including a cancelled caller), it cancels/wakes the body and takes/drops the
+  actual reader from shared state, even if Hyper still retains a body adapter.
+  This is a per-reader control mechanism, not a promise to synchronously join
+  reqwest/Hyper connection drivers or caller-owned producer tasks.
+- An ok:true response is not sufficient while the reader prefix is incomplete
+  or failed. Check recorded completion/error state before returning success;
+  return a static safe Unknown upload error if the body has not supplied the
+  prefix. Preserve a confirmed remote Rejected result while cancelling the
+  remaining source. Do not wait for an unread suffix. Do not let early success
+  or a request future disappearing hide EOF/I/O failure or retain the reader.
 - The private reader part uses reqwest Part::stream with an unknown HTTP part
   length, while length remains our enforced prefix/budget. The authenticated
   reqwest 0.13.5 source computes known Form lengths with unchecked u64 additions;
@@ -64,6 +78,11 @@ read, zero, premature EOF/error redaction, !Unpin/!Sync reader, invalid/oversize
 preflight with zero polls, pending reader deadline/cancellation/drop/capacity,
 generated attachments and retry refusal. Use synthetic data and localhost or
 MockTransport, never Telegram. Verify both production HTTP and in-memory paths;
+Add production localhost early-response RED tests: retain Incoming body at the
+server, respond ok:true after a client reader becomes Pending, assert no false
+success and reader release before returning/dropping the caller. Also exercise
+early confirmed refusal and a partial/short reader racing a successful response.
+MockTransport drains the body before replying and cannot prove these cases.
 MockTransport's body-capture ceiling is not a large-upload memory benchmark.
 Add compile assertions for preserved auto traits and a small runnable stream
 example/recipe. Keep schema/SDK source, dependencies and Cargo.lock unchanged.
@@ -88,3 +107,10 @@ Sources: pinned local reqwest 0.13.5 async_impl/multipart.rs compute_length/
 PartLength; [Tokio Take](https://docs.rs/tokio/1.54.1/tokio/io/trait.AsyncReadExt.html#method.take),
 [ReaderStream](https://docs.rs/tokio-util/0.7.20/tokio_util/io/struct.ReaderStream.html),
 [reqwest multipart](https://docs.rs/reqwest/0.13.5/reqwest/multipart/index.html).
+
+First scoped review exposed the early-response lifecycle/completeness gaps
+above. Pinned hyper-util 0.1.21 legacy client may return response and spawn
+on_idle while an upload is outstanding; hyper 1.12.0 H1 dispatch retains body_rx
+separately from response delivery. The guard and completion state are required
+before implementation acceptance; a bare ReaderStream variant is insufficient.
+Cross-model skipped autonomous; no implementation or successful tests claimed yet.
