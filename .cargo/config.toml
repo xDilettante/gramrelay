@@ -1,0 +1,10 @@
+# Repeated feature and standalone SDK builds must not accumulate full PDBs or
+# incremental snapshots. Keep file/line information for failure backtraces.
+[build]
+incremental = false
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
