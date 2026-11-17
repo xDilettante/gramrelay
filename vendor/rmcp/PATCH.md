@@ -51,8 +51,9 @@ format/round-trip, precision, epoch-floor semantics and both timestamp extrema;
 workspace consumer tests cover raw annotations, clocks and timeout diagnostics.
 See SPEC-mcp-timestamps.md for the complete acceptance commands.
 
-Root [patch] overrides are a development mechanism. External-consumer packaging
-is an open Q3 gate; do not publish an artifact that silently loses this patch.
+tg-agent binds this private SDK directly with a path-only dependency. Publishing
+is disabled; do not normalize it into a registry package that loses this patch.
+See SPEC-source-distribution.md for external consumers and remaining registry gates.
 The standalone SDK lockfile still retains chrono through the optional upstream
 OAuth2 auth feature. That feature is not enabled/exposed by Telegram Rust; its
 entire workspace lockfile and enabled dependency closure are chrono-free.

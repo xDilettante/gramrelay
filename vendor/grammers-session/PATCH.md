@@ -11,7 +11,9 @@ uses i64 intermediates so i32 inputs cannot silently wrap in release or panic in
 debug during duplicate handling. These preserve mathematical sequence comparisons;
 no custom update sequencing, storage, schema or cryptography is introduced.
 
-Cargo.toml adds the sibling hardened TL override for standalone library tests.
+Cargo.toml directly binds the sibling hardened TL dependency for downstream and
+standalone use, with no registry fallback or root patch requirement. This private
+source package has publish=false; see SPEC-source-distribution.md.
 The sole serde_with use (Option<[u8;256]> hex) is replaced with serde with/default
 attributes and the already-locked hex 0.4.3. This removes its disabled chrono
 integration from the workspace lockfile (Cargo issue rust-lang/cargo#10801).

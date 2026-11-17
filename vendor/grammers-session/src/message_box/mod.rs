@@ -67,9 +67,9 @@ impl MessageBox {
     /// Observe the same counter metadata used by maintained update sequencing.
     /// Invalid semantic constructors retain the upstream assertion behavior.
     pub fn update_metadata(update: &tl::enums::Update) -> Option<(Self, i32)> {
-        let info=PtsInfo::from_update_unfiltered(update)?;
-        let count=info.count;
-        Some((info.into(),count))
+        let info = PtsInfo::from_update_unfiltered(update)?;
+        let count = info.count;
+        Some((info.into(), count))
     }
     pub fn pts(&self) -> i32 {
         match self {
@@ -249,7 +249,9 @@ impl MessageBoxes {
     /// Number of updates retained while waiting for gaps to close.
     /// This read-only observation lets callers enforce a bounded backlog.
     pub fn buffered_updates(&self) -> usize {
-        self.entries.iter().filter_map(|entry| entry.possible_gap.as_ref())
+        self.entries
+            .iter()
+            .filter_map(|entry| entry.possible_gap.as_ref())
             .fold(0usize, |count, gap| count.saturating_add(gap.updates.len()))
     }
 
@@ -257,10 +259,17 @@ impl MessageBoxes {
     /// Adapted short updates can exceed their original wire envelope size.
     pub fn buffered_updates_bytes(&self, limit: usize) -> usize {
         use grammers_tl_types::Serializable;
-        let mut bytes=0usize;
-        for update in self.entries.iter().filter_map(|entry|entry.possible_gap.as_ref()).flat_map(|gap|&gap.updates) {
-            update.serialize(&mut |part|bytes=bytes.saturating_add(part.len()));
-            if bytes>limit {break;}
+        let mut bytes = 0usize;
+        for update in self
+            .entries
+            .iter()
+            .filter_map(|entry| entry.possible_gap.as_ref())
+            .flat_map(|gap| &gap.updates)
+        {
+            update.serialize(&mut |part| bytes = bytes.saturating_add(part.len()));
+            if bytes > limit {
+                break;
+            }
         }
         bytes
     }
@@ -587,7 +596,9 @@ impl MessageBoxes {
                             let gap_info = PtsInfo::from_update(&gap_update)
                                 .expect("only updates with pts info may be stored as gaps");
 
-                            match (i64::from(entry.pts) + i64::from(gap_info.count)).cmp(&i64::from(gap_info.pts)) {
+                            match (i64::from(entry.pts) + i64::from(gap_info.count))
+                                .cmp(&i64::from(gap_info.pts))
+                            {
                                 Ordering::Equal => {
                                     entry.pts = gap_info.pts;
                                     // possible gap can only be resolve if new update closed

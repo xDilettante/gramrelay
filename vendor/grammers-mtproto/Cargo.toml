@@ -37,9 +37,6 @@ license = "MIT OR Apache-2.0"
 repository = "https://codeberg.org/Lonami/grammers"
 resolver = "2"
 
-[patch.crates-io]
-grammers-tl-types = { path = "../grammers-tl-types" }
-
 [lib]
 name = "grammers_mtproto"
 path = "src/lib.rs"
@@ -65,7 +62,7 @@ version = "0.4.3"
 version = "0.12.0"
 
 [dependencies.grammers-tl-types]
-version = "0.12.0"
+path = "../grammers-tl-types"
 features = ["tl-mtproto"]
 
 [dependencies.num-bigint]

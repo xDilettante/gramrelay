@@ -10,6 +10,10 @@ The local patch changes Cargo.toml and three incoming-parser files only:
 manual_tl.rs, mtp/encrypted.rs and mtp/mod.rs. Cryptographic primitives,
 authentication/key derivation, transport and outgoing encoding are unchanged.
 
+The manifest directly binds the sibling hardened TL package, without a registry
+fallback or root override requirement. This private source package is not a
+registry-ready fork; see SPEC-source-distribution.md.
+
 Encrypted input has configurable RPC/control body, cumulative gzip expansion
 and nesting limits. Defaults are 8 MiB, 16 MiB and 32 levels. Incoming object
 limits apply to setup/control responses and intermediate inflated RPC objects

@@ -496,8 +496,6 @@ dependencies = [
 [[package]]
 name = "grammers-session"
 version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "221a58eaf6bfb61ecd1cb8bc58c20d2bc7ec3749b968bc90d52bcf9a8547d4e6"
 dependencies = [
  "grammers-tl-types",
  "tracing",

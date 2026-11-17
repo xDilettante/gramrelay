@@ -8,21 +8,16 @@
  authors = ["Lonami Exo <totufals@hotmail.com>"]
  build = false
  autolib = false
-@@ -40,7 +41,13 @@
- repository = "https://codeberg.org/Lonami/grammers"
+@@ -41,6 +42,8 @@
  resolver = "2"
  
-+[patch.crates-io]
-+grammers-mtproto = { path = "../grammers-mtproto" }
-+grammers-tl-types = { path = "../grammers-tl-types" }
-+
  [features]
 +tg-test-kit = []
 +upstream-live-tests = []
  proxy = [
      "tokio-socks",
      "hickory-resolver",
-@@ -54,13 +61,20 @@
+@@ -54,23 +57,30 @@
  [[test]]
  name = "deps"
  path = "tests/deps.rs"
@@ -35,15 +30,28 @@
  
  [dependencies.bytes]
  version = "1.12.1"
-+
+ 
 +[dependencies.futures-util]
 +version = "0.3"
 +default-features = false
 +features = ["std"]
- 
++
  [dependencies.grammers-mtproto]
- version = "0.12.0"
-@@ -113,6 +127,10 @@
+-version = "0.12.0"
++path = "../grammers-mtproto"
+ 
+ [dependencies.grammers-session]
+-version = "0.12.0"
++path = "../grammers-session"
+ default-features = false
+ 
+ [dependencies.grammers-tl-types]
+-version = "0.12.0"
++path = "../grammers-tl-types"
+ features = [
+     "tl-mtproto",
+     "deserializable-functions",
+@@ -113,6 +123,10 @@
  [dev-dependencies.socks5-server]
  version = "0.10.1"
  

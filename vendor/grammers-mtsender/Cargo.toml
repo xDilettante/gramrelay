@@ -41,10 +41,6 @@ license = "MIT OR Apache-2.0"
 repository = "https://codeberg.org/Lonami/grammers"
 resolver = "2"
 
-[patch.crates-io]
-grammers-mtproto = { path = "../grammers-mtproto" }
-grammers-tl-types = { path = "../grammers-tl-types" }
-
 [features]
 tg-test-kit = []
 upstream-live-tests = []
@@ -77,14 +73,14 @@ default-features = false
 features = ["std"]
 
 [dependencies.grammers-mtproto]
-version = "0.12.0"
+path = "../grammers-mtproto"
 
 [dependencies.grammers-session]
-version = "0.12.0"
+path = "../grammers-session"
 default-features = false
 
 [dependencies.grammers-tl-types]
-version = "0.12.0"
+path = "../grammers-tl-types"
 features = [
     "tl-mtproto",
     "deserializable-functions",

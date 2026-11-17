@@ -13,6 +13,7 @@
 edition = "2024"
 name = "grammers-session"
 version = "0.12.0"
+publish = false
 authors = ["Lonami Exo <totufals@hotmail.com>"]
 build = false
 autolib = false
@@ -55,7 +56,7 @@ name = "deps"
 path = "tests/deps.rs"
 
 [dependencies.grammers-tl-types]
-version = "0.12.0"
+path = "../grammers-tl-types"
 
 [dependencies.libsql]
 version = "0.10.0"
@@ -91,6 +92,3 @@ default-features = false
 
 [dev-dependencies.toml]
 version = "1.2.1"
-
-[patch.crates-io]
-grammers-tl-types = { path = "../grammers-tl-types" }

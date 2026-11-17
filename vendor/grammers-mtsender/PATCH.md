@@ -9,6 +9,11 @@ Upstream copyright headers are retained. Distributed under Apache-2.0.
 Existing source changes are limited to sender_pool.rs, sender.rs,
 configuration.rs and the normalized Cargo.toml:
 
+The manifest binds mtproto/session/TL siblings through path-only dependencies.
+External consumers inherit all safety patches without root overrides; packaging
+cannot silently fall back to the original registry SDK. This package stays
+private/unpublished; see SPEC-source-distribution.md for the release boundary.
+
 - Quit uses an independent sticky signal, interruptible during connection setup.
 - Completion closes admission, aborts and joins all child senders. Unwinding is
   caught until that drain completes, then propagated. futures-util supplies
