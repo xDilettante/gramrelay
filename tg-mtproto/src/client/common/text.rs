@@ -97,11 +97,29 @@ impl Drop for EditRequest {
 impl Account {
     /// Send one immutable text intent. Unknown outcomes are never replayed.
     pub async fn send_text(&self, peer: &Peer, intent: SendText) -> Result<MessageReceipt> {
+        self.send_text_inner(peer, intent, None).await
+    }
+    /// Cap the entire owned action, including identity/queue waits. An expired
+    /// cap refuses dispatch; a timeout after dispatch remains Unknown.
+    pub async fn send_text_until(
+        &self,
+        peer: &Peer,
+        intent: SendText,
+        deadline: std::time::Instant,
+    ) -> Result<MessageReceipt> {
+        self.send_text_inner(peer, intent, Some(deadline)).await
+    }
+    async fn send_text_inner(
+        &self,
+        peer: &Peer,
+        intent: SendText,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<MessageReceipt> {
         let references = self.references();
         peer.check(&references)?;
         let peer = peer.clone();
         let limit = self.client.inner.options.max_request_bytes;
-        self.run(move |context, session| async move {
+        self.run_until(deadline, move |context, session| async move {
             peer.check(&references)?;
             let input = input_peer(&session, peer.id, references.expected)
                 .await?
@@ -155,6 +173,26 @@ impl Account {
         message_id: i32,
         text: impl Into<String>,
     ) -> Result<MessageReceipt> {
+        self.edit_text_inner(peer, message_id, text, None).await
+    }
+    /// The same edit with an absolute cap covering the whole owned action.
+    pub async fn edit_text_until(
+        &self,
+        peer: &Peer,
+        message_id: i32,
+        text: impl Into<String>,
+        deadline: std::time::Instant,
+    ) -> Result<MessageReceipt> {
+        self.edit_text_inner(peer, message_id, text, Some(deadline))
+            .await
+    }
+    async fn edit_text_inner(
+        &self,
+        peer: &Peer,
+        message_id: i32,
+        text: impl Into<String>,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<MessageReceipt> {
         let text = checked_text(text)?;
         if message_id <= 0 {
             return Err(error(ClientErrorKind::InvalidInput, Outcome::NotSent));
@@ -163,7 +201,7 @@ impl Account {
         peer.check(&references)?;
         let peer = peer.clone();
         let limit = self.client.inner.options.max_request_bytes;
-        self.run(move |context, session| async move {
+        self.run_until(deadline, move |context, session| async move {
             peer.check(&references)?;
             let input = input_peer(&session, peer.id, references.expected)
                 .await?

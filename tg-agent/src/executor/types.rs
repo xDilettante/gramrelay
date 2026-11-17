@@ -14,6 +14,7 @@ pub enum ExecutorErrorKind {
     ApprovalRequired,
     ContextRequired,
     Capacity,
+    Closed,
     Conflict,
     QuotaExceeded,
     Storage,
@@ -47,7 +48,7 @@ impl ExecutorError {
     pub fn outcome(&self) -> Option<tg::EffectOutcome> {
         self.outcome
     }
-    pub(super) fn with_outcome(mut self, outcome: tg::EffectOutcome) -> Self {
+    pub(crate) fn with_outcome(mut self, outcome: tg::EffectOutcome) -> Self {
         self.outcome = Some(outcome);
         self
     }
@@ -59,6 +60,7 @@ impl ExecutorError {
             ExecutorErrorKind::ApprovalRequired => "executor_approval_required",
             ExecutorErrorKind::ContextRequired => "executor_context_required",
             ExecutorErrorKind::Capacity => "executor_capacity",
+            ExecutorErrorKind::Closed => "executor_closed",
             ExecutorErrorKind::Conflict => "executor_conflict",
             ExecutorErrorKind::QuotaExceeded => "executor_quota_exceeded",
             ExecutorErrorKind::Storage => "executor_storage",

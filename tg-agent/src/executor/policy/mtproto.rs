@@ -22,6 +22,23 @@ impl Entry {
     }
 }
 impl PolicyStore {
+    pub(crate) fn check_mtproto_lookup(
+        &self,
+        principal: &Principal,
+        request: &Request,
+        expected: ProfileIdentity,
+        time: i64,
+    ) -> Result<()> {
+        if request.action() != Action::GetOperation {
+            return Err(invalid_policy());
+        }
+        let state = self.inner.read().map_err(|_| invalid_policy())?;
+        let entry = state
+            .grants
+            .get(&(principal.clone(), request.profile().to_owned()))
+            .ok_or_else(denied)?;
+        entry.mtproto()?.check_basic(request, expected, time)
+    }
     pub fn replace_mtproto(
         &self,
         principal: &Principal,

@@ -51,6 +51,11 @@ a 30-second absolute deadline, a 1 MiB encoded request and an 8 MiB response.
 Admission precedes serialization. Dropping a caller does not release capacity
 while its owned work remains active. A timeout or session fence closes the whole
 generation; `close().await` joins the driver tree before draining storage.
+`Client::request_budget` exposes the configured request deadline budget. Hosts
+with their own durable lease can use `Account::send_text_until` and
+`edit_text_until` with an absolute `std::time::Instant`; that cap also covers
+queue/identity waits and never extends the Client budget. An expired cap refuses
+dispatch; a timed-out dispatched action remains Unknown, without automatic replay.
 Public `Session::close` refuses while attached: close through the Client.
 
 Raw calls do not retry. An ambiguous remote effect returns `Outcome::Unknown`;

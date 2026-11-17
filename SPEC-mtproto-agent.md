@@ -196,3 +196,26 @@ Windows/Rust 1.98.0: 565 all-feature / 365 default tests, 16 doctests, Clippy/fm
 isolated builds, deterministic schemas, 25 Python checks, four SDK verifiers and
 audit of 363 dependencies pass. Persistent write scopes/admission, callback/file
 providers, remote action execution and CLI/MCP integration remain M3.
+
+## Durable text-action evidence
+
+SPEC-mtproto-agent-actions.md implements journal v8, exact MT operation scopes and
+the six-action Rust Executor: verified get_me/cache-only get_peer, shared Reader,
+send/edit text and scoped get_operation. Common key/fencing/budget logic is reused;
+MT scopes remain separate from legacy Bot scope rows. Tracked jobs retain capacity
+after caller Drop, close can resume joining, and caller-side revision/scope checks
+protect buffered replies. M2 absolute send/edit caps cover identity/queue waits.
+
+Twenty-three further cases include actual killed-process recovery at three write
+boundaries, caller cancellation/close, scope/approval/revocation, durable quotas,
+malformed/Rejected/Unknown replies, cached reads without a backend, v8 migration
+and lease/policy wait handling. The offline authorized MT text example sends once
+for two invocations. Fresh store/runtime/deadline reviews have no unresolved
+findings; external cross-model review was skipped in the autonomous continuation.
+
+Windows/Rust 1.98.0: 588 all-feature / 369 default tests, 16 doctests, Clippy/fmt,
+isolated builds and Python/schema/SDK gates pass. The fresh advisory database now
+reports informational RUSTSEC-2026-0543 for transitive chrono via rmcp 3.10.0;
+the unchanged 363-dependency graph is not claimed audit-clean. Q3 tracks removal
+without ignoring the warning. Callback/document capabilities and CLI/MCP still
+remain M3, with no live-server or release acceptance claim.

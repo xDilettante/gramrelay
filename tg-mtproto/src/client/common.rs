@@ -182,8 +182,23 @@ impl Account {
         F: FnOnce(Context, Session) -> Fut + Send + 'static,
         Fut: Future<Output = Result<T>> + Send + 'static,
     {
+        self.run_until(None, action).await
+    }
+    pub(super) async fn run_until<T, F, Fut>(
+        &self,
+        deadline: Option<std::time::Instant>,
+        action: F,
+    ) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(Context, Session) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<T>> + Send + 'static,
+    {
         auth::check_stored(&self.client.inner.session, self.expected)?;
-        let reservation = self.client.reserve()?;
+        let mut reservation = self.client.reserve()?;
+        if let Some(deadline) = deadline {
+            reservation.1 = reservation.1.min(tokio::time::Instant::from_std(deadline));
+        }
         let session = self.client.inner.session.clone();
         let authorization = self.client.inner.authorization.clone();
         let expected = self.expected;

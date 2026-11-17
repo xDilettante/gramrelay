@@ -13,6 +13,9 @@ The implementation uses reqwest 0.13.5, Tokio 1.54.1, tokio-util 0.7.20 and wire
 - Explicitly disable transport retries: https://docs.rs/reqwest/0.13.5/reqwest/retry/fn.never.html
 - Multipart streaming with known length: https://docs.rs/reqwest/0.13.5/reqwest/multipart/struct.Part.html#method.stream_with_length
 - Pool reuse: https://docs.rs/reqwest/0.13.5/reqwest/#making-a-get-request
+- Owned Tokio job collections, cancel-safe join_next and abort-on-Drop: https://docs.rs/tokio/1.54.1/tokio/task/struct.JoinSet.html . MTProto executor keeps the collection through cancelled close waits and rechecks disclosure in the caller after the reply await.
+- Absolute standard/Tokio monotonic instant conversion: https://docs.rs/tokio/1.54.1/tokio/time/struct.Instant.html#method.from_std . M2 caps the existing owned deadline rather than detaching an outer timeout.
+- New advisory checked 17 November 2026: https://raw.githubusercontent.com/RustSec/advisory-db/main/crates/chrono/RUSTSEC-2026-0543.md ; maintainer context: https://github.com/chronotope/chrono/issues/1768 . All chrono versions are marked unmaintained; rmcp 3.10.0 remains the latest official release at https://github.com/modelcontextprotocol/rust-sdk/releases and still depends on chrono. See the open Q3 remediation task.
 - Bounded file reading: https://docs.rs/tokio/latest/tokio/io/trait.AsyncReadExt.html#method.take
 - AsyncRead to Stream: https://docs.rs/tokio-util/latest/tokio_util/io/struct.ReaderStream.html
 - Local HTTP mocks: https://docs.rs/wiremock/0.6.5/wiremock/

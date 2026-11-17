@@ -136,15 +136,7 @@ impl Grant {
         time: i64,
         scope: Option<&OriginalScope>,
     ) -> Result<()> {
-        if time < 0 {
-            return Err(invalid_policy());
-        }
-        if self.expected != expected
-            || self.expiry.is_some_and(|v| time >= v)
-            || !self.actions.contains(&request.action())
-        {
-            return Err(denied());
-        }
+        self.check_basic(request, expected, time)?;
         if let Some(scope) = scope {
             if !matches!(
                 request.action(),
@@ -152,23 +144,7 @@ impl Grant {
             ) {
                 return Err(invalid_policy());
             }
-            if scope.account != expected
-                || !scope.action.is_write()
-                || !self.actions.contains(&scope.action)
-                || (request.action() == Action::AnswerCallbackQuery
-                    && scope.action != Action::AnswerCallbackQuery)
-                || (scope.action == Action::SendDocument) != scope.file_handle.is_some()
-                || (scope.peer.is_none() && scope.action != Action::AnswerCallbackQuery)
-                || scope
-                    .peer
-                    .map_or(!self.unscoped_updates, |p| !self.permits_peer(p))
-                || scope
-                    .file_handle
-                    .as_ref()
-                    .is_some_and(|h| !self.permits_file(h))
-            {
-                return Err(denied());
-            }
+            self.check_original(request, expected, scope)?;
         } else {
             if matches!(
                 request.call(),
@@ -184,6 +160,48 @@ impl Grant {
             {
                 return Err(denied());
             }
+        }
+        Ok(())
+    }
+    pub(crate) fn check_basic(
+        &self,
+        request: &Request,
+        expected: ProfileIdentity,
+        time: i64,
+    ) -> Result<()> {
+        if time < 0 {
+            return Err(invalid_policy());
+        }
+        if self.expected != expected
+            || self.expiry.is_some_and(|v| time >= v)
+            || !self.actions.contains(&request.action())
+        {
+            return Err(denied());
+        }
+        Ok(())
+    }
+    fn check_original(
+        &self,
+        request: &Request,
+        expected: ProfileIdentity,
+        scope: &OriginalScope,
+    ) -> Result<()> {
+        if scope.account != expected
+            || !scope.action.is_write()
+            || !self.actions.contains(&scope.action)
+            || (request.action() == Action::AnswerCallbackQuery
+                && scope.action != Action::AnswerCallbackQuery)
+            || (scope.action == Action::SendDocument) != scope.file_handle.is_some()
+            || (scope.peer.is_none() && scope.action != Action::AnswerCallbackQuery)
+            || scope
+                .peer
+                .map_or(!self.unscoped_updates, |p| !self.permits_peer(p))
+            || scope
+                .file_handle
+                .as_ref()
+                .is_some_and(|h| !self.permits_file(h))
+        {
+            return Err(denied());
         }
         Ok(())
     }

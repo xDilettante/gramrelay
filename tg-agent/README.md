@@ -24,9 +24,36 @@ Bot API chat/thread options, access hashes, пути или произвольн
 `PolicyStore::replace_mtproto`, `dry_run_mtproto` и `approve_mtproto` используют
 тот же principal/profile и ревизии, что Bot grants; смешения разрешений нет.
 Подтверждение связано со всем неизменяемым запросом и operation_id. Проверка
-политики локальная: она не резервирует квоту и не проверяет вход. Пока это
-контракт Rust-провайдера; подключение исполнения и CLI/MCP MTProto остаётся M3,
-а существующий каталог Bot API содержит прежние восемь инструментов.
+политики локальная: она не резервирует квоту и не проверяет вход. Исполнение
+доступно через отдельный Rust `mtproto::Executor`; CLI/MCP MTProto ещё остаётся
+M3, а каталог Bot API содержит прежние восемь инструментов.
+
+`mtproto::Executor` принимает `register_profile(feed, client)` от хоста и выполняет
+шесть действий: get_me, get_peer, read_updates, send_message, edit_message_text и
+get_operation с префиксом `mtproto_`. `get_peer` проверяет личность и доступность
+собеседника в зашифрованном кеше; подготовку username/cache выполняет хост.
+Callback и документы пока возвращают `UnsupportedAction`. `Executor::ACTIONS`
+показывает фактически исполняемый набор. Вход/выход из аккаунта и raw TL не
+являются действиями агента.
+
+Миграция v8 добавляет отдельные точные MTProto scopes в общий журнал ключей и
+квот. Отправка/редактирование проходят prepare → текущие права/квоты и commit
+in_flight → M2 с абсолютным дедлайном → постоянная квитанция. `Unknown` и
+`Rejected` не отправляются повторно; cached/get_operation не требуют RPC и
+сохраняют исходную область доступа. `dry_run`/`approve` не расходуют квоту и не
+читают тело сохранённой квитанции. Текущие права проверяются и после получения
+ответа из owned-задачи, чтобы буферизация не обходила отзыв.
+
+По умолчанию — 16 принятых jobs, 1 MiB сохранённых данных на чтение и 5 секунд
+receipt margin; timeout берётся у M2 Client. Timeout + margin должны помещаться
+в аренду журнала. Отмена вызывающего кода оставляет принятую задачу и её слот
+до записи результата. Хост закрывает `executor.close().await`, затем Client,
+затем Journal. Отменённый close можно продолжить; Drop не обещает завершённую
+квитанцию или joined shutdown. Контракт: [SPEC-mtproto-agent-actions.md](../SPEC-mtproto-agent-actions.md).
+
+Офлайн-пример с синтетической зашифрованной сессией и настоящим TL-кодеком:
+`cargo run --locked --offline -p tg-agent --features mtproto-test-kit --example mtproto_authorized_text`.
+Он проверяет две попытки с одним ключом и одну отправку без сокетов.
 
 `mtproto::updates::Feed` принимает целые партии M2: `ingest` сохраняет проекцию
 и watermark в журнале, затем вызывает ACK. Хост удерживает один `SourceLease` и

@@ -39,6 +39,114 @@ fn version_five(path: &std::path::Path) -> Connection {
     connection
 }
 
+fn version_seven(path: &std::path::Path) -> Connection {
+    let connection = version_five(path);
+    connection
+        .execute_batch(include_str!("../src/journal/profiles.sql"))
+        .unwrap();
+    connection
+        .execute_batch(include_str!("../src/journal/mtproto-updates.sql"))
+        .unwrap();
+    connection.pragma_update(None, "user_version", 7).unwrap();
+    connection
+}
+
+#[tokio::test]
+async fn version_seven_adds_exact_mtproto_scopes_without_adopting_generic_operations() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("v7-actions.sqlite");
+    let c = version_seven(&path);
+    c.execute(
+        "INSERT INTO account_profiles VALUES('personal','mtproto_user',42)",
+        [],
+    )
+    .unwrap();
+    c.execute("INSERT INTO operations(profile,operation_id,principal,action,payload_hash,state,revision,created_at_ms,updated_at_ms,expires_at_ms) VALUES('personal','legacy','alice','mtproto_send_message',zeroblob(32),'unknown',4,0,0,999999999999999)",[]).unwrap();
+    c.execute(
+        "INSERT INTO executor_budgets VALUES('personal','alice','quota',60000,0,3,2,17,4)",
+        [],
+    )
+    .unwrap();
+    drop(c);
+    let journal = Journal::open(&path, JournalOptions::default())
+        .await
+        .unwrap();
+    journal.close().await.unwrap();
+    let c = Connection::open(&path).unwrap();
+    assert_eq!(
+        c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        8
+    );
+    assert_eq!(
+        c.query_row("SELECT state,revision FROM operations", [], |r| Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, i64>(1)?
+        )))
+        .unwrap(),
+        ("unknown".into(), 4)
+    );
+    assert_eq!(
+        c.query_row("SELECT upload_bytes FROM executor_budgets", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        17
+    );
+    assert_eq!(
+        c.query_row("SELECT COUNT(*) FROM mtproto_operation_scopes", [], |r| r
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn malformed_version_seven_does_not_partially_create_mtproto_action_tables() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("bad-v7-actions.sqlite");
+    let c = version_seven(&path);
+    c.execute("DROP INDEX mtproto_updates_retention", [])
+        .unwrap();
+    drop(c);
+    assert_eq!(
+        Journal::open(&path, JournalOptions::default())
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::UnsupportedSchema
+    );
+    let c = Connection::open(&path).unwrap();
+    assert_eq!(
+        c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        7
+    );
+    assert_eq!(c.query_row("SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('mtproto_operation_scopes','account_profiles_exact')",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+}
+
+#[tokio::test]
+async fn mtproto_action_schema_is_checked_in_storage_only_builds() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("bad-v8.sqlite");
+    let journal = Journal::open(&path, JournalOptions::default())
+        .await
+        .unwrap();
+    journal.close().await.unwrap();
+    let c = Connection::open(&path).unwrap();
+    c.execute("DROP INDEX mtproto_callback_admission", [])
+        .unwrap();
+    drop(c);
+    assert_eq!(
+        Journal::open(&path, JournalOptions::default())
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::UnsupportedSchema
+    );
+}
+
 #[tokio::test]
 async fn version_six_adds_mtproto_storage_without_rebinding_accounts_or_changing_keys() {
     let directory = tempfile::tempdir().unwrap();
@@ -69,7 +177,7 @@ async fn version_six_adds_mtproto_storage_without_rebinding_accounts_or_changing
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        7
+        8
     );
     assert_eq!(
         connection
@@ -161,7 +269,7 @@ async fn current_mtproto_schema_is_verified_even_in_storage_only_builds() {
         connection
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        7
+        8
     );
 }
 
@@ -240,7 +348,7 @@ async fn version_six_binding_constraints_and_exact_schema_are_checked_on_reopen(
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        7
+        8
     );
     assert_eq!(
         connection
@@ -275,7 +383,7 @@ async fn version_five_binds_only_known_feeds_and_preserves_legacy_operation_keys
     let version: i64 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
     let binding: (String, i64) = connection
         .query_row(
             "SELECT kind,account_id FROM account_profiles WHERE profile='known-bot'",
@@ -339,7 +447,7 @@ async fn migration_preserves_receipts_hashes_versions_and_another_workers_flight
         .unwrap()
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
     let request = OperationRequest::new("bot", "alice", "done", "send_message", &payload).unwrap();
     assert!(
         matches!(journal.prepare(request).await.unwrap(),Preparation::Existing(record) if record.state() == OperationState::Succeeded && record.revision() == 7 && record.result().unwrap()["message_id"] == 42)
@@ -424,7 +532,7 @@ async fn version_two_migrates_without_rewinding_update_or_poll_positions() {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        7
+        8
     );
     let feed = UpdateFeed::open(journal.clone(), "bot", 1, UpdateOptions::default())
         .await
@@ -467,7 +575,7 @@ async fn version_three_keeps_active_consumer_ownership_and_validates_the_new_uni
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        7
+        8
     );
     let retained: (String, i64, i64) = connection
         .query_row(
@@ -561,7 +669,7 @@ async fn version_four_preserves_durable_usage_and_creates_validated_file_metadat
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        7
+        8
     );
     assert_eq!(
         connection

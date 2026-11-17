@@ -192,6 +192,10 @@ impl fmt::Debug for Client {
     }
 }
 impl Client {
+    /// Configured RPC-job budget, including queue and identity waits.
+    pub fn request_budget(&self) -> Duration {
+        self.inner.options.timeout
+    }
     /// Claims the session without starting a runtime task or connecting.
     pub fn new(session: Session, options: ClientOptions) -> Result<Self> {
         let response_limit = options.max_response_bytes;

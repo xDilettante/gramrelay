@@ -25,6 +25,74 @@ fn extreme_peer_ids_fail_before_upstream_eager_arithmetic() {
     }
 }
 
+#[tokio::test]
+async fn text_deadline_caps_refuse_expired_admission_and_stop_waiting_identity_before_target_rpc() {
+    for edit in [false, true] {
+        let (_directory, session) = session().await;
+        let delayed = Arc::new(AtomicBool::new(false));
+        let delay = delayed.clone();
+        let targets = Arc::new(AtomicUsize::new(0));
+        let seen = targets.clone();
+        let client = fixture(session, ClientOptions::default(), move |_, bytes| {
+            let delay = delay.clone();
+            let seen = seen.clone();
+            async move {
+                if let Some(reply) = self_reply(&bytes) {
+                    if delay.load(Ordering::SeqCst) {
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                    }
+                    return Ok(reply);
+                }
+                if bytes[..4]
+                    == tl::functions::contacts::ResolveUsername::CONSTRUCTOR_ID.to_le_bytes()
+                {
+                    return Ok(resolved(vec![user(77, 1, 987654321)], 77));
+                }
+                seen.fetch_add(1, Ordering::SeqCst);
+                Ok(sent(1))
+            }
+        });
+        assert_eq!(client.request_budget(), Duration::from_secs(30));
+        let account = client.account(expected());
+        let peer = account.resolve_username("example").await.unwrap();
+        let expired = std::time::Instant::now() - Duration::from_secs(1);
+        let error = if edit {
+            account
+                .edit_text_until(&peer, 1, "hello", expired)
+                .await
+                .unwrap_err()
+        } else {
+            account
+                .send_text_until(&peer, SendText::new("hello").unwrap(), expired)
+                .await
+                .unwrap_err()
+        };
+        assert_eq!(error.outcome(), Outcome::NotSent);
+        delayed.store(true, Ordering::SeqCst);
+        let deadline = std::time::Instant::now() + Duration::from_millis(50);
+        let action = async {
+            if edit {
+                account.edit_text_until(&peer, 1, "hello", deadline).await
+            } else {
+                account
+                    .send_text_until(&peer, SendText::new("hello").unwrap(), deadline)
+                    .await
+            }
+        };
+        let error = tokio::time::timeout(Duration::from_secs(1), action)
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.kind(), ClientErrorKind::Timeout);
+        assert_eq!(
+            targets.load(Ordering::SeqCst),
+            0,
+            "deadline must cover live identity waiting"
+        );
+        client.close().await.unwrap();
+    }
+}
+
 fn expected() -> AccountIdentity {
     AccountIdentity {
         id: AccountId::new(42).unwrap(),

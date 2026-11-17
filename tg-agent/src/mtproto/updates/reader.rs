@@ -254,6 +254,16 @@ impl Reader {
         request: &Request,
         approval: Option<&Approval>,
     ) -> AgentResult<ReadPage> {
+        self.read_with_revision(principal, request, approval)
+            .await
+            .map(|(_, page)| page)
+    }
+    pub(crate) async fn read_with_revision(
+        &self,
+        principal: &Principal,
+        request: &Request,
+        approval: Option<&Approval>,
+    ) -> AgentResult<(u64, ReadPage)> {
         let slot = self
             .slots
             .clone()
@@ -304,7 +314,7 @@ impl Reader {
             .await
             .map_err(storage_error)??;
         // A page may wait in the reply channel while the caller is descheduled.
-        auth.disclose(revision, page)
+        auth.disclose(revision, page).map(|page| (revision, page))
     }
 }
 fn select(page: Page, grant: &Grant, limit: u8) -> ReadPage {

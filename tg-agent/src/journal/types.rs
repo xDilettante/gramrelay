@@ -378,6 +378,26 @@ pub struct Completion {
     pub(super) failure: Option<AttemptFailure>,
 }
 impl Completion {
+    #[cfg(feature = "mtproto")]
+    pub(crate) fn from_mtproto(error: &tg_mtproto::ClientError) -> Self {
+        let (state, outcome) = match error.outcome() {
+            tg_mtproto::Outcome::NotSent => (OperationState::Prepared, "not_sent"),
+            tg_mtproto::Outcome::Rejected => (OperationState::Rejected, "rejected"),
+            _ => (OperationState::Unknown, "unknown"),
+        };
+        Self {
+            state,
+            result: None,
+            failure: Some(AttemptFailure {
+                kind: error.code().into(),
+                outcome: outcome.into(),
+                http_status: None,
+                api_error_code: error.rpc_code().map(i64::from),
+                retry_after_secs: error.retry_after_seconds().map(u64::from),
+                migrate_to_chat_id: None,
+            }),
+        }
+    }
     #[cfg(feature = "executor")]
     pub(crate) fn executor_not_started() -> Self {
         Self::executor_failure(OperationState::Prepared, "not_sent")
@@ -520,5 +540,22 @@ impl fmt::Debug for Operation {
             .field("revision", &self.revision)
             .field("result_availability", &self.result_availability)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(feature = "mtproto")]
+// Borrow fixed metadata before copying it; SQLite row decoding never allocates
+// a Vec for a source ID, ordinal, batch ID, hash or private query ID.
+pub(crate) fn fixed_blob<const N: usize>(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+) -> rusqlite::Result<Option<[u8; N]>> {
+    match row.get_ref(index)? {
+        rusqlite::types::ValueRef::Null => Ok(None),
+        rusqlite::types::ValueRef::Blob(bytes) => bytes
+            .try_into()
+            .map(Some)
+            .map_err(|_| rusqlite::Error::InvalidQuery),
+        _ => Err(rusqlite::Error::InvalidQuery),
     }
 }

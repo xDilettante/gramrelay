@@ -67,6 +67,9 @@ fn lost() -> JournalError {
     JournalError::new(JournalErrorKind::LeaseLost)
 }
 impl Feed {
+    pub(crate) fn executor_binding(&self) -> (&Journal, &str, ProfileIdentity) {
+        (&self.journal, &self.profile, self.account)
+    }
     /// Host registration only; the M2 receiver independently verifies live self.
     pub async fn open(
         journal: Journal,

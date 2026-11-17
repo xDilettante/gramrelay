@@ -4,21 +4,7 @@ pub(super) enum Origin {
     Batch(Stamp),
     SourceChange([u8; 32]),
 }
-// Borrow fixed metadata before copying it; SQLite row decoding never allocates
-// a Vec for a source ID, ordinal, batch ID, hash or private query ID.
-pub(super) fn blob<const N: usize>(
-    row: &rusqlite::Row<'_>,
-    index: usize,
-) -> rusqlite::Result<Option<[u8; N]>> {
-    match row.get_ref(index)? {
-        rusqlite::types::ValueRef::Null => Ok(None),
-        rusqlite::types::ValueRef::Blob(bytes) => bytes
-            .try_into()
-            .map(Some)
-            .map_err(|_| rusqlite::Error::InvalidQuery),
-        _ => Err(rusqlite::Error::InvalidQuery),
-    }
-}
+pub(super) use crate::journal::types::fixed_blob as blob;
 struct Watermark {
     source: Option<[u8; 32]>,
     ordinal: Option<u64>,
