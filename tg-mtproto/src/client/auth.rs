@@ -10,6 +10,7 @@ pub use interactive::{
     PasswordPromptReason, PhoneNumber, UnsupportedAuthFlow, UserLoginTarget,
 };
 
+#[allow(deprecated, reason = "MSRV 1.89 predates stable AtomicU64::try_update")]
 fn advance_epoch(epoch: &std::sync::atomic::AtomicU64) -> Result<u64> {
     epoch
         .fetch_update(

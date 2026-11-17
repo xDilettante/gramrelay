@@ -15,7 +15,10 @@ Each module has a concrete spec before its implementation. Use small verified co
 
 M3 is complete locally: shared typed MT dispatch/extended schemas, trusted Host
 v2 and standalone CLI/MCP lifecycle fixtures. The original Bot v1 discovery is
-unchanged. Current release work: resolve Q3's known chrono advisory without
-ignores or wire/lifecycle regressions, then complete all Q1–Q4 documentation,
-evaluation, measurement, platform/packaging and security acceptance. This ordering
-does not remove or weaken any completion gate.
+unchanged. Q3's chrono remediation, inherited hardened dependency graph and local
+source-candidate acceptance are complete. Windows MSRV1.89/current1.100 runtime
+and feature matrices pass; native Linux/macOS remain. Continue all Q1–Q4
+documentation, evaluation, measurement, platform/packaging and security
+acceptance. The user chose to keep original code closed; record private licensing
+separately, preserving third-party licenses and publish=false. This does not
+remove or weaken any remaining completion gate.
