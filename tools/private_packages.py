@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -273,6 +274,28 @@ def isolated_environment(home):
     }
 
 
+def remove_scratch(scratch, parent):
+    if scratch.parent != parent or not scratch.name.startswith("tg-private-packages-") or scratch.is_symlink():
+        raise ValueError("unexpected scratch cleanup target")
+    root = scratch.resolve()
+    if root.parent != parent.resolve():
+        raise ValueError("unexpected resolved scratch cleanup target")
+
+    def readonly(function, path, error):
+        failed = Path(path)
+        if (os.name != "nt" or not isinstance(error, PermissionError) or function not in (os.unlink, os.remove)
+                or failed.is_symlink() or not failed.resolve().is_relative_to(root)
+                or not failed.is_file() or not failed.stat().st_file_attributes & stat.FILE_ATTRIBUTE_READONLY):
+            raise error
+        failed.chmod(stat.S_IWRITE)
+        function(path)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(scratch, onexc=readonly)
+    else:
+        shutil.rmtree(scratch, onerror=lambda function, path, error: readonly(function, path, error[1]))
+
+
 def rehearse(toolchain, output):
     check_compat.guard(ROOT)
     archive, manifest = source_bundle.build(ROOT, ROOT / "target/dist")
@@ -339,14 +362,14 @@ def rehearse(toolchain, output):
         if set(models) != set(DIRECTORIES):
             raise ValueError("staged Cargo model is incomplete")
         run("package", [*cargo, "package", "--workspace", "--registry", REGISTRY, "--no-verify", "--exclude-lockfile", "--offline",
-                        "--target-dir", str(candidate / "build")], source)
+                        "--target-dir", str(candidate / "package-build")], source)
         checksums = {}
         for name, relative in DIRECTORIES.items():
             filename = f"{name}-{versions[name]}.crate"
-            packaged = candidate / "build/package" / filename
+            packaged = candidate / "package-build/package" / filename
             data = inspect_package(packaged, source / relative, versions, registry)
             checksums[name] = hashlib.sha256(source_bundle.read_bounded(packaged, source_bundle.MAX_ARCHIVE)).hexdigest()
-            shutil.copyfile(packaged, crates / filename)
+            packaged.rename(crates / filename)
             entry = index / index_path(name)
             entry.parent.mkdir(parents=True, exist_ok=True)
             entry.write_text(json.dumps(index_entry(data, checksums[name], registry)) + "\n", encoding="utf-8")
@@ -397,10 +420,7 @@ def rehearse(toolchain, output):
                 if (candidate / "build/CACHEDIR.TAG").is_file():
                     run("clean", [*cargo, "clean", "--target-dir", str(candidate / "build"), "--profile", "dev"], source)
                 if not uncertain_children:
-                    # This is the exact freshly created private temp directory.
-                    if scratch.parent != scratch_parent or not scratch.name.startswith("tg-private-packages-") or scratch.is_symlink():
-                        raise ValueError("unexpected scratch cleanup target")
-                    shutil.rmtree(scratch)
+                    remove_scratch(scratch, scratch_parent)
             except BaseException as error:
                 summary.update(status="failed", cleanup_error=type(error).__name__ + ": " + str(error), retained_scratch=str(scratch))
                 save()

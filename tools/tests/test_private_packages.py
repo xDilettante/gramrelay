@@ -48,6 +48,22 @@ def archive(path, directory, manifest):
 
 
 class PrivatePackages(unittest.TestCase):
+    def test_cleanup_removes_owned_readonly_git_files_and_refuses_other_roots(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary).resolve()
+            scratch = Path(tempfile.mkdtemp(prefix="tg-private-packages-", dir=parent))
+            packed = scratch / "cargo/registry/index/private/.git/objects/pack/object.idx"
+            packed.parent.mkdir(parents=True)
+            packed.write_bytes(b"owned readonly git pack index")
+            packed.chmod(0o400)
+            packages.remove_scratch(scratch, parent)
+            self.assertFalse(scratch.exists())
+            other = parent / "unrelated"
+            other.mkdir()
+            with self.assertRaisesRegex(ValueError, "cleanup target"):
+                packages.remove_scratch(other, parent)
+            self.assertTrue(other.exists())
+
     def test_neutral_parent_refusal_leaves_failed_identity_before_any_child(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

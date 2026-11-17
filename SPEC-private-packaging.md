@@ -64,6 +64,10 @@ publish or a claim that an unknown production registry has been configured.
   after failure. Source commit/archive hash and tool versions identify evidence.
   Enforce repository 20 GiB free/target guards, bounded archive reads and
   subprocess lifetimes. Clean terminal scratch build/cache data only.
+  Keep Cargo's package-only output separate from a newly created runtime target:
+  cargo package does not add CACHEDIR.TAG to its output, and reusing that directory
+  prevents later cargo clean. For owned Windows Git cache files, retry deletion
+  only on regular read-only files within the exact validated scratch tree.
 
 ## Implementation and commands
 
