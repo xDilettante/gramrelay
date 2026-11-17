@@ -15,7 +15,9 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
+mod history;
 mod text;
+pub use history::{HistoryCursor, HistoryMessage, HistoryMessageKind, HistoryPage};
 pub use text::{MessageReceipt, SendText};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

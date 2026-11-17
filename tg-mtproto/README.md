@@ -3,8 +3,8 @@
 Separate MTProto package, currently implementing M2. Encrypted local session
 storage and the owned network Client with typed raw TL calls are implemented.
 Bot/user login, 2FA, confirmed login migration, live identity verification,
-opaque peer lookup/cache references and text send/edit are available.
-Dialogs/history, files and observable update recovery remain open.
+opaque peer lookup/cache references, text send/edit and bounded paginated history
+are available. Dialogs, files and observable update recovery remain open.
 This package does not route MTProto operations through the Bot API.
 
 ```rust,no_run
@@ -103,6 +103,39 @@ intent; it does not make retrying `Unknown` safe. Send/edit receipts require
 matching response evidence; unrelated, duplicate and malformed updates cannot
 produce guessed success. These actions do not advance update acknowledgement.
 See SPEC-mtproto-common.md for the complete current contract.
+
+User accounts can read one explicit history page at a time. This example stops
+after at most three pages; it does not start an unbounded background scan:
+
+```rust,no_run
+use tg_mtproto::{Account, ClientError, Peer};
+
+async fn inspect_history(account: &Account, peer: &Peer) -> Result<(), ClientError> {
+    let mut cursor = None;
+    for _ in 0..3 {
+        let page = account.history(peer, 50, cursor.as_ref()).await?;
+        if page.is_inexact() {
+            println!("Telegram marked this page as inexact");
+        }
+        for message in page.messages() {
+            println!("{} {:?}", message.id(), message.kind());
+        }
+        cursor = page.next_cursor().cloned();
+        if cursor.is_none() { break; }
+    }
+    Ok(())
+}
+```
+
+A short page may have a next cursor. Empty and service records stay visible;
+message content is available through explicit getters and Debug is redacted.
+Cursors are RAM-only positions bound to account/client/auth epoch and target;
+they cannot be used after reopening or as update acknowledgements. Inexact
+empty pages fail explicitly instead of claiming complete history. The optional
+count describes the whole history, not the remaining number of records.
+`HistoryMessage::raw()` is a trusted Rust escape hatch for full pinned fields;
+raw media may contain file access hashes and must not be dumped into tools/logs.
+See SPEC-mtproto-history.md. History is user-only; bot facades fail before RPC.
 
 For a user account, the trusted host supplies UI callbacks and an independent
 expected ID. `NewAccount` is an explicit alternative for first login; it refuses

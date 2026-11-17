@@ -4,7 +4,8 @@ mod session;
 pub use client::auth;
 pub use client::{
     Account, AppCredentials, BotToken, Client, ClientError, ClientErrorKind, ClientOptions,
-    MessageReceipt, Outcome, Peer, PeerId, PeerKind, SendText,
+    HistoryCursor, HistoryMessage, HistoryMessageKind, HistoryPage, MessageReceipt, Outcome, Peer,
+    PeerId, PeerKind, SendText,
 };
 pub use grammers_tl_types as tl;
 pub use session::{

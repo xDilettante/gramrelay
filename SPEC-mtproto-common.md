@@ -1,7 +1,8 @@
 # MTProto common actions (M2)
 
-Status: peer references and plain-text send/edit implemented; dialogs/history,
-files and remaining common capabilities stay open in M2. This extends
+Status: peer references and plain-text send/edit implemented. Bounded history is
+implemented in SPEC-mtproto-history.md; dialogs/files and remaining common
+capabilities stay open in M2. This extends
 SPEC-mtproto-client.md.
 
 ## Account and peer references

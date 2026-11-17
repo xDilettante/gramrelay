@@ -6,7 +6,10 @@ mod runtime;
 mod tests;
 use crate::{Session, session::ClientClaim};
 pub use auth::{AppCredentials, BotToken};
-pub use common::{Account, MessageReceipt, Peer, PeerId, PeerKind, SendText};
+pub use common::{
+    Account, HistoryCursor, HistoryMessage, HistoryMessageKind, HistoryPage, MessageReceipt, Peer,
+    PeerId, PeerKind, SendText,
+};
 pub use error::{ClientError, ClientErrorKind, Outcome};
 use error::{Result, error};
 use grammers_mtsender::{ConnectionParams, NoRetries, SenderPool};

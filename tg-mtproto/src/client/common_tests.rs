@@ -1,6 +1,8 @@
 use super::*;
 use crate::{AccountId, AccountIdentity, AccountKind, PeerId, SendText};
 use std::sync::atomic::AtomicUsize;
+#[path = "history_tests.rs"]
+mod history;
 
 fn expected() -> AccountIdentity {
     AccountIdentity {
