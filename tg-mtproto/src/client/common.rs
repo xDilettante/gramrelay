@@ -25,7 +25,9 @@ pub use files::{
     DocumentReceipt, DownloadOptions, DownloadReceipt, DownloadedDocument, RemoteDocument,
     SendDocument,
 };
+mod callbacks;
 mod text;
+pub use callbacks::CallbackAnswer;
 pub use history::{HistoryCursor, HistoryMessage, HistoryMessageKind, HistoryPage};
 pub use text::{MessageReceipt, SendText};
 

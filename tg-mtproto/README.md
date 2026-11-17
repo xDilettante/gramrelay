@@ -10,6 +10,14 @@ authorization and protected destinations. Observable batch updates have durable
 ACK, bounded catch-up and explicit scoped recovery. Release gates remain open.
 This package does not route MTProto operations through the Bot API.
 
+Bot accounts can answer callbacks with `CallbackAnswer::new(query_id)` and
+`Account::answer_callback` / `answer_callback_until`. Optional plain text is bounded
+to 200 UTF-16 units; alert is explicit, URLs and caching are absent. All opaque
+i64 query bits, including zero, are preserved. Only Bool true confirms success.
+The absolute cap includes live identity waits; cancellation retains owned work
+and never retries an ambiguous effect. This trusted Rust intent is not an agent
+permission: `tg-agent::mtproto::Executor` supplies scoped opaque references.
+
 ```rust,no_run
 use tg_mtproto::{Session, SessionBinding, SessionKey, SessionOptions};
 

@@ -10,10 +10,10 @@ mod updates;
 use crate::{Session, session::ClientClaim};
 pub use auth::{AppCredentials, BotToken};
 pub use common::{
-    Account, Dialog, DialogContinuation, DialogCursor, DialogFolder, DialogId, DialogPage,
-    DialogPageIssue, DocumentReceipt, DownloadOptions, DownloadReceipt, DownloadedDocument,
-    HistoryCursor, HistoryMessage, HistoryMessageKind, HistoryPage, MessageReceipt, Peer, PeerId,
-    PeerKind, RemoteDocument, SendDocument, SendText,
+    Account, CallbackAnswer, Dialog, DialogContinuation, DialogCursor, DialogFolder, DialogId,
+    DialogPage, DialogPageIssue, DocumentReceipt, DownloadOptions, DownloadReceipt,
+    DownloadedDocument, HistoryCursor, HistoryMessage, HistoryMessageKind, HistoryPage,
+    MessageReceipt, Peer, PeerId, PeerKind, RemoteDocument, SendDocument, SendText,
 };
 pub use error::{ClientError, ClientErrorKind, Outcome};
 use error::{Result, error};
