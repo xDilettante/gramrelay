@@ -99,7 +99,7 @@ impl Journal {
     }
 }
 
-fn load(connection: &Connection, profile: &str) -> Result<Option<ProfileIdentity>> {
+pub(crate) fn load(connection: &Connection, profile: &str) -> Result<Option<ProfileIdentity>> {
     let value: Option<(String, i64)> = connection
         .query_row(
             "SELECT kind,account_id FROM account_profiles WHERE profile=?1",

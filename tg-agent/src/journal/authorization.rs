@@ -1,6 +1,7 @@
 //! Storage primitives for A1. Authority is checked by the executor, not these rows.
 use super::*;
 use crate::executor::{Action, Budget, ChatId};
+use crate::profiles::{ProfileIdentity, ProfileKind};
 
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct FileScope {
@@ -10,7 +11,7 @@ pub(crate) struct FileScope {
 }
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct OperationScope {
-    pub bot_id: i64,
+    pub account: ProfileIdentity,
     pub action: Action,
     pub chat: Option<ChatId>,
     pub file: Option<FileScope>,
@@ -23,7 +24,7 @@ impl fmt::Debug for OperationScope {
 }
 impl OperationScope {
     fn validate(&self) -> Result<()> {
-        if self.bot_id < 0
+        if self.account.kind() != ProfileKind::BotApi
             || !self.action.is_write()
             || (self.action == Action::SendDocument) != self.file.is_some()
             || (self.action == Action::AnswerCallbackQuery) != self.reference_hash.is_some()
@@ -90,7 +91,7 @@ impl Journal {
         scope.validate()?;
         self.prepare_checked(request, move |connection, request, created| {
             let bot: Option<i64> = connection.query_row("SELECT bot_id FROM update_feeds WHERE profile=?1", [&request.profile], |row| row.get(0)).optional().map_err(|_| storage())?;
-            if bot != Some(scope.bot_id) || scope.action.name() != request.action { return Err(JournalError::new(JournalErrorKind::Denied)); }
+            if bot != Some(scope.account.account_id()) || crate::profiles::load(connection, &request.profile)? != Some(scope.account) || scope.action.name() != request.action { return Err(JournalError::new(JournalErrorKind::Denied)); }
             if let Some(hash)=&scope.reference_hash {
                 let claimed:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM executor_operation_scopes WHERE profile=?1 AND reference_hash=?2 AND admitted=1 AND operation_id!=?3)",params![request.profile,hash.as_slice(),request.id],|row|row.get(0)).map_err(|_|storage())?;
                 if claimed { return Err(JournalError::new(JournalErrorKind::Conflict)); }
@@ -104,7 +105,7 @@ impl Journal {
                 Some(file) => (Some(file.handle.as_str()), Some(file.sha256.as_slice()), Some(file.bytes as i64)),
                 None => (None, None, None),
             };
-            connection.execute("INSERT INTO executor_operation_scopes(profile,operation_id,bot_id,action,chat_id,file_handle,file_sha256,file_bytes,reference_hash) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)", params![request.profile, request.id, scope.bot_id, scope.action.name(), scope.chat.map(ChatId::get), handle, hash, bytes, scope.reference_hash.as_ref().map(|v|v.as_slice())]).map_err(|_| storage())?;
+            connection.execute("INSERT INTO executor_operation_scopes(profile,operation_id,bot_id,action,chat_id,file_handle,file_sha256,file_bytes,reference_hash) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)", params![request.profile, request.id, scope.account.account_id(), scope.action.name(), scope.chat.map(ChatId::get), handle, hash, bytes, scope.reference_hash.as_ref().map(|v|v.as_slice())]).map_err(|_| storage())?;
             Ok(())
         }).await
     }
@@ -209,7 +210,7 @@ fn load_scope(connection: &Connection, profile: &str, id: &str) -> Result<Option
                 _ => return Err(storage()),
             };
             let scope = OperationScope {
-                bot_id,
+                account: ProfileIdentity::bot_api(bot_id).map_err(|_| storage())?,
                 action: Action::ALL
                     .into_iter()
                     .find(|v| v.name() == action)
@@ -221,6 +222,9 @@ fn load_scope(connection: &Connection, profile: &str, id: &str) -> Result<Option
                     .transpose()?,
             };
             scope.validate().map_err(|_| storage())?;
+            if crate::profiles::load(connection, profile)? != Some(scope.account) {
+                return Err(JournalError::new(JournalErrorKind::Denied));
+            }
             Ok(scope)
         })
         .transpose()

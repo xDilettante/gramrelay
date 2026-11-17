@@ -7,6 +7,7 @@ description = "Durable and authorized Telegram actions for agents"
 
 [features]
 executor = ["tokio/time"]
+mtproto = ["executor", "dep:tg-mtproto"]
 host = ["executor", "tokio/io-util", "tokio/fs"]
 cli = ["host", "tokio/io-std", "tokio/rt-multi-thread"]
 mcp = ["cli", "dep:rmcp", "dep:tokio-util"]
@@ -24,6 +25,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = { version = "0.11", default-features = false }
 tg = { path = "..", default-features = false }
+tg-mtproto = { path = "../tg-mtproto", optional = true }
 tokio = { version = "1", features = ["rt", "sync"] }
 tokio-util = { version = "0.7", features = ["rt"], optional = true }
 

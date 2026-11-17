@@ -35,7 +35,7 @@ pub struct ExecutorError {
     outcome: Option<tg::EffectOutcome>,
 }
 impl ExecutorError {
-    pub(super) fn new(kind: ExecutorErrorKind) -> Self {
+    pub(crate) fn new(kind: ExecutorErrorKind) -> Self {
         Self {
             kind,
             outcome: None,
@@ -158,7 +158,7 @@ impl MessageId {
         self.0
     }
 }
-fn numeric_string<'de, D: Deserializer<'de>>(
+pub(crate) fn numeric_string<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> std::result::Result<i64, D::Error> {
     let value =

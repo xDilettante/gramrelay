@@ -53,6 +53,25 @@ at admission and disclosure, never only the old bot_id column.
 
 ## Remaining M3 contracts
 
+The optional `mtproto` agent feature adds separate `mtproto_*` request variants
+with explicitly tagged peer kind and canonical decimal-string bare IDs, validated
+through M2 constructors. It never reinterprets Bot API chat IDs or options.
+Its initial fixed actions are get_me, get_peer, read_updates, send_message,
+edit_message_text, answer_callback_query, get_operation and send_document.
+An independent immutable request contains all arguments and the operation key;
+approval fingerprints use an MTProto domain. Input remains bounded, strictly
+object-shaped and redacted. IDs/hashes/tokens/paths cannot become tool authority.
+
+One shared PolicyStore entry per principal/profile contains either a Bot grant
+or a MTProto grant. Replacement/revocation changes the same revision domain,
+invalidating earlier approvals even across protocols. A MTProto grant binds the
+exact ProfileIdentity, actions, typed peer scope, files, expiry, approval needs
+and existing durable Budget. A user grant cannot include answering bot callbacks.
+Default scopes deny; explicit all-peers/unscoped authority remains host-only.
+Local policy checks do not claim a durable admission or live identity check.
+Bot operation-scope loads/admission must also match the exact durable BotApi
+binding; the legacy bot_id column never establishes an arbitrary MTProto scope.
+
 Only the host supplies an already configured Client, encrypted Session/key,
 independently expected account kind/ID and principals/grants/approvals. Agent input
 cannot log in/out, import a session, resolve arbitrary host paths, provide keys or
@@ -116,3 +135,31 @@ passes with `cargo audit --no-fetch` using the advisory database updated in this
 run; the first registry/yanked lookup timed out. The all-feature CLI binary is
 rebuilt after schema verification. No MTProto executor, policy extension or
 tool dispatch is claimed by this profile-storage increment.
+
+## Policy/resource provider evidence
+
+The optional mtproto feature now provides eight immutable prefixed requests,
+tagged M2-validated peer IDs and MTProto grants in the shared PolicyStore. One
+current entry selects exactly one protocol family; replacement/revocation and
+the shared approval matcher retain the same revision domain. Default scopes deny
+and bot callback authority cannot be configured for a user account. The legacy
+Bot operation scope now carries exact BotApi identity and checks the durable
+profile binding on preparation, load/admission and disclosure, preserving v6 DDL.
+
+Eleven further Rust cases include seven public contract/policy tests, two
+trusted-provider scope cases, a stored Bot-scope mismatch regression and extreme
+M2 peer IDs. Two boundary defects have RED-to-GREEN proof: SDK eager arithmetic
+panicked on invalid IDs, and public direct Serde envelope errors echoed unknown
+input names. Guards preserve maintained ID ranges; Request/PeerId decoder errors
+are static. The ID regression also passes optimized. Fresh scope/ID and policy
+reviews have no unresolved findings; cross-model review was skipped in this
+autonomous continuation.
+
+Windows/Rust 1.98.0: 536 all-feature / 362 default workspace tests, 14 doctests,
+clean all-feature and Bot-only Clippy, storage-only/MTProto-only checks, 25 Python
+checks, deterministic protocol/agent schemas, four SDK verifiers and audit of
+363 dependencies pass. Bot-only dependency graphs exclude MTProto/grammers.
+The Bot v1 CLI catalog still has eight tools and its all-feature binary is
+rebuilt after schema checking. These local policy/provider checks do not yet
+implement MTProto journal ingestion, durable MTProto write admission, callback
+provenance/file registration, an executor or CLI/MCP dispatch; those remain M3.

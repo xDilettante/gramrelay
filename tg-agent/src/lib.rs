@@ -10,6 +10,8 @@ pub mod host;
 pub mod journal;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+#[cfg(feature = "mtproto")]
+pub mod mtproto;
 pub mod profiles;
 #[cfg(feature = "bot")]
 pub mod runtime;

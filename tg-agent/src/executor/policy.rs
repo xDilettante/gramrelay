@@ -9,6 +9,10 @@ use std::{
     sync::{Arc, RwLock, Weak},
     time::Duration,
 };
+#[cfg(feature = "mtproto")]
+mod mtproto;
+#[cfg(feature = "mtproto")]
+pub use mtproto::MtprotoDryRun;
 
 /// Authenticated host identity. Deliberately not deserializable from tool input.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -251,7 +255,8 @@ impl Grant {
         ) {
             return Err(invalid_policy());
         }
-        if scope.bot_id != bot_id
+        if scope.account
+            != crate::profiles::ProfileIdentity::bot_api(bot_id).map_err(|_| invalid_policy())?
             || !self.actions.contains(&scope.action)
             || (request.action() == Action::AnswerCallbackQuery
                 && scope.action != Action::AnswerCallbackQuery)
@@ -271,7 +276,21 @@ impl Grant {
 
 struct Entry {
     revision: u64,
-    grant: Grant,
+    grant: GrantKind,
+}
+enum GrantKind {
+    Bot(Grant),
+    #[cfg(feature = "mtproto")]
+    Mtproto(crate::mtproto::Grant),
+}
+impl Entry {
+    fn bot(&self) -> Result<&Grant> {
+        match &self.grant {
+            GrantKind::Bot(grant) => Ok(grant),
+            #[cfg(feature = "mtproto")]
+            GrantKind::Mtproto(_) => Err(denied()),
+        }
+    }
 }
 #[derive(Default)]
 struct State {
@@ -292,6 +311,26 @@ pub struct Approval {
     fingerprint: [u8; 32],
     revision: u64,
     expires_at_ms: i64,
+}
+impl Approval {
+    fn matches(
+        &self,
+        store: &PolicyStore,
+        principal: &Principal,
+        profile: &str,
+        fingerprint: [u8; 32],
+        revision: u64,
+        time: i64,
+    ) -> bool {
+        self.issuer
+            .upgrade()
+            .is_some_and(|issuer| Arc::ptr_eq(&issuer, &store.inner))
+            && self.principal == *principal
+            && self.profile == profile
+            && self.fingerprint == fingerprint
+            && self.revision == revision
+            && time < self.expires_at_ms
+    }
 }
 /// Local checks only. Neither a durable quota reservation nor an execution permit.
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -320,7 +359,7 @@ impl PolicyStore {
             .grants
             .get(&(principal.clone(), profile.to_owned()))
             .ok_or_else(denied)?;
-        let grant = &entry.grant;
+        let grant = entry.bot()?;
         if time < 0
             || grant.bot_id != bot_id
             || grant.expires_at_ms.is_some_and(|expiry| time >= expiry)
@@ -335,6 +374,9 @@ impl PolicyStore {
     pub fn replace(&self, principal: &Principal, profile: &str, grant: Grant) -> Result<()> {
         valid_id(profile)?;
         grant.validate()?;
+        self.store(principal, profile, GrantKind::Bot(grant))
+    }
+    fn store(&self, principal: &Principal, profile: &str, grant: GrantKind) -> Result<()> {
         let mut state = self.inner.write().map_err(|_| invalid_policy())?;
         let key = (principal.clone(), profile.to_owned());
         if state.grants.len() >= 1024 && !state.grants.contains_key(&key) {
@@ -391,18 +433,18 @@ impl PolicyStore {
             .grants
             .get(&(principal.clone(), request.profile().to_owned()))
             .ok_or_else(denied)?;
-        entry.grant.check_request(request, bot_id, now_ms, scope)?;
-        if entry.grant.approvals.contains(&request.action()) {
+        let grant = entry.bot()?;
+        grant.check_request(request, bot_id, now_ms, scope)?;
+        if grant.approvals.contains(&request.action()) {
             let matches = approval.is_some_and(|value| {
-                value
-                    .issuer
-                    .upgrade()
-                    .is_some_and(|issuer| Arc::ptr_eq(&issuer, &self.inner))
-                    && value.principal == *principal
-                    && value.profile == request.profile()
-                    && value.fingerprint == request.fingerprint()
-                    && value.revision == entry.revision
-                    && now_ms < value.expires_at_ms
+                value.matches(
+                    self,
+                    principal,
+                    request.profile(),
+                    request.fingerprint(),
+                    entry.revision,
+                    now_ms,
+                )
             });
             if !matches {
                 return Err(ExecutorError::new(ExecutorErrorKind::ApprovalRequired));
@@ -415,7 +457,7 @@ impl PolicyStore {
                 is_write: request.action().is_write(),
                 grant_revision: entry.revision,
             },
-            entry.grant.clone(),
+            grant.clone(),
         ))
     }
     /// Explicit host confirmation. Approval includes operation_id, so the same
@@ -451,7 +493,7 @@ impl PolicyStore {
             .grants
             .get(&(principal.clone(), request.profile().to_owned()))
             .ok_or_else(denied)?;
-        entry.grant.check_basic(request, bot_id, now_ms)
+        entry.bot()?.check_basic(request, bot_id, now_ms)
     }
     pub(super) fn approve_with_scope(
         &self,
@@ -467,8 +509,9 @@ impl PolicyStore {
             .grants
             .get(&(principal.clone(), request.profile().to_owned()))
             .ok_or_else(denied)?;
-        entry.grant.check_request(request, bot_id, now_ms, scope)?;
-        if expires_at_ms <= now_ms || entry.grant.expires_at_ms.is_some_and(|v| expires_at_ms > v) {
+        let grant = entry.bot()?;
+        grant.check_request(request, bot_id, now_ms, scope)?;
+        if expires_at_ms <= now_ms || grant.expires_at_ms.is_some_and(|v| expires_at_ms > v) {
             return Err(invalid_policy());
         }
         Ok(Approval {

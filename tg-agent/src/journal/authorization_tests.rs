@@ -37,12 +37,69 @@ fn request(id: &str) -> OperationRequest {
 }
 fn scope() -> OperationScope {
     OperationScope {
-        bot_id: 123,
+        account: crate::profiles::ProfileIdentity::bot_api(123).unwrap(),
         action: Action::SendMessage,
         chat: Some(ChatId::new(-1001).unwrap()),
         file: None,
         reference_hash: None,
     }
+}
+
+#[tokio::test]
+async fn stored_bot_scopes_cannot_authorize_a_same_number_mtproto_binding() {
+    let directory = tempfile::tempdir().unwrap();
+    let journal = Journal::open(
+        directory.path().join("binding.sqlite"),
+        JournalOptions::default(),
+    )
+    .await
+    .unwrap();
+    UpdateFeed::open(journal.clone(), "primary", 123, UpdateOptions::default())
+        .await
+        .unwrap();
+    journal
+        .prepare_scoped(request("stored"), scope())
+        .await
+        .unwrap();
+    // Simulate a future bad migration mixing protocol domains. Even then a
+    // legacy Bot scope must not establish authority over a MTProto account.
+    journal
+        .run(|connection, _, _| {
+            connection
+                .execute(
+                    "UPDATE account_profiles SET kind='mtproto_user' WHERE profile='primary'",
+                    [],
+                )
+                .map_err(|_| super::storage())?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        journal
+            .operation_scope("primary", "alice", "stored")
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::Denied
+    );
+    assert_eq!(
+        journal
+            .get_scoped("primary", "alice", "stored")
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::Denied
+    );
+    assert_eq!(
+        journal
+            .prepare_scoped(request("fresh"), scope())
+            .await
+            .unwrap_err()
+            .kind(),
+        JournalErrorKind::Denied
+    );
+    journal.close().await.unwrap();
 }
 fn ready(value: Preparation) -> super::Prepared {
     match value {
@@ -119,7 +176,7 @@ async fn scoped_rows_are_bound_atomically_and_legacy_rows_fail_closed() {
         JournalErrorKind::Denied
     );
     let mut wrong_bot = scope();
-    wrong_bot.bot_id = 124;
+    wrong_bot.account = crate::profiles::ProfileIdentity::bot_api(124).unwrap();
     assert!(
         journal
             .prepare_scoped(request("wrong-bot"), wrong_bot)

@@ -250,7 +250,7 @@ fn candidate(
         .transpose()
         .map_err(|_| ExecutorError::new(ExecutorErrorKind::InvalidInput))?;
     let scope = OperationScope {
-        bot_id: profile.bot_id,
+        account: profile.expected,
         action: Action::AnswerCallbackQuery,
         chat,
         file: None,

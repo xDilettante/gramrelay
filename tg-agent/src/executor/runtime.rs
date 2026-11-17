@@ -113,6 +113,7 @@ impl ExecutorOptions {
 }
 struct Profile {
     bot: Bot,
+    expected: crate::profiles::ProfileIdentity,
     journal: Journal,
     bot_id: i64,
     identity: OnceCell<BotInfo>,
@@ -303,6 +304,8 @@ impl Executor {
             name.to_owned(),
             Arc::new(Profile {
                 bot,
+                expected: crate::profiles::ProfileIdentity::bot_api(bot_id)
+                    .map_err(|_| ExecutorError::new(ExecutorErrorKind::InvalidPolicy))?,
                 journal: journal.clone(),
                 bot_id,
                 identity: OnceCell::new(),

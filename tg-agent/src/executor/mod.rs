@@ -8,6 +8,8 @@ mod runtime;
 mod types;
 #[cfg(feature = "host")]
 pub(crate) use runtime::validate_cursor;
+#[cfg(feature = "mtproto")]
+pub(crate) use types::{map_only, numeric_string, valid_id};
 #[cfg(feature = "host")]
 pub(crate) use types::{map_only as deserialize_object, valid_id as validate_identifier};
 
@@ -17,6 +19,8 @@ pub use runtime::{
     ReadEventScope, ReadPage, RegisteredFile,
 };
 
+#[cfg(feature = "mtproto")]
+pub use policy::MtprotoDryRun;
 pub use policy::{
     Approval, Budget, BudgetLimits, ChatScope, DryRun, Grant, PolicyStore, Principal,
 };

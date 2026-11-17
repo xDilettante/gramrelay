@@ -21,14 +21,14 @@ impl Executor {
         admission.checked(now()?)?;
         let scope = match request.call() {
             ActionCall::SendMessage(args) => OperationScope {
-                bot_id: profile.bot_id,
+                account: profile.expected,
                 action: request.action(),
                 chat: Some(args.chat_id),
                 file: None,
                 reference_hash: None,
             },
             ActionCall::EditMessageText(args) => OperationScope {
-                bot_id: profile.bot_id,
+                account: profile.expected,
                 action: request.action(),
                 chat: Some(args.chat_id),
                 file: None,
@@ -40,7 +40,7 @@ impl Executor {
             ActionCall::SendDocument(args) => {
                 let file = admission.file.as_ref().expect("resolved file metadata");
                 OperationScope {
-                    bot_id: profile.bot_id,
+                    account: profile.expected,
                     action: Action::SendDocument,
                     chat: Some(args.chat_id),
                     file: Some(journal::authorization::FileScope {
