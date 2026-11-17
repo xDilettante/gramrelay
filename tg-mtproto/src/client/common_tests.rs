@@ -12,6 +12,19 @@ mod history;
 #[path = "update_receiver_tests.rs"]
 mod updates;
 
+#[test]
+fn extreme_peer_ids_fail_before_upstream_eager_arithmetic() {
+    for constructor in [PeerId::user, PeerId::chat, PeerId::channel] {
+        for id in [i64::MIN, -1, 0, i64::MAX, i64::MAX - 1] {
+            assert!(
+                constructor(id).is_err(),
+                "invalid peer must be a local error"
+            );
+        }
+        assert!(constructor(7).is_ok());
+    }
+}
+
 fn expected() -> AccountIdentity {
     AccountIdentity {
         id: AccountId::new(42).unwrap(),

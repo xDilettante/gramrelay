@@ -2,8 +2,9 @@
 
 Status: peer references and plain-text send/edit implemented. Bounded history is
 implemented in SPEC-mtproto-history.md and dialogs in SPEC-mtproto-dialogs.md;
-uploads/sending are implemented in SPEC-mtproto-files.md. Downloads and remaining
-common capabilities stay open in M2. This extends
+uploads/sending are implemented in SPEC-mtproto-files.md, downloads in
+SPEC-mtproto-download.md and observable recovery in SPEC-mtproto-updates.md.
+M2 is complete locally; M3 and release gates remain open. This extends
 SPEC-mtproto-client.md.
 
 ## Account and peer references
@@ -18,6 +19,11 @@ cloneable RAM reference bound to the originating client, expected account and
 authorization epoch. It exposes only its ID; Debug and serialization must not
 expose access hashes. Another client/account or an authorization transition
 invalidates the reference. Both pre-admission and post-guard checks are required.
+Public ID constructors guard the pinned backend's eager marked-ID arithmetic
+before applying its maintained range checks. Invalid i64 extremes return local
+errors; the regression reproduces the prior debug overflow and passes in both
+debug and optimized builds. This does not establish that all inherited SDK
+arithmetic or parser paths are panic-free.
 Reopening a session requires obtaining a fresh reference from its encrypted cache
 or a fresh Telegram lookup. Host raw TL remains a separate trusted escape hatch.
 

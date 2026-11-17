@@ -47,9 +47,16 @@ impl PeerId {
         Self::new(PeerKind::User, id, BackendPeerId::user(id))
     }
     pub fn chat(id: i64) -> Result<Self> {
+        // Upstream then_some eagerly computes -id even outside its ID range.
+        id.checked_neg()
+            .ok_or_else(|| error(ClientErrorKind::InvalidInput, Outcome::NotSent))?;
         Self::new(PeerKind::Chat, id, BackendPeerId::chat(id))
     }
     pub fn channel(id: i64) -> Result<Self> {
+        // Guard the pinned SDK's eager marked-ID expression before invoking it.
+        id.checked_add(1_000_000_000_000)
+            .and_then(i64::checked_neg)
+            .ok_or_else(|| error(ClientErrorKind::InvalidInput, Outcome::NotSent))?;
         Self::new(PeerKind::Channel, id, BackendPeerId::channel(id))
     }
     fn new(kind: PeerKind, id: i64, checked: Option<BackendPeerId>) -> Result<Self> {
