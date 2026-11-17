@@ -2,7 +2,6 @@ import json
 import os
 from pathlib import Path
 import sys
-import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -55,7 +54,9 @@ class Compatibility(unittest.TestCase):
             commands = [("ok", [sys.executable, "-c", "print('fixture')"]),
                         ("bad", [sys.executable, "-c", "raise SystemExit(7)"]),
                         ("later", [sys.executable, "-c", f"open({str(sentinel)!r},'w').close()"])]
-            self.assertEqual(compat.execute(commands, evidence, {"suite": "fixture"}, root), 1)
+            # These tiny Python commands test evidence, not a Rust build's reserve.
+            with patch.object(compat, "guard"):
+                self.assertEqual(compat.execute(commands, evidence, {"suite": "fixture"}, root), 1)
             summary = json.loads((evidence / "summary.json").read_bytes())
             self.assertEqual(summary["status"], "failed")
             self.assertEqual([case["exit_code"] for case in summary["cases"]], [0, 7])
@@ -65,7 +66,7 @@ class Compatibility(unittest.TestCase):
     def test_interruption_cannot_leave_success(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            with patch.object(compat.subprocess, "run", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
+            with patch.object(compat, "guard"), patch.object(compat.subprocess, "run", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
                 compat.execute([("interrupted", ["cargo"])], root / "evidence", {}, root)
             summary = json.loads((root / "evidence/summary.json").read_bytes())
             self.assertEqual(summary["status"], "interrupted")
@@ -82,7 +83,7 @@ class Compatibility(unittest.TestCase):
                 command = [sys.executable, "-c", f"import time; time.sleep(.05); print({marker!r})"]
                 self.assertEqual(compat.execute([("fixture", command)], evidence, {"marker": marker}, root), 0)
                 return evidence
-            with ThreadPoolExecutor(max_workers=2) as pool:
+            with patch.object(compat, "guard"), ThreadPoolExecutor(max_workers=2) as pool:
                 directories = list(pool.map(run, ["A", "B"]))
             self.assertNotEqual(*directories)
             for directory in directories:
@@ -97,16 +98,29 @@ class Compatibility(unittest.TestCase):
                 directory = root / relative
                 directory.mkdir(exist_ok=True)
                 (directory / "Cargo.toml").write_text('[package]\nname="fixture"\nrust-version="1.89"\n')
-            (root / "Cargo.lock").write_text("fixture")
-            command = ["cargo", "+1.89.0", "metadata", "--locked", "--no-deps"]
-            error = subprocess.CalledProcessError(101, command, output=b"", stderr=b"fixture Cargo resolution reason")
-            with patch.object(compat, "ROOT", root), patch.object(sys, "argv", ["check_compat.py", "--toolchain", "1.89.0"]), \
-                 patch.object(compat.subprocess, "check_output", side_effect=["rustc fixture version", error]), \
-                 patch.object(compat.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout="fixture", stderr="")):
+            (root / "Cargo.lock").write_text("version = 4\n")
+            toolchain = os.environ.get("RUSTUP_TOOLCHAIN", "stable")
+            command = ["cargo", f"+{toolchain}", "metadata", "--locked", "--no-deps", "--format-version", "1"]
+            # Real malformed manifests avoid mocking subprocess globally: Unix
+            # platform.platform() may itself invoke it before the rustc query.
+            with patch.object(compat, "ROOT", root), patch.object(sys, "argv", ["check_compat.py", "--toolchain", toolchain]):
                 self.assertEqual(compat.main(), 1)
-            summary_path, = (root / "target/compat-1.89.0-evidence").glob("run-*/summary.json")
+            summary_path, = (root / f"target/compat-{toolchain}-evidence").glob("run-*/summary.json")
             summary = json.loads(summary_path.read_bytes())
-            self.assertEqual(summary["rustc"], "rustc fixture version")
+            self.assertTrue(summary["rustc"].startswith("rustc "))
+            self.assertEqual(summary["status"], "failed-preflight")
             self.assertEqual(summary["preflight_error"]["command"], command)
             self.assertEqual(summary["preflight_error"]["exit_code"], 101)
-            self.assertIn("fixture Cargo resolution reason", (summary_path.parent / summary["preflight_error"]["stderr_log"]).read_text())
+            self.assertIn("Cargo.toml", (summary_path.parent / summary["preflight_error"]["stderr_log"]).read_text())
+
+    def test_real_guard_still_refuses_compilation_below_reserved_space(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(compat.shutil, "disk_usage") as usage, patch.object(compat.subprocess, "run") as launch:
+                usage.return_value.free = 19 * 1024**3
+                with self.assertRaisesRegex(ValueError, "20 GiB"):
+                    compat.execute([("must-not-build", ["cargo"])], root / "evidence", {}, root)
+                launch.assert_not_called()
+            summary = json.loads((root / "evidence/summary.json").read_bytes())
+            self.assertEqual(summary["status"], "interrupted")
+            self.assertEqual(summary["failure_type"], "ValueError")

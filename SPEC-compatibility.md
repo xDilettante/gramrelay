@@ -84,7 +84,8 @@ Installed stable alias was only 1.98.0; official rustup check identified current
 stable 1.100.0 (2026-11-12), now installed separately without changing the
 user's default toolchain. Its complete 28-stage Windows runner passed the same
 counts (target/compat-1.100.0-evidence/run-k59txsmg/summary.json).
-Native Linux/macOS cells remain unverified; full
+Linux MSRV runtime acceptance is recorded below; Linux current-stable/tooling
+and both macOS cells remain unverified. Full
 Q3/Q1/Q2/Q4 remain open.
 
 Runner review findings have RED-to-GREEN coverage: Cargo's implicit feature
@@ -107,3 +108,20 @@ replace std's atomic loop. General -D warnings remains enabled. The initial
 Clippy RED and probe output are preserved; final Clippy and an actual 1.89 crate
 check pass. Existing auth epoch-exhaustion runtime coverage passes again on 1.100.
 This changes no epoch/ordering/overflow behavior.
+
+Linux x86_64 / Rust 1.89.0 passed all 28 native Rust stages from the private
+ff7bfca20752e5dcdfe194cb067663ab2bc4180f source candidate: default395/all681/doc16
+and 25 production configurations. All 649 source files were compared against
+the validated ZIP manifest after completion and matched. Evidence was copied
+to target/compat-linux-1.89.0-evidence/run-megtrgr6, including source-bundle.json
+with commit/archive identity and computed counts. Cargo clean removed the
+terminal 8.1 GiB dev cache; the original extracted source remains unchanged.
+
+The separate first Linux Python run exposed four harness errors: three tiny
+fake executor tests applied the real 20 GiB build reserve to /tmp's smaller
+tmpfs; another globally mocked subprocess.check_output and intercepted Unix
+platform.platform() before rustc. Scope the guard mock to fake executor tests,
+add a real fail-closed low-space test, and use genuinely malformed Cargo
+manifests for the diagnostic fixture. Production guard and all Rust sources
+are unchanged. Windows41 and the six focused Linux tests pass; the complete
+Linux tool suite must be rechecked in the newly exported candidate.
