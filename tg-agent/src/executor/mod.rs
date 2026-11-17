@@ -4,6 +4,7 @@
 //! the executor must recheck the current grant when admitting and disclosing work.
 
 pub(crate) mod callback_clock;
+pub(crate) mod file_store;
 mod policy;
 #[cfg(feature = "mtproto")]
 pub(crate) use policy::PolicyTime;
