@@ -91,7 +91,7 @@ pub(super) fn check_stored(session: &Session, expected: AccountIdentity) -> Resu
     Ok(())
 }
 
-fn checked_peer(user: tl::enums::User, expected: AccountIdentity) -> Result<PeerInfo> {
+pub(super) fn checked_peer(user: tl::enums::User, expected: AccountIdentity) -> Result<PeerInfo> {
     let mismatch = || error(ClientErrorKind::IdentityMismatch, Outcome::Unknown);
     let tl::enums::User::User(user) = user else {
         return Err(mismatch());

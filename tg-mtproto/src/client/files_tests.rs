@@ -1,5 +1,7 @@
 use super::*;
 use crate::SendDocument;
+#[path = "download_tests.rs"]
+mod download;
 
 #[test]
 fn document_names_mime_captions_and_ids_reject_invalid_input_without_io() {

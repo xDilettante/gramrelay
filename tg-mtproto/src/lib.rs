@@ -5,8 +5,9 @@ pub use client::auth;
 pub use client::{
     Account, AppCredentials, BotToken, Client, ClientError, ClientErrorKind, ClientOptions, Dialog,
     DialogContinuation, DialogCursor, DialogFolder, DialogId, DialogPage, DialogPageIssue,
-    DocumentReceipt, HistoryCursor, HistoryMessage, HistoryMessageKind, HistoryPage,
-    MessageReceipt, Outcome, Peer, PeerId, PeerKind, SendDocument, SendText,
+    DocumentReceipt, DownloadOptions, DownloadReceipt, DownloadedDocument, HistoryCursor,
+    HistoryMessage, HistoryMessageKind, HistoryPage, MessageReceipt, Outcome, Peer, PeerId,
+    PeerKind, RemoteDocument, SendDocument, SendText,
 };
 pub use grammers_tl_types as tl;
 pub use session::{

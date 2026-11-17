@@ -5,8 +5,8 @@ storage and the owned network Client with typed raw TL calls are implemented.
 Bot/user login, 2FA, confirmed login migration, live identity verification,
 opaque peer lookup/cache references, text send/edit, bounded paginated history
 and Main/Archive dialogs are available. Document upload/sending from owned bytes
-or protected host files is implemented. Downloads and observable update recovery
-remain open.
+or protected host files is implemented. Document downloads support verified DC
+authorization and protected destinations. Observable update recovery remains open.
 This package does not route MTProto operations through the Bot API.
 
 ```rust,no_run
@@ -212,8 +212,59 @@ owned and can still result in a message; never replay an Unknown result.
 Receipts expose message metadata, size and an explicit SHA-256 accessor. Debug
 and static errors exclude content, paths and incidental metadata. Protected
 paths are trusted host input; OS I/O itself can block and joined close awaits
-owned reads. No agent tool accepts such a path. Downloads remain open in M2;
-see SPEC-mtproto-files.md.
+owned reads. No agent tool accepts such a path; see SPEC-mtproto-files.md.
+
+Download a document from an exact peer/message, without exposing reusable file keys:
+
+```rust,no_run
+use tg_mtproto::{Account, ClientError, DownloadOptions, DownloadReceipt, Peer};
+
+async fn save_document(
+    account: &Account,
+    peer: &Peer,
+    message_id: i32,
+    new_protected_absolute_path: &std::path::Path,
+    expected_sha256: [u8; 32],
+) -> Result<Option<DownloadReceipt>, ClientError> {
+    let Some(document) = account.document(peer, message_id).await? else {
+        return Ok(None);
+    };
+    let options = DownloadOptions::default()
+        .max_bytes(64 * 1024 * 1024)
+        .parallelism(4)
+        .expected_sha256(expected_sha256);
+    account.download_document_to(&document, new_protected_absolute_path, options)
+        .await.map(Some)
+}
+```
+
+`RemoteDocument` is bound to the originating client, account and authorization
+epoch. Its filename/MIME are untrusted display metadata, never output paths.
+An expired reference returns `FileReferenceExpired`; explicitly look up the
+message again and inspect the new document before starting a new action.
+`download_document` returns a zeroizing buffer (at most 64 MiB); `into_bytes`
+transfers wiping responsibility to the caller. File output supports up to
+4 GiB with host options, using one absolute deadline and at most eight part
+calls. Defaults are 64 MiB/four calls. Parts are consumed in order; exact sizes
+and optional SHA-256 are checked before the result becomes available. An
+aligned size needs an extra empty EOF probe; unexpected extra/short data fails.
+
+File output uses a temporary in the same protected directory and no-clobber
+publication; an existing entry, including one created during the transfer,
+is never replaced. Failed validation leaves no final file. Native I/O remains
+owned after caller cancellation; a deadline during OS publication can return
+Unknown while leaving a complete validated destination. Inspect the destination
+instead of blindly repeating. Process termination can leave a temporary file;
+power-loss durability of the directory is not promised. Protected directory
+selection and OS access control belong to the trusted host.
+
+A separate DC is checked against the live expected self. Only exact
+AUTH_KEY_UNREGISTERED allows serialized export/import; uncertain import fences
+the client before waiters resume. One confirmed FILE_MIGRATE may redirect the
+download without changing the home DC. Flood/5xx/ambiguous outcomes are never
+automatically retried; unexpected CDN replies are explicit unsupported errors.
+No update state is acknowledged by source lookup/download. See
+SPEC-mtproto-download.md.
 
 For a user account, the trusted host supplies UI callbacks and an independent
 expected ID. `NewAccount` is an explicit alternative for first login; it refuses

@@ -8,8 +8,9 @@ use crate::{Session, session::ClientClaim};
 pub use auth::{AppCredentials, BotToken};
 pub use common::{
     Account, Dialog, DialogContinuation, DialogCursor, DialogFolder, DialogId, DialogPage,
-    DialogPageIssue, DocumentReceipt, HistoryCursor, HistoryMessage, HistoryMessageKind,
-    HistoryPage, MessageReceipt, Peer, PeerId, PeerKind, SendDocument, SendText,
+    DialogPageIssue, DocumentReceipt, DownloadOptions, DownloadReceipt, DownloadedDocument,
+    HistoryCursor, HistoryMessage, HistoryMessageKind, HistoryPage, MessageReceipt, Peer, PeerId,
+    PeerKind, RemoteDocument, SendDocument, SendText,
 };
 pub use error::{ClientError, ClientErrorKind, Outcome};
 use error::{Result, error};
@@ -39,6 +40,8 @@ pub struct ClientOptions {
     before_accept: Option<Duration>,
     #[cfg(test)]
     before_compute: Option<Duration>,
+    #[cfg(test)]
+    before_dc_confirm: Option<Duration>,
     max_pending: usize,
     timeout: Duration,
     max_request_bytes: usize,
@@ -55,6 +58,8 @@ impl Default for ClientOptions {
             before_accept: None,
             #[cfg(test)]
             before_compute: None,
+            #[cfg(test)]
+            before_dc_confirm: None,
             max_pending: 16,
             timeout: Duration::from_secs(30),
             max_request_bytes: grammers_mtproto::MAX_REQUEST_SIZE.min(1024 * 1024),
@@ -118,6 +123,7 @@ struct Shared {
 struct Core {
     session: Session,
     authorization: Arc<tokio::sync::RwLock<()>>,
+    dc_authorization: Arc<tokio::sync::Mutex<()>>,
     auth_epoch: Arc<AtomicU64>,
     options: ClientOptions,
     startup: Mutex<Option<Startup>>,
@@ -219,6 +225,7 @@ impl Client {
             inner: Arc::new(Core {
                 session,
                 authorization: Arc::new(tokio::sync::RwLock::new(())),
+                dc_authorization: Arc::new(tokio::sync::Mutex::new(())),
                 auth_epoch: Arc::new(AtomicU64::new(0)),
                 slots: Arc::new(Semaphore::new(options.max_pending)),
                 options,

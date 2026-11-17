@@ -16,6 +16,8 @@ pub(super) struct Context {
     blocking: Arc<tokio::sync::Mutex<JoinSet<()>>>,
     #[cfg(test)]
     before_compute: Option<Duration>,
+    #[cfg(test)]
+    before_dc_confirm: Option<Duration>,
 }
 impl Context {
     pub async fn invoke_auth<R: tl::RemoteCall>(&self, body: &[u8]) -> Result<R::Return>
@@ -133,16 +135,88 @@ impl Context {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(guard);
     }
     pub async fn invoke<R: tl::RemoteCall>(&self, body: Vec<u8>) -> Result<R::Return> {
-        self.invoke_inner::<R>(body, false).await
+        self.invoke_inner::<R>(body, false, None).await
+    }
+    pub fn home_dc(&self) -> Result<i32> {
+        self.handle
+            .session
+            .home_dc_id()
+            .map_err(|_| error(ClientErrorKind::Session, self.state.seal()))
+    }
+    pub async fn invoke_in_dc<R: tl::RemoteCall>(
+        &self,
+        dc: i32,
+        body: Vec<u8>,
+    ) -> Result<R::Return> {
+        self.invoke_inner::<R>(body, false, Some(dc)).await
+    }
+    pub fn begin_dc_authorization(&self, guard: tokio::sync::OwnedMutexGuard<()>) -> Result<()> {
+        self.check_active()?;
+        let mut held = self
+            .state
+            .dc_guard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if held.is_some() {
+            return Err(error(ClientErrorKind::Backend, self.state.seal()));
+        }
+        *held = Some(guard);
+        self.state.dc_pending.store(true, Ordering::Release);
+        Ok(())
+    }
+    pub fn confirm_dc_authorization(&self) -> Result<()> {
+        let guard = {
+            let completion = self
+                .state
+                .completion
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *completion != Completion::Pending {
+                return Err(error(ClientErrorKind::Closed, self.state.seal()));
+            }
+            self.check_active()?;
+            self.session
+                .live()
+                .map_err(|_| error(ClientErrorKind::Session, self.state.seal()))?;
+            #[cfg(test)]
+            if let Some(delay) = self.before_dc_confirm {
+                std::thread::sleep(delay);
+            }
+            let mut held = self
+                .state
+                .dc_guard
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if held.is_none() {
+                return Err(error(ClientErrorKind::Backend, self.state.seal()));
+            }
+            // Session/guard reads above may block. These must be the final
+            // nonblocking checks before publication and waking DC waiters.
+            if tokio::time::Instant::now() >= self.deadline {
+                return Err(error(ClientErrorKind::Timeout, self.state.seal()));
+            }
+            if self.shared.closed.load(Ordering::Acquire) {
+                return Err(error(ClientErrorKind::Closed, self.state.seal()));
+            }
+            let guard = held
+                .take()
+                .ok_or_else(|| error(ClientErrorKind::Backend, self.state.seal()))?;
+            self.state.dc_pending.store(false, Ordering::Release);
+            guard
+        };
+        // No waiter is woken under the completion mutex.
+        drop(guard);
+        Ok(())
     }
     pub async fn invoke_logout(&self, body: Vec<u8>) -> Result<tl::enums::auth::LoggedOut> {
-        self.invoke_inner::<tl::functions::auth::LogOut>(body, true)
+        self.invoke_inner::<tl::functions::auth::LogOut>(body, true, None)
             .await
     }
     async fn invoke_inner<R: tl::RemoteCall>(
         &self,
         body: Vec<u8>,
         allow_quarantine: bool,
+        target_dc: Option<i32>,
     ) -> Result<R::Return> {
         let mut body = Zeroizing::new(body);
         if self
@@ -153,11 +227,20 @@ impl Context {
         {
             return Err(error(ClientErrorKind::Quarantined, self.state.seal()));
         }
-        let dc = self
-            .handle
-            .session
-            .home_dc_id()
-            .map_err(|_| error(ClientErrorKind::Session, Outcome::NotSent))?;
+        let dc = match target_dc {
+            Some(dc) => {
+                if dc <= 0
+                    || !self
+                        .session
+                        .has_datacenter(dc)
+                        .map_err(|_| error(ClientErrorKind::Session, self.state.seal()))?
+                {
+                    return Err(error(ClientErrorKind::InvalidInput, Outcome::NotSent));
+                }
+                dc
+            }
+            None => self.home_dc()?,
+        };
         if tokio::time::Instant::now() >= self.deadline {
             return Err(error(ClientErrorKind::Timeout, self.state.seal()));
         }
@@ -222,6 +305,8 @@ struct CallState {
     logout_confirmed: AtomicBool,
     completion: Mutex<Completion>,
     migration_used: AtomicBool,
+    dc_pending: AtomicBool,
+    dc_guard: Mutex<Option<tokio::sync::OwnedMutexGuard<()>>>,
 }
 impl CallState {
     fn is_pending(&self) -> bool {
@@ -244,13 +329,14 @@ impl CallState {
         Some(self.seal())
     }
     fn authorization_transition(&self) -> bool {
-        matches!(
-            self.authorization
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .as_ref(),
-            Some(AuthorizationGuard::Write { .. })
-        )
+        self.dc_pending.load(Ordering::Acquire)
+            || matches!(
+                self.authorization
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .as_ref(),
+                Some(AuthorizationGuard::Write { .. })
+            )
     }
     fn release_authorization(&self) {
         let guard = self
@@ -259,6 +345,12 @@ impl CallState {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
         drop(guard);
+        let dc_guard = self
+            .dc_guard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        drop(dc_guard);
     }
     fn seal(&self) -> Outcome {
         match self
@@ -424,7 +516,7 @@ pub(super) async fn run(
                 let slot=Arc::new(Mutex::new(Some(call.permit)));
                 let state=Arc::new(CallState::default());
                 active.insert(id,Pending {reply:reply.clone(),_slot:slot.clone(),deadline:call.deadline,state:state.clone()});
-                let context=Context {handle:handle.clone(),session:startup.claim.session(),max_response_bytes:options.max_response_bytes,state:state.clone(),shared:shared.clone(),deadline:call.deadline,blocking:blocking.clone(),#[cfg(test)]before_compute:options.before_compute};
+                let context=Context {handle:handle.clone(),session:startup.claim.session(),max_response_bytes:options.max_response_bytes,state:state.clone(),shared:shared.clone(),deadline:call.deadline,blocking:blocking.clone(),#[cfg(test)]before_compute:options.before_compute,#[cfg(test)]before_dc_confirm:options.before_dc_confirm};
                 let shared=shared.clone();
                 let session_health=context.handle.session.clone();
                 #[cfg(test)]

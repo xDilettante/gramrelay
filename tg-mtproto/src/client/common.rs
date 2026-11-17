@@ -21,7 +21,10 @@ mod history;
 pub use dialogs::{
     Dialog, DialogContinuation, DialogCursor, DialogFolder, DialogId, DialogPage, DialogPageIssue,
 };
-pub use files::{DocumentReceipt, SendDocument};
+pub use files::{
+    DocumentReceipt, DownloadOptions, DownloadReceipt, DownloadedDocument, RemoteDocument,
+    SendDocument,
+};
 mod text;
 pub use history::{HistoryCursor, HistoryMessage, HistoryMessageKind, HistoryPage};
 pub use text::{MessageReceipt, SendText};

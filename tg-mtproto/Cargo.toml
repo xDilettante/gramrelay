@@ -22,11 +22,11 @@ serde_json = "1"
 serde_ignored = "0.1.14"
 tokio = { version = "1", features = ["rt", "sync", "time"] }
 zeroize = "1"
+tempfile = "3"
 md-5 = { version = "=0.11.0", default-features = false, features = ["zeroize"] }
 
 [dev-dependencies]
 grammers-mtsender = { version = "=0.12.0", default-features = false, features = ["tg-test-kit"] }
-tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 
 [lints.rust]

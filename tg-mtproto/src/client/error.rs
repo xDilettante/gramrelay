@@ -11,6 +11,8 @@ pub(super) enum RpcClass {
     CodeExpired,
     PasswordInvalid,
     SrpExpired,
+    Unregistered,
+    FileMigrate(i32),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -47,6 +49,7 @@ pub enum ClientErrorKind {
     UnsupportedOperation,
     File,
     Integrity,
+    FileReferenceExpired,
 }
 
 /// Static diagnostic metadata. No upstream error or remote description is retained.
@@ -99,6 +102,7 @@ impl ClientError {
             ClientErrorKind::UnsupportedOperation => "mtproto_unsupported_operation",
             ClientErrorKind::File => "mtproto_file",
             ClientErrorKind::Integrity => "mtproto_integrity",
+            ClientErrorKind::FileReferenceExpired => "mtproto_file_reference_expired",
         }
     }
 }
@@ -139,6 +143,14 @@ pub(super) fn invocation(failure: InvocationError) -> ClientError {
                     .and_then(|value| i32::try_from(value).ok())
                     .filter(|value| *value > 0)
                     .map_or(RpcClass::Other, RpcClass::Migrate)
+            } else if rpc.code == 303 && rpc.name == "FILE_MIGRATE" {
+                rpc.value
+                    .and_then(|value| i32::try_from(value).ok())
+                    .filter(|dc| *dc > 0)
+                    .map_or(RpcClass::Other, RpcClass::FileMigrate)
+            } else if rpc.code == 401 && rpc.name == "AUTH_KEY_UNREGISTERED" && rpc.value.is_none()
+            {
+                RpcClass::Unregistered
             } else if matches!(rpc.code, 400 | 401) {
                 match rpc.name.as_str() {
                     "SESSION_PASSWORD_NEEDED" => RpcClass::PasswordNeeded,
@@ -152,7 +164,12 @@ pub(super) fn invocation(failure: InvocationError) -> ClientError {
                 RpcClass::Other
             };
             let result = ClientError {
-                kind: if flood {
+                kind: if rpc.code == 400
+                    && rpc.name == "FILE_REFERENCE_EXPIRED"
+                    && rpc.value.is_none()
+                {
+                    ClientErrorKind::FileReferenceExpired
+                } else if flood {
                     ClientErrorKind::FloodWait
                 } else {
                     match class {

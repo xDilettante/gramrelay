@@ -1,5 +1,8 @@
+mod datacenter;
+mod download;
 mod source;
 use super::*;
+pub use download::{DownloadOptions, DownloadReceipt, DownloadedDocument, RemoteDocument};
 use futures_util::{StreamExt, stream::FuturesUnordered};
 use source::{Prepared, Source};
 use std::path::PathBuf;

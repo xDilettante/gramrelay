@@ -1,6 +1,8 @@
 use super::*;
 use crate::{AccountId, AccountIdentity, AccountKind, PeerId, SendText};
 use std::sync::atomic::AtomicUsize;
+#[path = "datacenter_tests.rs"]
+mod datacenter;
 #[path = "dialogs_tests.rs"]
 mod dialogs;
 #[path = "files_tests.rs"]
