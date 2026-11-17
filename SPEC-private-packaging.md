@@ -102,3 +102,35 @@ All eight normalized archives and the independent registry consumer satisfy the
 checks above. Record exact source identity, versions, checksums, graph and runtime
 results. Main source graph/lock and SDK verifiers remain unchanged. Both macOS
 cells and Q1/Q2/Q4 remain separate mandatory gates; full goal stays active.
+
+## Recorded acceptance
+
+Windows x86_64 MSVC / Rust 1.100.0 completed the full rehearsal from
+b08bc736110fb9a5f548e81f0ffb9c9b15cbe022, source ZIP SHA256
+ddd94ce13a1899b4c10e0684cb38e9aca0ca46887b78c208b94d9cf6b0323b64.
+Evidence: target/private-packages/b08bc736110f-apn4__m9/evidence/summary.json;
+19 commands, all exit0, eight verified normalized archives/private registry
+nodes, complete staging/registry target models equal, independent lock278
+without chrono. Consumer lock SHA256:
+2b714952d936fd0386fd8b793875c3a7078b1599f4b46fecb883ad6b7912f181.
+Bot message/callback/upload/Unknown, MCP discovery and MT real-TL/joined close
+actually executed from registry copies. Root337 and consumer278 local-DB audits
+are clean; pinned SDK source verification separately preserves their base-code
+provenance rather than treating a private package identity as advisory coverage.
+
+All 52 Python tests pass. Two pure-unit/runner review cycles and a third scoped
+runner re-review are clear after canonical ordering, complete target models,
+ancestor config/workspace isolation and failure-evidence fixes; cross-model
+skipped autonomous. A separate narrow cleanup/target-separation review is also
+clear. Actual eight-package execution exposed Cargo's reserved
+Cargo.toml.orig, omitted ignore files and Windows read-only Git cleanup; each
+has retained failure evidence and passing regression/actual acceptance.
+The final run's Cargo clean removed 1.3 GiB, and its scratch no longer exists.
+Runtime targets are separate from package-only output to preserve Cargo tagging.
+
+An older completed run cd0f531448d8-i8zam5fe passed runtime but failed scratch
+cleanup; its receipt remains failed. Deleting its untagged build directory via
+verified PowerShell paths was rejected by automatic policy review (blocked by
+policy); no alternate deletion was attempted. Its build and partial scratch are
+retained, and the latest total target is 2.53 GiB with 427.17 GiB free.
+This does not block the new successful rehearsal or erase the older failure.

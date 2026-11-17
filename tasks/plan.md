@@ -19,7 +19,9 @@ unchanged. Q3's chrono remediation, inherited hardened dependency graph and loca
 source-candidate acceptance are complete. Windows MSRV1.89/current1.100 runtime
 and feature matrices pass; Linux x86_64 GNU repeats both compiler matrices,
 stable lint and relocated source consumer acceptance. Both macOS cells remain.
-Continue all Q1–Q4 documentation, evaluation, measurement, platform/packaging and security
+Local normalized private-package preparation is also accepted on Windows1.100:
+eight exact private registry nodes, offline independent runtime, models and lock.
+Continue all Q1–Q4 documentation, evaluation, measurement, platform and security
 acceptance. The user chose to keep original code closed; record private licensing
 separately, preserving third-party licenses and publish=false. This does not
 remove or weaken any remaining completion gate.
