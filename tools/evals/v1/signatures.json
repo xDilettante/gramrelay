@@ -1,0 +1,15 @@
+{
+  "T01": "pub async fn solve(bot: &tg::Bot, chat: tg::ChatId, text: &str) -> tg::Result<tg::MessageId>",
+  "T02": "pub async fn solve(bot: &tg::Bot, chat: tg::ChatId, parent: tg::MessageId, text: &str) -> tg::Result<tg::MessageId>",
+  "T03": "pub async fn solve(bot: &tg::Bot, chat: tg::ChatId, text: &str, label: &str, data: &str) -> tg::Result<tg::MessageId>",
+  "T04": "pub async fn solve(bot: &tg::Bot, id: tg::CallbackQueryId, notification: &str) -> tg::Result<bool>",
+  "T05": "pub async fn solve(bot: &tg::Bot, chat: tg::ChatId, name: String, bytes: Vec<u8>) -> tg::Result<tg::MessageId>",
+  "T06": "pub async fn solve(bot: &tg::Bot, chat: tg::ChatId, file: tg::FileId) -> tg::Result<tg::MessageId>",
+  "T07": "pub async fn solve(bot: &tg::Bot, chat: tg::ChatId, message: tg::MessageId, text: &str) -> tg::Result<tg::api::types::EditMessageTextResult>",
+  "T08": "pub async fn solve(bot: &tg::Bot) -> tg::Result<tg::User>",
+  "T09": "pub fn solve(bot: &tg::Bot, chat: tg::ChatId, text: &str)",
+  "T10": "pub async fn solve(bot: &tg::Bot, chat: tg::ChatId, text: &str) -> Result<tg::MessageId, tg::EffectOutcome>",
+  "T11": "pub fn solve(text: &str, range: std::ops::Range<usize>) -> tg::Result<tg::RichText>",
+  "T12": "pub fn solve(input: &str, key: &str) -> serde_json::Result<(Option<serde_json::Value>, serde_json::Value)>",
+  "T15": "pub async fn solve(bot: &tg::Bot, chat: tg::ChatId, name: String, reader: impl tokio::io::AsyncRead + Send + 'static, length: u64) -> tg::Result<tg::MessageId>"
+}

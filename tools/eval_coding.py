@@ -1,0 +1,275 @@
+"""Compile and execute reviewed Rust answers against isolated per-task fixtures."""
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import tomllib
+
+import check_compat
+import check_external
+import source_bundle
+
+
+ROOT = check_compat.ROOT
+EVALS = Path("tools/evals/v1")
+DOCS = ("docs/AGENT-INDEX.md", "docs/RECIPES.md", "docs/START.md")
+AREA_DOCS = {
+    "agent": ("docs/AGENT-CLI.md", "docs/AGENT-MCP.md"),
+    "mtproto": ("docs/AGENT-MTPROTO.md",),
+}
+MAX_ANSWER = 64 * 1024
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def read(path, limit=MAX_ANSWER):
+    return source_bundle.read_bounded(path, limit)
+
+
+def inventory(root):
+    suite = json.loads(read(root / EVALS / "tasks.json"))
+    tasks = {task["id"]: task for task in suite["tasks"]}
+    if (suite["schema_version"] != 1 or len(suite["tasks"]) != 30
+            or list(tasks) != [f"T{i:02d}" for i in range(1, 31)]):
+        raise ValueError("expected the ordered 30-task v1 corpus")
+    signatures = json.loads(read(root / EVALS / "signatures.json"))
+    if not signatures.keys() <= tasks.keys():
+        raise ValueError("signature for unknown task")
+    paths = [root / EVALS / folder for folder in ("checks", "reference")]
+    for directory in paths:
+        if {path.stem for path in directory.glob("*.rs")} != signatures.keys():
+            raise ValueError(f"missing or unexpected case files in {directory.name}")
+    return suite, tasks, signatures
+
+
+def packet(root, suite, task, signature):
+    names = DOCS + AREA_DOCS.get(task["area"], ())
+    pieces = [
+        "# " + task["id"] + " " + task["title"],
+        task["prompt"],
+        "Верните один Rust-модуль с функцией указанной сигнатуры. "
+        "Используйте только этот пакет документации. Ответ проверяется с "
+        "синтетическими данными и предоставленными аргументами. "
+        "Файлы, окружение и сеть доступны только через явно заданные в задании интерфейсы.",
+        "```rust\n" + signature + "\n```",
+    ]
+    for name in names:
+        pieces.append("## " + name + "\n\n" + read(root / name).decode("utf-8"))
+    document = ("\n\n".join(pieces) + "\n").encode("utf-8")
+    if len(document) > suite["controlled_context_max_utf8_bytes"]:
+        raise ValueError("documentation packet exceeds context byte budget")
+    return document
+
+
+def locked_packages(lock):
+    return {(p["name"], p["version"], p["source"], p["checksum"])
+            for p in tomllib.loads(lock.decode("utf-8"))["package"] if "source" in p}
+
+
+def record(path, value):
+    temporary = path.with_suffix(".pending")
+    temporary.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def executable(log, target, name):
+    artifacts = []
+    for line in read(log, 16 * 1024**2).decode("utf-8").splitlines():
+        event = json.loads(line)
+        if (event["reason"] == "compiler-artifact" and event["target"]["kind"] == ["test"]
+                and event["target"]["name"] == name and event["executable"]):
+            artifacts.append(Path(event["executable"]).resolve())
+    if len(artifacts) != 1 or not artifacts[0].is_relative_to(target) or not artifacts[0].is_file():
+        raise ValueError("Cargo did not report the expected test executable")
+    return artifacts[0]
+
+
+def stage(root, crate, ids):
+    (crate / "src").mkdir(parents=True)
+    (crate / "src/lib.rs").write_text("", encoding="utf-8")
+    (crate / "tests").mkdir()
+    manifest = check_external.manifest(root, test_kit=True)
+    manifest = manifest.replace('name = "telegram-external-consumer"', 'name = "telegram-eval-coding"')
+    manifest += '\ntokio-util = { version = "0.7", features = ["rt"] }\n'
+    (crate / "Cargo.toml").write_text(manifest, encoding="utf-8")
+    for task_id in ids:
+        case = crate / "tests" / task_id.lower()
+        case.mkdir()
+        (case / "main.rs").write_text(
+            "#![forbid(unsafe_code)]\nmod fixture;\nmod solution;\ninclude!(\"check.rs\");\n", encoding="utf-8")
+        shutil.copyfile(root / EVALS / "fixture.rs", case / "fixture.rs")
+        shutil.copyfile(root / EVALS / "checks" / (task_id + ".rs"), case / "check.rs")
+
+
+def run(args):
+    check_compat.guard(ROOT)
+    archive, sidecar = source_bundle.build(ROOT, ROOT / "target/dist")
+    source_info, files = source_bundle.verify_bundle(read(archive, source_bundle.MAX_ARCHIVE),
+                                                     read(sidecar, source_bundle.MAX_MANIFEST))
+    target = ROOT / "target" / f"eval-coding-{args.toolchain}"
+    parent = ROOT / "target/eval-coding-evidence"
+    parent.mkdir(parents=True, exist_ok=True)
+    evidence = Path(tempfile.mkdtemp(prefix="run-", dir=parent))
+    scratch_parent = Path(tempfile.gettempdir()).resolve()
+    scratch = Path(tempfile.mkdtemp(prefix="tg-coding-eval-", dir=scratch_parent)).resolve()
+    print(f"evidence {evidence}", flush=True)
+    summary = {
+        "status": "preflight", "mode": "reference" if args.reference else args.attempt,
+        "model": args.model, "toolchain": args.toolchain,
+        "source_commit": source_info["commit"], "archive_sha256": source_info["archive_sha256"],
+        "started_utc": datetime.now(timezone.utc).isoformat(), "cases": [],
+    }
+    receipt = evidence / "summary.json"
+    retain = False
+    cargo = ["cargo", "+" + args.toolchain]
+    env = os.environ | {"RUSTUP_AUTO_INSTALL": "0", "CARGO_INCREMENTAL": "0",
+                       "CARGO_BUILD_JOBS": "3", "CARGO_PROFILE_DEV_DEBUG": "line-tables-only",
+                       "CARGO_PROFILE_TEST_DEBUG": "line-tables-only"}
+
+    def command(argv, name, cwd, timeout=900, runtime=False):
+        # The fixture needs OS/temp discovery, but no service or Cargo credentials.
+        allowed = {"PATH", "SYSTEMROOT", "WINDIR", "TMP", "TEMP", "TMPDIR", "USERPROFILE", "HOME"}
+        process_env = {k: v for k, v in env.items() if k.upper() in allowed} if runtime else env
+        with (evidence / (name + ".stdout")).open("xb") as stdout, (evidence / (name + ".stderr")).open("xb") as stderr:
+            return subprocess.run(argv, cwd=cwd, env=process_env, stdin=subprocess.DEVNULL,
+                                  stdout=stdout, stderr=stderr, timeout=timeout, check=False).returncode
+
+    record(receipt, summary)
+    try:
+        source = scratch / "source"
+        source_bundle.materialize(files, source)
+        suite, tasks, signatures = inventory(source)
+        ids = args.task or list(signatures)
+        if len(set(ids)) != len(ids) or not ids or any(task_id not in signatures for task_id in ids):
+            raise ValueError("select distinct implemented cases")
+        if not args.reference and args.attempt != "pilot" and suite["status"] != "frozen":
+            raise ValueError("scoring requires the frozen corpus and all 30 executable cases")
+        if suite["status"] == "frozen" and len(signatures) != 30:
+            raise ValueError("frozen corpus requires 30 cases")
+        if not args.reference and args.attempt == "first" and len(ids) != 30:
+            raise ValueError("a first-check run requires all 30 tasks")
+        answers = source / EVALS / "reference" if args.reference else args.submissions
+        summary.update(corpus_sha256=digest(read(source / EVALS / "tasks.json")),
+                       suite=suite["suite"], context_max_utf8_bytes=suite["controlled_context_max_utf8_bytes"],
+                       selected=ids, denominator=30, frozen=suite["status"] == "frozen")
+        if command(["rustup", "run", args.toolchain, "rustc", "-Vv"], "rustc", scratch):
+            raise ValueError("installed compiler unavailable")
+        summary["rustc"] = read(evidence / "rustc.stdout").decode().strip()
+        crate = scratch / "consumer"
+        stage(source, crate, ids)
+        seed = read(source / "Cargo.lock", 512 * 1024)
+        (crate / "Cargo.lock").write_bytes(seed)
+        # Cargo retains locked versions while adding the independent consumer.
+        graph_cmd = [*cargo, "metadata", "--offline", "--format-version", "1"]
+        if command(graph_cmd, "metadata", crate):
+            raise ValueError("offline fixture dependencies unavailable")
+        graph = json.loads(read(evidence / "metadata.stdout", 16 * 1024**2))
+        check_external.check_graph(graph, source)
+        lock = read(crate / "Cargo.lock", 512 * 1024)
+        if not locked_packages(lock) <= locked_packages(seed):
+            raise ValueError("fixture resolved a dependency outside the source lock")
+        (evidence / "Cargo.lock").write_bytes(lock)
+        summary.update(status="running", lock_sha256=digest(lock), resolve_command=graph_cmd)
+        for task_id in ids:
+            check_compat.guard(ROOT)
+            name = task_id.lower()
+            context = packet(source, suite, tasks[task_id], signatures[task_id])
+            (evidence / f"{task_id}.packet.md").write_bytes(context)
+            item = {"id": task_id, "packet_sha256": digest(context), "packet_bytes": len(context)}
+            summary["cases"].append(item)
+            try:
+                answer = read(answers / f"{task_id}.rs")
+            except FileNotFoundError:
+                item.update(status="missing")
+                record(receipt, summary)
+                continue
+            (evidence / f"{task_id}.answer.rs").write_bytes(answer)
+            (crate / "tests" / name / "solution.rs").write_bytes(answer)
+            build = [*cargo, "test", "--locked", "--offline", "--no-run",
+                     "--message-format=json-render-diagnostics", "--test", name, "--target-dir", str(target)]
+            item.update(status="building", answer_sha256=digest(answer), build=build, build_exit=None)
+            record(receipt, summary)
+            print(task_id, flush=True)
+            code = command(build, name + "-build", crate)
+            item["build_exit"] = code
+            if code:
+                item.update(status="build-failed")
+            else:
+                test = [str(executable(evidence / (name + "-build.stdout"), target, name)),
+                        "--test-threads=1"]
+                item.update(status="testing", test=test, test_exit=None)
+                record(receipt, summary)
+                try:
+                    result = command(test, name + "-test", crate, timeout=30, runtime=True)
+                    item.update(test_exit=result, status="passed" if result == 0 else "test-failed")
+                except subprocess.TimeoutExpired:
+                    # Only reviewed answers are executed here. They may not spawn child processes.
+                    item["status"] = "test-timeout"
+            record(receipt, summary)
+        check_compat.guard(ROOT)
+        count = sum(item["status"] == "passed" for item in summary["cases"])
+        summary.update(status="finished", passed=count)
+        print(f"{summary['mode']}: {count}/{len(ids)} selected cases", flush=True)
+        return 0 if count == len(ids) else 1
+    except BaseException as error:
+        retain = isinstance(error, (subprocess.TimeoutExpired, KeyboardInterrupt))
+        summary.update(status="failed", error_type=type(error).__name__)
+        if retain:
+            summary["retained_scratch"] = str(scratch)
+        raise
+    finally:
+        summary["finished_utc"] = datetime.now(timezone.utc).isoformat()
+        if not retain:
+            try:
+                if scratch.resolve().parent != scratch_parent or scratch.is_symlink():
+                    raise OSError("temporary evaluation path changed")
+                shutil.rmtree(scratch)
+            except OSError as error:
+                summary.update(status="failed", cleanup_error=type(error).__name__, retained_scratch=str(scratch))
+                raise
+            finally:
+                record(receipt, summary)
+        else:
+            record(receipt, summary)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    create_packet = commands.add_parser("packet")
+    create_packet.add_argument("id")
+    evaluate = commands.add_parser("run")
+    source = evaluate.add_mutually_exclusive_group(required=True)
+    source.add_argument("--reference", action="store_true")
+    source.add_argument("--submissions", type=Path)
+    evaluate.add_argument("--model")
+    evaluate.add_argument("--attempt", choices=("first", "repair", "pilot"), default="first")
+    evaluate.add_argument("--toolchain", required=True)
+    evaluate.add_argument("--task", action="append")
+    args = parser.parse_args()
+    try:
+        if args.command == "packet":
+            suite, tasks, signatures = inventory(ROOT)
+            sys.stdout.buffer.write(packet(ROOT, suite, tasks[args.id], signatures[args.id]))
+            return 0
+        if not re.fullmatch(r"stable|[0-9]+\.[0-9]+\.[0-9]+", args.toolchain):
+            raise ValueError("toolchain must be stable or a release version")
+        if args.submissions is not None and not (args.model and args.model.strip()):
+            raise ValueError("provide the exposed model identity for submissions")
+        return run(args)
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        print(f"coding evaluation failed: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
