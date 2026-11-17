@@ -3,7 +3,10 @@
 //! The policy layer is local and performs no I/O. It is not an execution permit:
 //! the executor must recheck the current grant when admitting and disclosing work.
 
+pub(crate) mod callback_clock;
 mod policy;
+#[cfg(feature = "mtproto")]
+pub(crate) use policy::PolicyTime;
 mod runtime;
 #[cfg(feature = "mtproto")]
 pub(crate) use runtime::storage_error;

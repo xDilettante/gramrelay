@@ -468,16 +468,22 @@ async fn unsupported_capabilities_duplicate_profiles_and_invalid_lease_budgets_a
             .kind(),
         ExecutorErrorKind::InvalidPolicy
     );
-    for req in [
-        request(
-            "mtproto_answer_callback_query",
-            json!({"reference":"missing"}),
-            Some("callback"),
+    for (req, kind) in [
+        (
+            request(
+                "mtproto_answer_callback_query",
+                json!({"reference":"missing"}),
+                Some("callback"),
+            ),
+            ExecutorErrorKind::Denied,
         ),
-        request(
-            "mtproto_send_document",
-            json!({"peer":peer(),"file_handle":"missing"}),
-            Some("file"),
+        (
+            request(
+                "mtproto_send_document",
+                json!({"peer":peer(),"file_handle":"missing"}),
+                Some("file"),
+            ),
+            ExecutorErrorKind::UnsupportedAction,
         ),
     ] {
         assert_eq!(
@@ -486,7 +492,7 @@ async fn unsupported_capabilities_duplicate_profiles_and_invalid_lease_budgets_a
                 .await
                 .unwrap_err()
                 .kind(),
-            ExecutorErrorKind::UnsupportedAction
+            kind
         );
     }
     assert_eq!(f.control.count(), 0);

@@ -24,6 +24,9 @@ mod files;
 mod read;
 #[cfg(feature = "host")]
 pub(crate) use read::validate_cursor;
+#[cfg(test)]
+#[path = "runtime/clock_tests.rs"]
+mod clock_tests;
 mod write;
 pub use callbacks::{CallbackClockPolicy, CallbackReference};
 use callbacks::{CallbackRegistry, ReferenceDeadline};
@@ -402,7 +405,7 @@ impl Authorization {
     fn checked(&self, time: i64) -> Result<(DryRun, Grant)> {
         let result = self.policy_checked(time)?;
         if let Some(reference) = &self.reference {
-            reference.remaining(time)?;
+            reference.remaining(now()?.max(time))?;
         }
         Ok(result)
     }
@@ -411,7 +414,7 @@ impl Authorization {
             &self.principal,
             &self.request,
             self.bot_id,
-            time,
+            PolicyTime::Current(time),
             self.approval.as_ref(),
             self.scope.as_ref(),
         )

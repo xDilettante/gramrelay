@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    executor::{ExecutorError, ExecutorErrorKind, storage_error},
+    executor::{ExecutorError, ExecutorErrorKind, PolicyTime, storage_error},
     journal::{
         self, Completion, Journal, JournalError, JournalErrorKind, OperationRequest, Preparation,
         authorization::{BudgetContext, charge_invocation_checked},
@@ -18,8 +18,10 @@ use tokio::{
     sync::{Mutex, Semaphore, oneshot},
     task::JoinSet,
 };
+mod callbacks;
 mod output;
 mod write;
+pub use callbacks::{CallbackClockPolicy, CallbackReference};
 pub use output::*;
 type Result<T> = std::result::Result<T, ExecutorError>;
 
@@ -28,6 +30,9 @@ pub struct ExecutorOptions {
     max_in_flight: usize,
     max_read_bytes: usize,
     receipt_margin: Duration,
+    callback_ttl: Duration,
+    max_callback_references: usize,
+    callback_clock_policy: CallbackClockPolicy,
 }
 impl Default for ExecutorOptions {
     fn default() -> Self {
@@ -35,10 +40,25 @@ impl Default for ExecutorOptions {
             max_in_flight: 16,
             max_read_bytes: 1024 * 1024,
             receipt_margin: Duration::from_secs(5),
+            callback_ttl: Duration::from_secs(10),
+            max_callback_references: 1024,
+            callback_clock_policy: CallbackClockPolicy::JournalMonotonic,
         }
     }
 }
 impl ExecutorOptions {
+    pub fn callback_ttl(mut self, value: Duration) -> Self {
+        self.callback_ttl = value;
+        self
+    }
+    pub fn max_callback_references(mut self, value: usize) -> Self {
+        self.max_callback_references = value;
+        self
+    }
+    pub fn callback_clock_policy(mut self, value: CallbackClockPolicy) -> Self {
+        self.callback_clock_policy = value;
+        self
+    }
     pub fn max_in_flight(mut self, value: usize) -> Self {
         self.max_in_flight = value;
         self
@@ -76,6 +96,7 @@ pub struct Executor {
     options: ExecutorOptions,
     slots: Arc<Semaphore>,
     jobs: Arc<Mutex<Jobs>>,
+    callback_references: Arc<std::sync::Mutex<callbacks::Registry>>,
 }
 impl std::fmt::Debug for Executor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -83,18 +104,22 @@ impl std::fmt::Debug for Executor {
     }
 }
 impl Executor {
-    pub const ACTIONS: [Action; 6] = [
+    pub const ACTIONS: [Action; 7] = [
         Action::GetMe,
         Action::GetPeer,
         Action::ReadUpdates,
         Action::SendMessage,
         Action::EditMessageText,
+        Action::AnswerCallbackQuery,
         Action::GetOperation,
     ];
     pub fn new(policy: PolicyStore, options: ExecutorOptions) -> Result<Self> {
         if !(1..=1024).contains(&options.max_in_flight)
             || !(1..=64 * 1024 * 1024).contains(&options.max_read_bytes)
             || options.receipt_margin.is_zero()
+            || options.callback_ttl < Duration::from_millis(1)
+            || options.callback_ttl > Duration::from_secs(60)
+            || !(1..=65536).contains(&options.max_callback_references)
             || Instant::now().checked_add(options.receipt_margin).is_none()
         {
             return Err(invalid_policy());
@@ -105,6 +130,7 @@ impl Executor {
             slots: Arc::new(Semaphore::new(options.max_in_flight)),
             options,
             jobs: Arc::default(),
+            callback_references: Arc::default(),
         })
     }
     /// Immutable host registration; no login, identity RPC or action is started.
@@ -161,7 +187,8 @@ impl Executor {
         Ok(Worker {
             profile,
             policy: self.policy.clone(),
-            receipt_margin: self.options.receipt_margin,
+            options: self.options.clone(),
+            callback_references: self.callback_references.clone(),
         })
     }
     pub async fn dry_run(
@@ -199,15 +226,28 @@ impl Executor {
                 .await;
         }
         let auth = worker.authorization(principal, request, None).await?;
+        if let Some(reference) = &auth.reference {
+            let time = now()?;
+            let remaining = reference.deadline.remaining(time)?;
+            if expires_at_ms > reference.deadline.expires_at_ms
+                || expires_at_ms.saturating_sub(time) > remaining.as_millis() as i64
+            {
+                return Err(invalid_policy());
+            }
+        }
         let scope = auth.scope.as_ref().map(Scope::policy_scope);
-        self.policy.approve_mtproto_with_scope(
+        let approval = self.policy.approve_mtproto_with_scope(
             principal,
             request,
             worker.profile.expected,
-            now()?,
+            PolicyTime::Current(now()?),
             expires_at_ms,
             scope.as_ref(),
-        )
+        )?;
+        if let Some(reference) = &auth.reference {
+            reference.deadline.remaining(now()?)?;
+        }
+        Ok(approval)
     }
     pub async fn execute(
         &self,
@@ -288,18 +328,23 @@ struct Authorization {
     approval: Option<Approval>,
     expected: ProfileIdentity,
     scope: Option<Scope>,
+    reference: Option<callbacks::Context>,
 }
 impl Authorization {
     fn checked(&self, time: i64) -> Result<(DryRun, Grant)> {
         let scope = self.scope.as_ref().map(Scope::policy_scope);
-        self.policy.authorized_mtproto(
+        let result = self.policy.authorized_mtproto(
             &self.principal,
             &self.request,
             self.expected,
-            time,
+            PolicyTime::Current(time),
             self.approval.as_ref(),
             scope.as_ref(),
-        )
+        )?;
+        if let Some(reference) = &self.reference {
+            reference.deadline.remaining(now()?.max(time))?;
+        }
+        Ok(result)
     }
     fn budget(&self, time: i64) -> journal::Result<BudgetContext> {
         let (_, grant) = self
@@ -339,7 +384,8 @@ impl Authorized {
 struct Worker {
     profile: Arc<Profile>,
     policy: PolicyStore,
-    receipt_margin: Duration,
+    options: ExecutorOptions,
+    callback_references: Arc<std::sync::Mutex<callbacks::Registry>>,
 }
 impl Worker {
     async fn authorization(
@@ -348,6 +394,7 @@ impl Worker {
         request: &Request,
         approval: Option<&Approval>,
     ) -> Result<Authorization> {
+        let mut reference = None;
         let scope = if let Call::GetOperation(args) = request.call() {
             self.policy
                 .check_mtproto_lookup(principal, request, self.profile.expected, now()?)?;
@@ -363,6 +410,17 @@ impl Worker {
                     .map_err(storage_error)?
                     .ok_or_else(|| ExecutorError::new(ExecutorErrorKind::NotFound))?,
             )
+        } else if let Call::AnswerCallbackQuery(args) = request.call() {
+            self.policy
+                .check_mtproto_lookup(principal, request, self.profile.expected, now()?)?;
+            let found = self
+                .callback_references
+                .lock()
+                .map_err(|_| invalid_policy())?
+                .lookup(principal, &self.profile.name, &args.reference, now()?)?;
+            let scope = found.context.scope.clone();
+            reference = Some(found.context);
+            Some(scope)
         } else {
             None
         };
@@ -373,6 +431,7 @@ impl Worker {
             approval: approval.cloned(),
             expected: self.profile.expected,
             scope,
+            reference,
         })
     }
     async fn run(
@@ -385,11 +444,12 @@ impl Worker {
             let auth = self
                 .authorization(&principal, &request, approval.as_ref())
                 .await?;
-            let (revision, page) = self
+            let (revision, mut page) = self
                 .profile
                 .reader
                 .read_with_revision(&principal, &request, approval.as_ref())
                 .await?;
+            self.attach_callbacks(&principal, &mut page)?;
             return Ok(Authorized {
                 auth,
                 revision,
@@ -446,7 +506,9 @@ impl Worker {
                 }
                 output::project(operation, &scope)?
             }
-            Call::SendMessage(_) | Call::EditMessageText(_) => self.write(&auth).await?,
+            Call::SendMessage(_) | Call::EditMessageText(_) | Call::AnswerCallbackQuery(_) => {
+                self.write(&auth).await?
+            }
             _ => return Err(ExecutorError::new(ExecutorErrorKind::UnsupportedAction)),
         };
         let (dry, _) = auth.checked(now()?).map_err(|e| {

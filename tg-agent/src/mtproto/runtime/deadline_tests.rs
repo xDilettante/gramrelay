@@ -40,6 +40,7 @@ async fn policy_lock_wait_does_not_extend_a_durable_write_lease() {
         approval: None,
         expected,
         scope: None,
+        reference: None,
     };
     let scope = Scope {
         account: expected,

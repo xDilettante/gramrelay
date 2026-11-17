@@ -29,15 +29,37 @@ impl PolicyStore {
         expected: ProfileIdentity,
         time: i64,
     ) -> Result<()> {
-        if request.action() != Action::GetOperation {
+        if !matches!(
+            request.action(),
+            Action::GetOperation | Action::AnswerCallbackQuery
+        ) {
             return Err(invalid_policy());
         }
         let state = self.inner.read().map_err(|_| invalid_policy())?;
+        let time = PolicyTime::Current(time).sample()?;
         let entry = state
             .grants
             .get(&(principal.clone(), request.profile().to_owned()))
             .ok_or_else(denied)?;
         entry.mtproto()?.check_basic(request, expected, time)
+    }
+    pub(crate) fn check_mtproto_callback_observation(
+        &self,
+        principal: &Principal,
+        profile: &str,
+        expected: ProfileIdentity,
+        peer: Option<crate::mtproto::PeerId>,
+        time: i64,
+    ) -> Result<()> {
+        let state = self.inner.read().map_err(|_| invalid_policy())?;
+        let time = PolicyTime::Current(time).sample()?;
+        let entry = state
+            .grants
+            .get(&(principal.clone(), profile.to_owned()))
+            .ok_or_else(denied)?;
+        entry
+            .mtproto()?
+            .check_callback_observation(expected, peer, time)
     }
     pub fn replace_mtproto(
         &self,
@@ -57,19 +79,27 @@ impl PolicyStore {
         time: i64,
         approval: Option<&Approval>,
     ) -> Result<MtprotoDryRun> {
-        self.authorized_mtproto(principal, request, expected, time, approval, None)
-            .map(|(dry, _)| dry)
+        self.authorized_mtproto(
+            principal,
+            request,
+            expected,
+            PolicyTime::Fixed(time),
+            approval,
+            None,
+        )
+        .map(|(dry, _)| dry)
     }
     pub(crate) fn authorized_mtproto(
         &self,
         principal: &Principal,
         request: &Request,
         expected: ProfileIdentity,
-        time: i64,
+        time: PolicyTime,
         approval: Option<&Approval>,
         scope: Option<&OriginalScope>,
     ) -> Result<(MtprotoDryRun, Grant)> {
         let state = self.inner.read().map_err(|_| invalid_policy())?;
+        let time = time.sample()?;
         let entry = state
             .grants
             .get(&(principal.clone(), request.profile().to_owned()))
@@ -108,18 +138,26 @@ impl PolicyStore {
         time: i64,
         expires_at_ms: i64,
     ) -> Result<Approval> {
-        self.approve_mtproto_with_scope(principal, request, expected, time, expires_at_ms, None)
+        self.approve_mtproto_with_scope(
+            principal,
+            request,
+            expected,
+            PolicyTime::Fixed(time),
+            expires_at_ms,
+            None,
+        )
     }
     pub(crate) fn approve_mtproto_with_scope(
         &self,
         principal: &Principal,
         request: &Request,
         expected: ProfileIdentity,
-        time: i64,
+        time: PolicyTime,
         expires_at_ms: i64,
         scope: Option<&OriginalScope>,
     ) -> Result<Approval> {
         let state = self.inner.read().map_err(|_| invalid_policy())?;
+        let time = time.sample()?;
         let entry = state
             .grants
             .get(&(principal.clone(), request.profile().to_owned()))

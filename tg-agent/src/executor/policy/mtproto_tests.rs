@@ -39,7 +39,14 @@ fn retained_scope_checks_current_original_resources_without_reconfirming_the_wri
     policy.replace_mtproto(&alice, "primary", grant()).unwrap();
     assert!(
         policy
-            .authorized_mtproto(&alice, &req, expected(), 100, None, Some(&original))
+            .authorized_mtproto(
+                &alice,
+                &req,
+                expected(),
+                PolicyTime::Fixed(100),
+                None,
+                Some(&original)
+            )
             .is_ok()
     );
     let mut wrong_account = scope();
@@ -51,7 +58,14 @@ fn retained_scope_checks_current_original_resources_without_reconfirming_the_wri
     for wrong in [wrong_account, wrong_peer, wrong_file] {
         assert_eq!(
             policy
-                .authorized_mtproto(&alice, &req, expected(), 100, None, Some(&wrong))
+                .authorized_mtproto(
+                    &alice,
+                    &req,
+                    expected(),
+                    PolicyTime::Fixed(100),
+                    None,
+                    Some(&wrong)
+                )
                 .unwrap_err()
                 .kind(),
             ExecutorErrorKind::Denied
@@ -66,20 +80,34 @@ fn retained_scope_checks_current_original_resources_without_reconfirming_the_wri
         .unwrap();
     assert_eq!(
         policy
-            .authorized_mtproto(&alice, &req, expected(), 100, None, Some(&original))
+            .authorized_mtproto(
+                &alice,
+                &req,
+                expected(),
+                PolicyTime::Fixed(100),
+                None,
+                Some(&original)
+            )
             .unwrap_err()
             .kind(),
         ExecutorErrorKind::ApprovalRequired
     );
     let approval = policy
-        .approve_mtproto_with_scope(&alice, &req, expected(), 100, 200, Some(&original))
+        .approve_mtproto_with_scope(
+            &alice,
+            &req,
+            expected(),
+            PolicyTime::Fixed(100),
+            200,
+            Some(&original),
+        )
         .unwrap();
     policy
         .authorized_mtproto(
             &alice,
             &req,
             expected(),
-            100,
+            PolicyTime::Fixed(100),
             Some(&approval),
             Some(&original),
         )
@@ -97,7 +125,14 @@ fn retained_scope_checks_current_original_resources_without_reconfirming_the_wri
         .unwrap();
     assert_eq!(
         policy
-            .authorized_mtproto(&alice, &req, expected(), 100, None, Some(&original))
+            .authorized_mtproto(
+                &alice,
+                &req,
+                expected(),
+                PolicyTime::Fixed(100),
+                None,
+                Some(&original)
+            )
             .unwrap_err()
             .kind(),
         ExecutorErrorKind::Denied
@@ -124,7 +159,14 @@ fn global_callback_scope_requires_explicit_bot_and_unscoped_authority() {
     policy.replace_mtproto(&alice, "primary", grant()).unwrap();
     assert_eq!(
         policy
-            .authorized_mtproto(&alice, &req, bot, 100, None, Some(&scope))
+            .authorized_mtproto(
+                &alice,
+                &req,
+                bot,
+                PolicyTime::Fixed(100),
+                None,
+                Some(&scope)
+            )
             .unwrap_err()
             .kind(),
         ExecutorErrorKind::Denied
@@ -133,6 +175,13 @@ fn global_callback_scope_requires_explicit_bot_and_unscoped_authority() {
         .replace_mtproto(&alice, "primary", grant().unscoped_updates(true))
         .unwrap();
     policy
-        .authorized_mtproto(&alice, &req, bot, 100, None, Some(&scope))
+        .authorized_mtproto(
+            &alice,
+            &req,
+            bot,
+            PolicyTime::Fixed(100),
+            None,
+            Some(&scope),
+        )
         .unwrap();
 }

@@ -196,14 +196,18 @@ impl Executor {
                 return Err(ExecutorError::new(ExecutorErrorKind::InvalidPolicy));
             }
         }
-        self.policy.approve_with_scope(
+        let approval = self.policy.approve_with_scope(
             principal,
             request,
             profile.bot_id,
-            now()?,
+            PolicyTime::Current(now()?),
             expires_at_ms,
             auth.scope.as_ref(),
-        )
+        )?;
+        if let Some(reference) = &auth.reference {
+            reference.remaining(now()?)?;
+        }
+        Ok(approval)
     }
     async fn resolve_scope(
         &self,

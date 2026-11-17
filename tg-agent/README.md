@@ -29,10 +29,10 @@ Bot API chat/thread options, access hashes, пути или произвольн
 M3, а каталог Bot API содержит прежние восемь инструментов.
 
 `mtproto::Executor` принимает `register_profile(feed, client)` от хоста и выполняет
-шесть действий: get_me, get_peer, read_updates, send_message, edit_message_text и
-get_operation с префиксом `mtproto_`. `get_peer` проверяет личность и доступность
+семь действий: get_me, get_peer, read_updates, send_message, edit_message_text,
+answer_callback_query и get_operation с префиксом `mtproto_`. `get_peer` проверяет личность и доступность
 собеседника в зашифрованном кеше; подготовку username/cache выполняет хост.
-Callback и документы пока возвращают `UnsupportedAction`. `Executor::ACTIONS`
+Документы пока возвращают `UnsupportedAction`. `Executor::ACTIONS`
 показывает фактически исполняемый набор. Вход/выход из аккаунта и raw TL не
 являются действиями агента.
 
@@ -55,6 +55,34 @@ receipt margin; timeout берётся у M2 Client. Timeout + margin должн
 `cargo run --locked --offline -p tg-agent --features mtproto-test-kit --example mtproto_authorized_text`.
 Он проверяет две попытки с одним ключом и одну отправку без сокетов.
 
+Ответ callback принимает только непрозрачный `reference`, текст и `show_alert`.
+`read_updates` добавляет `callback_reference` к разрешённому событию; доверенный
+хост также может вызвать `observe_callback(principal, profile, stored_event)`.
+Нужен MT bot и исходное событие того же экземпляра Journal/профиля. Область
+определяется по чату сообщения, а inline требует явного `unscoped_updates`.
+Ссылка не выдаёт права ответа и не заменяет approval. Query ID и access hash
+никогда не входят в инструментальные аргументы или квитанции.
+
+По умолчанию TTL — 10 секунд от исходного приёма (1 мс..60 секунд), реестр —
+1024 ссылки (до 65536), `CallbackClockPolicy::JournalMonotonic` требует исходного
+монотонного наблюдения. Рестарт теряет это RAM-доказательство. Явный host-only
+`TrustedWallClock` разрешает восстановление по исходному UTC; хост отвечает за
+часы. Повторные чтения и новые алиасы не продлевают TTL. Общая для копий отметка
+времени не позволяет оживить уже истёкшую ссылку откатом часов.
+
+Дедлайн ограничивает ожидание identity и ответ; только TL Bool true подтверждает
+успех. Квитанция содержит лишь `acknowledged=true`. Admission query общий для всех
+principals/алиасов в одном профиле одной БД: после допуска другой ключ запрещён,
+включая `Unknown`, `Rejected` и `NotSent`. Подтверждённый `NotSent` можно продолжить
+с прежним ключом и неизменными параметрами/исходным временем, даже с новым алиасом.
+Approval по-прежнему связан с точным видимым запросом и его алиасом. После TTL
+`get_operation` читает сохранённую квитанцию при текущем праве на исходный scope.
+Отдельные БД/восстановленные копии не разделяют admission; возраст на сервере
+не доказывается. Контракт: [SPEC-mtproto-agent-callback.md](../SPEC-mtproto-agent-callback.md).
+
+Офлайн-пример настоящего TL intake и двух вызовов с одной отправкой:
+`cargo run --locked --offline -p tg-agent --features mtproto-test-kit --example mtproto_authorized_callback`.
+
 `mtproto::updates::Feed` принимает целые партии M2: `ingest` сохраняет проекцию
 и watermark в журнале, затем вызывает ACK. Хост удерживает один `SourceLease` и
 `UpdateReceiver`; разрыв возвращается как `Ingested::Gap` для явного решения.
@@ -71,8 +99,8 @@ Client. Общие лимиты feeds/строк/байтов учитывают
 неподдержанный TL constructor виден как unscoped marker. Graphs entities, access
 hashes, file references и callback query ID в сериализованный вывод не входят.
 Монотонное наблюдение callback локальное, теряется после рестарта и не доказывает
-возраст запроса на сервере. Следующие провайдеры M3 добавят action references и
-авторизованные записи. `mtproto-test-kit` — явная опция для офлайн-тестов,
+возраст запроса на сервере. Executor выдаёт callback references; провайдер файлов
+ещё остаётся в M3. `mtproto-test-kit` — явная опция для офлайн-тестов,
 не настройка инструмента агента.
 
 `mtproto::updates::Reader::new(feed, policy, ReadOptions::default())` открывает

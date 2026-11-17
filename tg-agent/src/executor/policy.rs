@@ -14,6 +14,29 @@ mod mtproto;
 #[cfg(feature = "mtproto")]
 pub use mtproto::MtprotoDryRun;
 
+/// Pure policy APIs use an explicit instant; runtime decisions sample UTC only
+/// after acquiring the policy lock, bounded below by transaction/caller time.
+#[derive(Clone, Copy)]
+pub(crate) enum PolicyTime {
+    Fixed(i64),
+    Current(i64),
+}
+impl PolicyTime {
+    fn sample(self) -> Result<i64> {
+        match self {
+            Self::Fixed(time) => Ok(time),
+            Self::Current(lower) => {
+                if lower < 0 {
+                    return Err(invalid_policy());
+                }
+                crate::journal::now()
+                    .map(|time| time.max(lower))
+                    .map_err(|_| ExecutorError::new(ExecutorErrorKind::Storage))
+            }
+        }
+    }
+}
+
 /// Authenticated host identity. Deliberately not deserializable from tool input.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Principal(String);
@@ -355,6 +378,7 @@ impl PolicyStore {
         time: i64,
     ) -> Result<()> {
         let state = self.inner.read().map_err(|_| invalid_policy())?;
+        let time = PolicyTime::Current(time).sample()?;
         let entry = state
             .grants
             .get(&(principal.clone(), profile.to_owned()))
@@ -417,18 +441,26 @@ impl PolicyStore {
         now_ms: i64,
         approval: Option<&Approval>,
     ) -> Result<(DryRun, Grant)> {
-        self.authorized_with_scope(principal, request, bot_id, now_ms, approval, None)
+        self.authorized_with_scope(
+            principal,
+            request,
+            bot_id,
+            PolicyTime::Fixed(now_ms),
+            approval,
+            None,
+        )
     }
     pub(super) fn authorized_with_scope(
         &self,
         principal: &Principal,
         request: &Request,
         bot_id: i64,
-        now_ms: i64,
+        now_ms: PolicyTime,
         approval: Option<&Approval>,
         scope: Option<&OperationScope>,
     ) -> Result<(DryRun, Grant)> {
         let state = self.inner.read().map_err(|_| invalid_policy())?;
+        let now_ms = now_ms.sample()?;
         let entry = state
             .grants
             .get(&(principal.clone(), request.profile().to_owned()))
@@ -470,7 +502,14 @@ impl PolicyStore {
         now_ms: i64,
         expires_at_ms: i64,
     ) -> Result<Approval> {
-        self.approve_with_scope(principal, request, bot_id, now_ms, expires_at_ms, None)
+        self.approve_with_scope(
+            principal,
+            request,
+            bot_id,
+            PolicyTime::Fixed(now_ms),
+            expires_at_ms,
+            None,
+        )
     }
     pub(super) fn check_lookup(
         &self,
@@ -489,6 +528,7 @@ impl PolicyStore {
             return Err(invalid_policy());
         }
         let state = self.inner.read().map_err(|_| invalid_policy())?;
+        let now_ms = PolicyTime::Current(now_ms).sample()?;
         let entry = state
             .grants
             .get(&(principal.clone(), request.profile().to_owned()))
@@ -500,11 +540,12 @@ impl PolicyStore {
         principal: &Principal,
         request: &Request,
         bot_id: i64,
-        now_ms: i64,
+        now_ms: PolicyTime,
         expires_at_ms: i64,
         scope: Option<&OperationScope>,
     ) -> Result<Approval> {
         let state = self.inner.read().map_err(|_| invalid_policy())?;
+        let now_ms = now_ms.sample()?;
         let entry = state
             .grants
             .get(&(principal.clone(), request.profile().to_owned()))

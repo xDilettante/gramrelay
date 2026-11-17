@@ -7,6 +7,9 @@ Callback/document actions keep explicit UnsupportedAction until their capability
 providers are implemented; their existing typed requests/policy never become
 execution permits by themselves. No live Telegram or external publishing.
 
+Follow-up: SPEC-mtproto-agent-callback.md implements the seventh action with an
+original observation provider. Document execution remains UnsupportedAction.
+
 ## Exact durable scopes
 
 Strict journal v8 migration verifies/preserves v1–v7 schemas, operations, update

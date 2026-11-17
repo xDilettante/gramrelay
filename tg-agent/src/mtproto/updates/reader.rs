@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    executor::{ExecutorError, ExecutorErrorKind, storage_error},
+    executor::{ExecutorError, ExecutorErrorKind, PolicyTime, storage_error},
     journal::authorization::{BudgetContext, charge_invocation_checked},
     mtproto::{
         Approval, Call, DryRun, Grant, PolicyStore, Principal, Request,
@@ -77,8 +77,13 @@ pub struct ReadEvent {
     checkpoint_acknowledged: bool,
     untrusted: bool,
     event: Event,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    callback_reference: Option<String>,
 }
 impl ReadEvent {
+    pub fn callback_reference(&self) -> Option<&str> {
+        self.callback_reference.as_deref()
+    }
     pub fn cursor(&self) -> &Cursor {
         &self.cursor
     }
@@ -101,8 +106,18 @@ pub struct ReadPage {
     events: Vec<ReadEvent>,
     next_cursor: Cursor,
     has_more: bool,
+    #[serde(skip)]
+    callbacks: Vec<(usize, CallbackObservation)>,
 }
 impl ReadPage {
+    pub(crate) fn attach_callbacks(
+        &mut self,
+        mut register: impl FnMut(&CallbackObservation) -> Option<String>,
+    ) {
+        for (index, observation) in self.callbacks.drain(..) {
+            self.events[index].callback_reference = register(&observation);
+        }
+    }
     pub fn events(&self) -> &[ReadEvent] {
         &self.events
     }
@@ -137,7 +152,7 @@ impl Authorization {
             &self.principal,
             &self.request,
             self.expected,
-            time,
+            PolicyTime::Current(time),
             self.approval.as_ref(),
             None,
         )
@@ -238,12 +253,13 @@ impl Reader {
         if request.profile() != self.feed.profile {
             return Err(denied());
         }
-        let approval = self.policy.approve_mtproto(
+        let approval = self.policy.approve_mtproto_with_scope(
             principal,
             request,
             self.feed.account,
-            time()?,
+            PolicyTime::Current(time()?),
             expires_at_ms,
+            None,
         )?;
         self.preflight(principal, request, Some(&approval)).await?;
         Ok(approval)
@@ -256,7 +272,10 @@ impl Reader {
     ) -> AgentResult<ReadPage> {
         self.read_with_revision(principal, request, approval)
             .await
-            .map(|(_, page)| page)
+            .map(|(_, mut page)| {
+                page.callbacks.clear();
+                page
+            })
     }
     pub(crate) async fn read_with_revision(
         &self,
@@ -323,11 +342,15 @@ fn select(page: Page, grant: &Grant, limit: u8) -> ReadPage {
     let count = page.events().len();
     let mut considered = 0;
     let mut events = Vec::new();
+    let mut callbacks = Vec::new();
     for stored in page.into_events() {
         considered += 1;
         next_cursor = stored.cursor.clone();
         let peer = stored.event.peer();
         if peer.map_or(grant.permits_unscoped_updates(), |p| grant.permits_peer(p)) {
+            if let Some(observation) = stored.callback_observation() {
+                callbacks.push((events.len(), observation));
+            }
             events.push(ReadEvent {
                 cursor: stored.cursor,
                 scope: peer.map_or(ReadScope::Unscoped, ReadScope::Peer),
@@ -335,6 +358,7 @@ fn select(page: Page, grant: &Grant, limit: u8) -> ReadPage {
                 checkpoint_acknowledged: stored.checkpoint_acknowledged,
                 untrusted: true,
                 event: stored.event,
+                callback_reference: None,
             });
             if events.len() == limit as usize {
                 break;
@@ -346,6 +370,7 @@ fn select(page: Page, grant: &Grant, limit: u8) -> ReadPage {
         events,
         next_cursor,
         has_more: has_more || considered < count,
+        callbacks,
     }
 }
 

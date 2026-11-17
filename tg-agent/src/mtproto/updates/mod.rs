@@ -40,6 +40,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+pub(crate) use types::CallbackObservation;
 pub use types::*;
 
 #[derive(Clone)]

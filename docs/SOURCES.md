@@ -1,5 +1,14 @@
 # Implementation sources
 
+- MTProto bot callback answers and observation fields, rechecked 17 November 2026:
+  [messages.setBotCallbackAnswer](https://core.telegram.org/method/messages.setBotCallbackAnswer.md),
+  [updateBotCallbackQuery](https://core.telegram.org/constructor/updateBotCallbackQuery.md) and
+  [updateInlineBotCallbackQuery](https://core.telegram.org/constructor/updateInlineBotCallbackQuery.md).
+  These specify bot-only use, opaque long query IDs, Bool response and primary
+  peer versus actor. TTL, 200-UTF-16 text bound, no URL/cache options, opaque
+  aliases, approvals and durable admission are local library policies; they do
+  not establish Telegram-side creation age or acceptance.
+
 The implementation uses reqwest 0.13.5, Tokio 1.54.1, tokio-util 0.7.20 and wiremock 0.6.5 as pinned by Cargo.lock. Telegram contracts were checked against the Bot API documentation on 16 November 2026. The structural schema pins all 193 methods and 425 types in Bot API 10.4. Callable coverage is tracked separately in tasks/todo.md.
 
 - Telegram sendMessage and plain-text parameters: https://core.telegram.org/bots/api#sendmessage

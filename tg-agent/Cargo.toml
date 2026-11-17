@@ -82,3 +82,7 @@ required-features = ["mcp"]
 [[example]]
 name = "mtproto_authorized_text"
 required-features = ["mtproto-test-kit"]
+
+[[example]]
+name = "mtproto_authorized_callback"
+required-features = ["mtproto-test-kit"]

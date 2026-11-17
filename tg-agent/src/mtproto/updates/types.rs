@@ -30,6 +30,11 @@ impl From<Cursor> for String {
         )
     }
 }
+impl Cursor {
+    pub(crate) fn matches_profile(&self, profile: &str) -> bool {
+        self.profile == profile
+    }
+}
 impl FromStr for Cursor {
     type Err = JournalError;
     fn from_str(value: &str) -> Result<Self> {
@@ -172,7 +177,30 @@ pub struct StoredEvent {
     #[serde(skip)]
     pub(crate) callback_received: Option<Instant>,
 }
+/// Private collection evidence; this cannot be created from serialized tool data.
+#[derive(Clone)]
+pub(crate) struct CallbackObservation {
+    pub cursor: Cursor,
+    pub query: i64,
+    pub peer: Option<PeerId>,
+    pub received_at_ms: i64,
+    pub origin: Arc<str>,
+    pub observed: Option<Instant>,
+}
 impl StoredEvent {
+    pub(crate) fn callback_observation(&self) -> Option<CallbackObservation> {
+        if !matches!(self.event, Event::Callback { .. }) {
+            return None;
+        }
+        Some(CallbackObservation {
+            cursor: self.cursor.clone(),
+            query: self.callback_query?,
+            peer: self.event.peer(),
+            received_at_ms: self.received_at_ms,
+            origin: self.origin.clone(),
+            observed: self.callback_received,
+        })
+    }
     pub fn cursor(&self) -> &Cursor {
         &self.cursor
     }

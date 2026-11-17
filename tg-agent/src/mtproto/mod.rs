@@ -20,8 +20,8 @@ mod grant;
 mod runtime;
 mod types;
 pub use runtime::{
-    AccountInfo, ExecutionResult, Executor, ExecutorOptions, FailureReceipt, MessageReceipt,
-    OperationReceipt, PeerInfo,
+    AccountInfo, CallbackClockPolicy, CallbackReference, ExecutionResult, Executor,
+    ExecutorOptions, FailureReceipt, MessageReceipt, OperationReceipt, PeerInfo,
 };
 pub mod updates;
 pub use crate::executor::{

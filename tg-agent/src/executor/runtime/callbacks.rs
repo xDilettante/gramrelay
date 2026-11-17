@@ -2,25 +2,21 @@ use super::*;
 use crate::updates::StoredUpdate;
 use sha2::{Digest, Sha256};
 
-/// Host clock trust, never a tool argument.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CallbackClockPolicy {
-    /// Requires monotonic ingestion provenance in this journal lifetime.
-    JournalMonotonic,
-    /// Allows historical/cross-process receipts; the host guarantees its UTC clock.
-    TrustedWallClock,
-}
+use crate::executor::callback_clock::CallbackClock;
+pub use crate::executor::callback_clock::CallbackClockPolicy;
 #[derive(Clone)]
 pub(super) struct ReferenceDeadline {
     pub(super) received_at_ms: i64,
     pub(super) expires_at_ms: i64,
     instant: Instant,
+    clock: CallbackClock,
 }
 impl ReferenceDeadline {
     pub(super) fn cap_rpc(&self, deadline: Instant) -> Instant {
         deadline.min(self.instant)
     }
     pub(super) fn remaining(&self, time: i64) -> Result<Duration> {
+        let time = self.clock.observe(time);
         let wall = self
             .expires_at_ms
             .checked_sub(time)
@@ -63,14 +59,14 @@ type Key = (Principal, String, [u8; 32]);
 #[derive(Default)]
 pub(super) struct CallbackRegistry {
     entries: BTreeMap<Key, CallbackReference>,
-    wall_high_water: i64,
+    clock: CallbackClock,
 }
 impl CallbackRegistry {
     pub(super) fn prune(&mut self, time: i64) -> usize {
-        self.wall_high_water = self.wall_high_water.max(time);
+        let time = self.clock.observe(time);
         let before = self.entries.len();
         self.entries
-            .retain(|_, reference| reference.deadline.remaining(self.wall_high_water).is_ok());
+            .retain(|_, reference| reference.deadline.remaining(time).is_ok());
         before - self.entries.len()
     }
     pub(super) fn register_event(
@@ -82,8 +78,10 @@ impl CallbackRegistry {
         options: &ExecutorOptions,
         time: i64,
     ) -> Result<CallbackReference> {
-        self.wall_high_water = self.wall_high_water.max(time);
-        let reference = candidate(profile, event, options, self.wall_high_water)?;
+        let time = self.clock.observe(time);
+        let mut reference = candidate(profile, event, options, time)?;
+        self.clock.observe(reference.deadline.clock.highest());
+        reference.deadline.clock = self.clock.clone();
         let key = (
             principal.clone(),
             name.to_owned(),
@@ -96,7 +94,7 @@ impl CallbackRegistry {
             {
                 return Err(ExecutorError::new(ExecutorErrorKind::Conflict));
             }
-            existing.deadline.remaining(self.wall_high_water)?;
+            existing.deadline.remaining(time)?;
             return Ok(existing.clone());
         }
         if self.entries.len() >= options.max_callback_references {
@@ -112,7 +110,7 @@ impl CallbackRegistry {
         id: &str,
         time: i64,
     ) -> Result<CallbackReference> {
-        self.wall_high_water = self.wall_high_water.max(time);
+        let time = self.clock.observe(time);
         let reference = self
             .entries
             .get(&(principal.clone(), name.to_owned(), callback_hash(id)))
@@ -120,7 +118,7 @@ impl CallbackRegistry {
         if reference.query_id != id {
             return Err(unavailable());
         }
-        reference.deadline.remaining(self.wall_high_water)?;
+        reference.deadline.remaining(time)?;
         Ok(reference.clone())
     }
 }
@@ -153,6 +151,7 @@ impl Executor {
             .callback_references
             .lock()
             .map_err(|_| ExecutorError::new(ExecutorErrorKind::InvalidPolicy))?;
+        let time = now()?;
         registry.prune(time);
         registry.register_event(&source, principal, profile, event, &self.options, time)
     }
@@ -241,6 +240,7 @@ fn candidate(
         received_at_ms: received,
         expires_at_ms: expires,
         instant,
+        clock: CallbackClock::default(),
     };
     deadline.remaining(time)?;
     let chat = callback
@@ -275,4 +275,65 @@ fn expired() -> ExecutorError {
 }
 fn unavailable() -> ExecutorError {
     ExecutorError::new(ExecutorErrorKind::ReferenceUnavailable)
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+    #[tokio::test]
+    async fn bot_callback_copy_retains_registry_wall_expiry_after_clock_rollback() {
+        use crate::updates::{SourceMode, UpdateOptions};
+        let dir = tempfile::tempdir().unwrap();
+        let journal = Journal::open(
+            dir.path().join("callback-clock.sqlite"),
+            journal::JournalOptions::default(),
+        )
+        .await
+        .unwrap();
+        let feed = UpdateFeed::open(journal.clone(), "primary", 0, UpdateOptions::default())
+            .await
+            .unwrap();
+        let lease = feed.claim_source(SourceMode::Webhook).await.unwrap();
+        let update:tg::Update=serde_json::from_value(serde_json::json!({"update_id":1,"callback_query":{"id":"synthetic","from":{"id":2,"is_bot":false,"first_name":"Synthetic"},"chat_instance":"untrusted","message":{"message_id":1,"date":1,"chat":{"id":1,"type":"private"}}}})).unwrap();
+        feed.append_webhook(&lease, update).await.unwrap();
+        feed.release_source(lease).await.unwrap();
+        let event = feed
+            .read(None, 1)
+            .await
+            .unwrap()
+            .into_events()
+            .pop()
+            .unwrap();
+        let mock = tg::test_kit::MockTransport::new([]).unwrap();
+        let profile = Profile {
+            bot: mock.bot().unwrap(),
+            expected: crate::profiles::ProfileIdentity::bot_api(0).unwrap(),
+            journal: journal.clone(),
+            bot_id: 0,
+            identity: OnceCell::new(),
+            feed,
+        };
+        let principal = Principal::new("alice").unwrap();
+        let time = now().unwrap();
+        let mut registry = CallbackRegistry::default();
+        let reference = registry
+            .register_event(
+                &profile,
+                &principal,
+                "primary",
+                &event,
+                &ExecutorOptions::default(),
+                time,
+            )
+            .unwrap();
+        let copied = registry
+            .lookup(&principal, "primary", reference.callback_query_id(), time)
+            .unwrap();
+        assert_eq!(registry.prune(time + 30_000), 1);
+        assert_eq!(
+            copied.deadline.remaining(time).unwrap_err().kind(),
+            ExecutorErrorKind::ReferenceExpired
+        );
+        journal.close().await.unwrap();
+    }
 }

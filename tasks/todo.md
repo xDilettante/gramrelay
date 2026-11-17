@@ -54,6 +54,26 @@ See tasks/goal.md. The active goal includes every unchecked module below.
 
   - Durable MT text actions implemented against SPEC-mtproto-agent-actions.md: strict journal v8, exact account/peer/file/callback scopes, shared operation keys and atomic write quotas, six-action Rust Executor, owned jobs with cancellation-safe capacity, resumable joined close, final caller-side disclosure checks and M2 absolute send/edit deadline caps. Twenty-three new cases include actual process kills before begin/after begin/after confirmation, restart, Unknown/Rejected/NotSent, approvals/revocation and closed-backend cache reads. Offline authorized MT text example passes. Workspace: 588 all-feature / 369 default tests, 16 doctests; Clippy/fmt, isolated builds and Python/schema/SDK checks pass. Fresh audit scans 363 dependencies with one new informational chrono-unmaintained warning; explicit Q3 remediation remains open. Reviewed storage/runtime/deadline changes have no unresolved findings. M3 still requires callback/document providers and shared CLI/MCP dispatch.
 
+The MTProto callback increment implements SPEC-mtproto-agent-callback.md: bot-only
+typed M2 answers, original same-journal observation proof, bounded owner aliases,
+current peer/unscoped grants and exact approvals, canonical v8 query admission,
+semantic same-key NotSent recovery and reference-capped owned execution. Seven
+Rust executor actions are available; document execution and CLI/MCP MTProto remain
+M3. The full goal stays active.
+
+Verified callback increment: six M2, seven registry/runtime unit, two Bot API
+clock regressions and ten real-TL intake/executor cases. Workspace: 613 all-feature
+/ 375 default tests and 16 doctests; final focused authority/disclosure checks,
+fmt/Clippy, isolated storage/executor/MT builds, 25 Python tests, protocol schema
+and four SDK verifiers pass. The offline authorized callback example proves one
+dispatch for two invocations. Fresh contract, registry and execution re-reviews
+are clear after two RED→GREEN timing fixes: cloned contexts retain shared
+irreversible clock expiry; runtime policy time is sampled after lock acquisition.
+Cross-model skipped in this autonomous continuation. Audit scans 363 dependencies
+with the known chrono-unmaintained warning; Q3 remediation is still required.
+Agent schema verification confirms the unchanged three v1 artifacts/eight Bot API
+tools; all-feature CLI/MCP binaries were rebuilt after executable checks.
+
 ## Release gates
 
 - [ ] Q1: task-based docs, migration guide, examples, agent index and 30-task evaluation.

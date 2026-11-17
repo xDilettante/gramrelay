@@ -68,9 +68,14 @@ pub struct OperationReceipt {
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<MessageReceipt>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    acknowledged: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     failure: Option<FailureReceipt>,
 }
 impl OperationReceipt {
+    pub fn acknowledged(&self) -> Option<bool> {
+        self.acknowledged
+    }
     pub fn operation_id(&self) -> &str {
         &self.operation_id
     }
@@ -163,12 +168,35 @@ impl ExecutionResult {
     }
 }
 pub(super) fn project(operation: Operation, scope: &Scope) -> Result<ExecutionResult> {
-    let message = operation
-        .result()
-        .map(|value| {
-            serde_json::from_value::<MessageReceipt>(value.clone()).map_err(|_| uncertain())
-        })
-        .transpose()?;
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Acknowledgement {
+        acknowledged: tg::api::True,
+    }
+    let (message, acknowledged) = if scope.action == Action::AnswerCallbackQuery {
+        let ack = operation
+            .result()
+            .map(|v| {
+                serde_json::from_value::<Acknowledgement>(v.clone())
+                    .map(|v| {
+                        let _ = v.acknowledged;
+                        true
+                    })
+                    .map_err(|_| uncertain())
+            })
+            .transpose()?;
+        (None, ack)
+    } else {
+        (
+            operation
+                .result()
+                .map(|value| {
+                    serde_json::from_value::<MessageReceipt>(value.clone()).map_err(|_| uncertain())
+                })
+                .transpose()?,
+            None,
+        )
+    };
     if message
         .as_ref()
         .is_some_and(|v| Some(v.peer) != scope.peer || i32::try_from(v.message_id.get()).is_err())
@@ -210,6 +238,7 @@ pub(super) fn project(operation: Operation, scope: &Scope) -> Result<ExecutionRe
                 state: operation.state(),
                 result_availability: operation.result_availability(),
                 message,
+                acknowledged,
                 failure,
             },
         },

@@ -180,6 +180,26 @@ impl Grant {
         }
         Ok(())
     }
+    pub(crate) fn check_callback_observation(
+        &self,
+        expected: ProfileIdentity,
+        peer: Option<PeerId>,
+        time: i64,
+    ) -> Result<()> {
+        if time < 0 {
+            return Err(invalid_policy());
+        }
+        if expected.kind() != ProfileKind::MtprotoBot
+            || self.expected != expected
+            || self.expiry.is_some_and(|v| time >= v)
+            || !(self.actions.contains(&Action::ReadUpdates)
+                || self.actions.contains(&Action::AnswerCallbackQuery))
+            || peer.map_or(!self.unscoped_updates, |p| !self.permits_peer(p))
+        {
+            return Err(denied());
+        }
+        Ok(())
+    }
     fn check_original(
         &self,
         request: &Request,

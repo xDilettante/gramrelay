@@ -2,15 +2,24 @@ use super::*;
 impl Worker {
     pub(super) async fn write(&self, auth: &Authorization) -> Result<ExecutionResult> {
         let request = &auth.request;
-        let peer = request.call().peer().expect("supported text peer");
-        let scope = Scope {
-            account: self.profile.expected,
-            action: request.action(),
-            peer: Some(peer),
-            file: None,
-            reference_hash: None,
+        let scope = if request.action() == Action::AnswerCallbackQuery {
+            auth.scope
+                .clone()
+                .ok_or_else(|| ExecutorError::new(ExecutorErrorKind::ContextRequired))?
+        } else {
+            Scope {
+                account: self.profile.expected,
+                action: request.action(),
+                peer: request.call().peer(),
+                file: None,
+                reference_hash: None,
+            }
         };
-        let payload = serde_json::to_value(request).map_err(|_| invalid_policy())?;
+        let payload = if let Some(reference) = &auth.reference {
+            callbacks::payload(request, reference)?
+        } else {
+            serde_json::to_value(request).map_err(|_| invalid_policy())?
+        };
         let operation = OperationRequest::new(
             &self.profile.name,
             auth.principal.as_str(),
@@ -36,6 +45,18 @@ impl Worker {
         };
         let preparation = async {
             auth.checked(now()?)?;
+            if let Call::AnswerCallbackQuery(args) = request.call() {
+                let reference = auth
+                    .reference
+                    .as_ref()
+                    .ok_or_else(|| ExecutorError::new(ExecutorErrorKind::ContextRequired))?;
+                let mut intent =
+                    tg_mtproto::CallbackAnswer::new(reference.query).show_alert(args.show_alert);
+                if let Some(text) = &args.text {
+                    intent = intent.text(text.clone()).map_err(remote)?;
+                }
+                return Ok(Input::Callback(intent));
+            }
             let intent = if let Call::SendMessage(args) = request.call() {
                 Some(
                     tg_mtproto::SendText::new(args.text.clone())
@@ -48,14 +69,14 @@ impl Worker {
             let resolved = self
                 .profile
                 .account
-                .cached_peer(peer.as_client_id())
+                .cached_peer(scope.peer.expect("text peer").as_client_id())
                 .await
                 .map_err(remote)?
                 .ok_or_else(|| ExecutorError::new(ExecutorErrorKind::NotFound))?;
-            Ok((resolved, intent))
+            Ok(Input::Text(resolved, intent))
         }
         .await;
-        let (resolved, intent) = match preparation {
+        let input = match preparation {
             Ok(peer) => peer,
             Err(error) => {
                 let _ = self.profile.journal.release_prepared(prepared).await;
@@ -76,7 +97,7 @@ impl Worker {
                 return Err(storage_error(error));
             }
         };
-        let dispatch = rpc_deadline(&flight, self.receipt_margin, auth);
+        let dispatch = rpc_deadline(&flight, self.options.receipt_margin, auth);
         let deadline = match dispatch {
             Ok(d) => d,
             Err(error) => {
@@ -88,44 +109,35 @@ impl Worker {
                 return Err(error.with_outcome(EffectOutcome::NotSent));
             }
         };
-        let response = match request.call() {
-            Call::SendMessage(_) => {
-                self.profile
-                    .account
-                    .send_text_until(&resolved, intent.expect("send intent"), deadline)
-                    .await
-            }
-            Call::EditMessageText(args) => {
-                self.profile
-                    .account
-                    .edit_text_until(
-                        &resolved,
-                        args.message_id.get() as i32,
-                        args.text.clone(),
-                        deadline,
-                    )
-                    .await
-            }
+        let response = match (input, request.call()) {
+            (Input::Callback(intent), Call::AnswerCallbackQuery(_)) => self
+                .profile
+                .account
+                .answer_callback_until(intent, deadline)
+                .await
+                .map(|_| Some(serde_json::json!({"acknowledged":true}))),
+            (Input::Text(resolved, intent), Call::SendMessage(_)) => self
+                .profile
+                .account
+                .send_text_until(&resolved, intent.expect("send intent"), deadline)
+                .await
+                .map(|r| message_value(r, scope.peer, None)),
+            (Input::Text(resolved, _), Call::EditMessageText(args)) => self
+                .profile
+                .account
+                .edit_text_until(
+                    &resolved,
+                    args.message_id.get() as i32,
+                    args.text.clone(),
+                    deadline,
+                )
+                .await
+                .map(|r| message_value(r, scope.peer, Some(args.message_id.get()))),
             _ => unreachable!("supported text action"),
         };
         let completion = match response {
-            Ok(receipt) => {
-                let expected = if let Call::EditMessageText(args) = request.call() {
-                    Some(args.message_id.get())
-                } else {
-                    None
-                };
-                if receipt.peer() != peer.as_client_id()
-                    || receipt.message_id() <= 0
-                    || expected.is_some_and(|id| id != i64::from(receipt.message_id()))
-                {
-                    Completion::executor_uncertain()
-                } else {
-                    Completion::succeeded(
-                        serde_json::json!({"peer":peer,"message_id":receipt.message_id().to_string()}),
-                    )
-                }
-            }
+            Ok(Some(value)) => Completion::succeeded(value),
+            Ok(None) => Completion::executor_uncertain(),
             Err(error) => Completion::from_mtproto(&error),
         };
         self.profile
@@ -156,6 +168,24 @@ impl Worker {
         output::project(operation, &scope)
     }
 }
+enum Input {
+    Text(tg_mtproto::Peer, Option<tg_mtproto::SendText>),
+    Callback(tg_mtproto::CallbackAnswer),
+}
+fn message_value(
+    receipt: tg_mtproto::MessageReceipt,
+    peer: Option<PeerId>,
+    expected: Option<i64>,
+) -> Option<serde_json::Value> {
+    let peer = peer?;
+    if receipt.peer() != peer.as_client_id()
+        || receipt.message_id() <= 0
+        || expected.is_some_and(|id| id != i64::from(receipt.message_id()))
+    {
+        return None;
+    }
+    Some(serde_json::json!({"peer":peer,"message_id":receipt.message_id().to_string()}))
+}
 fn rpc_deadline(
     flight: &journal::InFlight,
     receipt_margin: Duration,
@@ -174,6 +204,10 @@ fn rpc_deadline(
         .and_then(|d| d.checked_sub(receipt_margin))
         .ok_or_else(capacity)?;
     auth.checked(now()?)?;
+    let deadline = auth
+        .reference
+        .as_ref()
+        .map_or(deadline, |r| r.deadline.cap(deadline));
     if deadline <= Instant::now() {
         return Err(capacity());
     }
