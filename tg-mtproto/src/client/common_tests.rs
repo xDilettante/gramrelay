@@ -14,6 +14,32 @@ mod history;
 #[path = "update_receiver_tests.rs"]
 mod updates;
 
+#[tokio::test]
+async fn cached_peer_absolute_cap_covers_identity_and_refuses_already_expired_work() {
+    let (_dir, stored) = session().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    let client = fixture(stored, ClientOptions::default(), move |_, _| {
+        seen.fetch_add(1, Ordering::SeqCst);
+        async { std::future::pending().await }
+    });
+    let account = client.account(expected());
+    let id = PeerId::user(42).unwrap();
+    let error = account
+        .cached_peer_until(id, std::time::Instant::now() - Duration::from_secs(1))
+        .await
+        .unwrap_err();
+    assert_eq!(error.outcome(), Outcome::NotSent);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let error = account
+        .cached_peer_until(id, std::time::Instant::now() + Duration::from_millis(80))
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), ClientErrorKind::Timeout);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    client.close().await.unwrap();
+}
+
 #[test]
 fn extreme_peer_ids_fail_before_upstream_eager_arithmetic() {
     for constructor in [PeerId::user, PeerId::chat, PeerId::channel] {

@@ -5,6 +5,168 @@ mod auth;
 #[path = "common_tests.rs"]
 mod common;
 
+#[tokio::test]
+async fn receiver_close_race_disposes_rejected_owned_call_off_the_submitting_task() {
+    struct Owner;
+    impl AsRef<[u8]> for Owner {
+        fn as_ref(&self) -> &[u8] {
+            b"abc"
+        }
+    }
+    impl Drop for Owner {
+        fn drop(&mut self) {
+            panic!("synthetic rejected owner");
+        }
+    }
+    let (_dir, stored) = session().await;
+    let client = fixture(stored.clone(), ClientOptions::default(), |_, _| async {
+        panic!("must not dispatch")
+    });
+    client
+        .inner
+        .startup
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .receiver
+        .close();
+    let source = bytes::Bytes::from_owner(Owner);
+    let result = client
+        .submit_with_source(
+            client.reserve().unwrap(),
+            Some(source.clone()),
+            move |_| async move {
+                drop(source);
+                Ok(())
+            },
+        )
+        .await;
+    let _ = client.close().await;
+    assert_eq!(result.unwrap_err().outcome(), Outcome::NotSent);
+    assert_eq!(
+        stored.remembered_account().unwrap_err().kind(),
+        crate::SessionErrorKind::Closed
+    );
+}
+
+#[tokio::test]
+async fn expired_queued_work_is_not_sent_and_does_not_close_a_healthy_driver() {
+    let (_dir, stored) = session().await;
+    let client = fixture(stored, ClientOptions::default(), |_, bytes| async move {
+        Ok(pong(&bytes))
+    });
+    let (permit, _) = client.reserve().unwrap();
+    let pending = client.submit(
+        (
+            permit,
+            tokio::time::Instant::now() + Duration::from_millis(30),
+        ),
+        |_| async {
+            panic!("expired action must not run");
+            #[allow(unreachable_code)]
+            Ok(())
+        },
+    );
+    tokio::pin!(pending);
+    std::future::poll_fn(|cx| {
+        assert!(pending.as_mut().poll(cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    std::thread::sleep(Duration::from_millis(60));
+    let error = pending.await.unwrap_err();
+    assert_eq!(error.kind(), ClientErrorKind::Timeout);
+    assert_eq!(error.outcome(), Outcome::NotSent);
+    client
+        .invoke(&tl::functions::Ping { ping_id: 7 })
+        .await
+        .unwrap();
+    client.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn nested_owner_panic_payload_cannot_escape_queued_cleanup_or_skip_session_close() {
+    struct Payload(Arc<AtomicBool>);
+    impl Drop for Payload {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+            panic!("payload destructor must not run");
+        }
+    }
+    struct Owner(Arc<AtomicBool>);
+    impl AsRef<[u8]> for Owner {
+        fn as_ref(&self) -> &[u8] {
+            b"abc"
+        }
+    }
+    impl Drop for Owner {
+        fn drop(&mut self) {
+            std::panic::panic_any(Payload(self.0.clone()));
+        }
+    }
+    let (_dir, stored) = session().await;
+    let client = fixture(stored.clone(), ClientOptions::default(), |_, _| async {
+        panic!("must not dispatch")
+    });
+    let payload_dropped = Arc::new(AtomicBool::new(false));
+    let source = bytes::Bytes::from_owner(Owner(payload_dropped.clone()));
+    let pending = client.submit_with_source(
+        client.reserve().unwrap(),
+        Some(source.clone()),
+        move |_| async move {
+            drop(source);
+            Ok(())
+        },
+    );
+    tokio::pin!(pending);
+    std::future::poll_fn(|cx| {
+        assert!(pending.as_mut().poll(cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    let _ = client.close().await;
+    assert_eq!(pending.await.unwrap_err().kind(), ClientErrorKind::Backend);
+    assert!(!payload_dropped.load(Ordering::SeqCst));
+    assert_eq!(
+        stored.remembered_account().unwrap_err().kind(),
+        crate::SessionErrorKind::Closed
+    );
+}
+
+#[tokio::test]
+async fn a_queued_owner_destructor_cannot_skip_session_close_before_actor_start() {
+    struct Owner;
+    impl Drop for Owner {
+        fn drop(&mut self) {
+            panic!("synthetic queued cleanup");
+        }
+    }
+    let (_directory, stored) = session().await;
+    let client = fixture(stored.clone(), ClientOptions::default(), |_, _| async {
+        panic!("must not dispatch")
+    });
+    let owner = Owner;
+    let pending = client.submit(client.reserve().unwrap(), move |_| async move {
+        drop(owner);
+        Ok(())
+    });
+    tokio::pin!(pending);
+    std::future::poll_fn(|cx| {
+        assert!(pending.as_mut().poll(cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    // No yield above: close precedes the actor's first poll and drains the queue.
+    let _ = client.close().await;
+    let error = pending.await.unwrap_err();
+    assert_eq!(error.outcome(), Outcome::NotSent);
+    assert_eq!(
+        stored.remembered_account().unwrap_err().kind(),
+        crate::SessionErrorKind::Closed
+    );
+}
+
 async fn session() -> (tempfile::TempDir, Session) {
     let directory = tempfile::tempdir().unwrap();
     let session = Session::open(

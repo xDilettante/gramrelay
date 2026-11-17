@@ -196,6 +196,19 @@ impl Account {
         F: FnOnce(Context, Session) -> Fut + Send + 'static,
         Fut: Future<Output = Result<T>> + Send + 'static,
     {
+        self.run_until_owned(deadline, None, action).await
+    }
+    pub(super) async fn run_until_owned<T, F, Fut>(
+        &self,
+        deadline: Option<std::time::Instant>,
+        owner: Option<bytes::Bytes>,
+        action: F,
+    ) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(Context, Session) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<T>> + Send + 'static,
+    {
         auth::check_stored(&self.client.inner.session, self.expected)?;
         let mut reservation = self.client.reserve()?;
         if let Some(deadline) = deadline {
@@ -206,7 +219,7 @@ impl Account {
         let expected = self.expected;
         let limit = self.client.inner.options.max_request_bytes;
         self.client
-            .submit(reservation, move |context| async move {
+            .submit_with_source(reservation, owner, move |context| async move {
                 context.hold_authorization_read(authorization).await;
                 auth::verify_in_context(&context, &session, expected, limit).await?;
                 action(context, session).await
@@ -266,8 +279,23 @@ impl Account {
     }
     /// Read cached routing metadata after live self verification. No target RPC.
     pub async fn cached_peer(&self, id: PeerId) -> Result<Option<Peer>> {
+        self.cached_peer_inner(id, None).await
+    }
+    /// Cap the live identity check and cache lookup by an absolute deadline.
+    pub async fn cached_peer_until(
+        &self,
+        id: PeerId,
+        deadline: std::time::Instant,
+    ) -> Result<Option<Peer>> {
+        self.cached_peer_inner(id, Some(deadline)).await
+    }
+    async fn cached_peer_inner(
+        &self,
+        id: PeerId,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<Option<Peer>> {
         let references = self.references();
-        self.run(move |_, session| async move {
+        self.run_until(deadline, move |_, session| async move {
             Ok(input_peer(&session, id, references.expected)
                 .await?
                 .map(|_| references.reference(id)))

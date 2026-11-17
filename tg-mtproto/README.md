@@ -191,6 +191,22 @@ folders, distinct from custom chat filters.
 
 Upload and send one document intent, with an independently known content hash:
 
+`SendDocument::owned_bytes(name, mime, owner)` retains an immutable host owner
+without a second full file copy. The owner implements `AsRef<[u8]> + Send + 'static`;
+the host accounts storage beyond its exposed slice. The ordinary `bytes(Vec)`
+entry point still checks retained Vec capacity and wipes its allocation on Drop.
+`send_document_until` caps identity, native preparation, parts and final send with
+one absolute deadline. `cached_peer_until` also caps the preceding verified cache
+lookup when a host supplies an expiring capability.
+
+Accepted calls retain their source from queue admission through joined cleanup,
+including caller cancellation, failed reads and final media confirmation. Owner
+destruction runs on bounded native work. If a host destructor panics, the client
+is fenced and session cleanup continues; its panic payload is intentionally
+retained because dropping that payload could panic again. Before admission,
+ordinary Rust caller ownership applies. A failed enqueue disposes its rejected
+call natively; its permit remains held if that caller cancels the wait.
+
 ```rust,no_run
 use tg_mtproto::{Account, ClientError, DocumentReceipt, Peer, SendDocument};
 

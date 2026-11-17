@@ -74,6 +74,27 @@ with the known chrono-unmaintained warning; Q3 remediation is still required.
 Agent schema verification confirms the unchanged three v1 artifacts/eight Bot API
 tools; all-feature CLI/MCP binaries were rebuilt after executable checks.
 
+File-provider foundations are implemented against SPEC-mtproto-agent-files.md:
+shared immutable FileRegistry/FileLimits and metadata methods replace the Bot-only
+copy; M2 owned_bytes preserves source ownership without another complete buffer,
+and send_document_until/cached_peer_until share absolute caps. Accepted calls keep
+their source from queue through identity, part drain, final media and native
+cleanup. Queued/rejected and panicking owners cannot skip session finalization;
+stale queued work stays NotSent without fencing a healthy driver. Host cleanup
+panic payload retention is explicit in ADR 0018. The eighth MT executor action,
+its integration/example and CLI/MCP remain unimplemented M3 work.
+
+Verified foundations: ten further M2 lifecycle/source cases (183 M2 library
+checks), including four observed RED→GREEN failures plus a stale-queue regression
+and existing DC-import waiter fence. Shared registry preserves 25 Bot library /
+12 file integration checks. Workspace: 623 all-feature / 385 default tests,
+16 doctests; fmt/Clippy, isolated storage/executor/MT builds, 25 Python tests,
+protocol/agent schemas, four SDK verifiers and final all-feature binaries pass.
+Fresh audit scans 363 dependencies with the known chrono-unmaintained warning;
+only a direct edge to already-pinned bytes 1.12.1 was added. Registry/source/
+disposal/queue reviews are reconciled with scoped clean re-reviews. Cross-model
+skipped in the autonomous continuation. The full goal remains active.
+
 ## Release gates
 
 - [ ] Q1: task-based docs, migration guide, examples, agent index and 30-task evaluation.

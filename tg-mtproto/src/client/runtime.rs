@@ -20,6 +20,33 @@ pub(super) struct Context {
     before_dc_confirm: Option<Duration>,
 }
 impl Context {
+    async fn release_source_owner(&self, action: Option<Action>) -> Result<()> {
+        if self
+            .state
+            .source_owner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_none()
+            && action.is_none()
+        {
+            return Ok(());
+        }
+        // Do not take the owner across an await before native admission: a
+        // cancelled cleanup waiter leaves it in state for joined shutdown.
+        let mut jobs = self.blocking.lock().await;
+        let mut failed = false;
+        while let Some(result) = jobs.join_next().await {
+            failed |= result.is_err();
+        }
+        let owner = self.state.take_source_owner();
+        let waiting = dispose_native(&mut jobs, (action, owner));
+        drop(jobs);
+        if waiting.await.unwrap_or(false) && !failed {
+            Ok(())
+        } else {
+            Err(error(ClientErrorKind::Backend, Outcome::Unknown))
+        }
+    }
     pub(super) fn polling_deadline(&self, wait: Duration) -> tokio::time::Instant {
         let now = tokio::time::Instant::now();
         now + wait.min(self.deadline.saturating_duration_since(now) / 2)
@@ -305,6 +332,7 @@ struct CallState {
     phase: std::sync::atomic::AtomicU8,
     done: AtomicBool,
     authorization: Mutex<Option<AuthorizationGuard>>,
+    source_owner: Mutex<Option<bytes::Bytes>>,
     stop_generation: AtomicBool,
     logout_confirmed: AtomicBool,
     completion: Mutex<Completion>,
@@ -313,6 +341,12 @@ struct CallState {
     dc_guard: Mutex<Option<tokio::sync::OwnedMutexGuard<()>>>,
 }
 impl CallState {
+    fn take_source_owner(&self) -> Option<bytes::Bytes> {
+        self.source_owner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
     fn is_pending(&self) -> bool {
         *self
             .completion
@@ -370,6 +404,7 @@ struct Pending {
     reply: Reply,
     _slot: Slot,
     deadline: tokio::time::Instant,
+    enforce_deadline: bool,
     state: Arc<CallState>,
 }
 
@@ -416,6 +451,43 @@ fn reply_take(reply: &Reply) -> Option<oneshot::Sender<Result<Value>>> {
         .take()
 }
 
+fn dispose<T>(value: T) -> bool {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(value))) {
+        Ok(()) => true,
+        Err(payload) => {
+            // A host panic payload can itself panic on Drop. Leak only this
+            // failed cleanup payload; the caller fences the bounded client.
+            std::mem::forget(payload);
+            false
+        }
+    }
+}
+fn dispose_native<T: Send + 'static>(jobs: &mut JoinSet<()>, value: T) -> oneshot::Receiver<bool> {
+    let (reply, waiting) = oneshot::channel();
+    jobs.spawn_blocking(move || {
+        let _ = reply.send(dispose(value));
+    });
+    waiting
+}
+pub(super) async fn reject_unstarted(call: Call, failure: ClientError) -> bool {
+    let Call {
+        action,
+        source_owner,
+        permit,
+        reply,
+        ..
+    } = call;
+    let clean = tokio::task::spawn_blocking(move || dispose((action, source_owner, permit)))
+        .await
+        .unwrap_or(false);
+    let _ = reply.send(Err(if clean {
+        failure
+    } else {
+        error(ClientErrorKind::Backend, Outcome::NotSent)
+    }));
+    clean
+}
+
 pub(super) async fn run(
     mut startup: Startup,
     options: ClientOptions,
@@ -429,16 +501,21 @@ pub(super) async fn run(
         shared.closed.store(true, Ordering::Release);
         slots.close();
         startup.receiver.close();
+        let mut cleanup_failed = false;
         while let Ok(call) = startup.receiver.try_recv() {
-            let _ = call
-                .reply
-                .send(Err(error(ClientErrorKind::Closed, Outcome::NotSent)));
+            cleanup_failed |=
+                !reject_unstarted(call, error(ClientErrorKind::Closed, Outcome::NotSent)).await;
         }
         let result = startup
             .claim
             .finish()
             .await
-            .map_err(|_| error(ClientErrorKind::Session, Outcome::Unknown));
+            .map_err(|_| error(ClientErrorKind::Session, Outcome::Unknown))
+            .and(if cleanup_failed {
+                Err(error(ClientErrorKind::Backend, Outcome::NotSent))
+            } else {
+                Ok(())
+            });
         shared.exited.send_replace(Some(result));
         exit.complete();
         return;
@@ -453,9 +530,7 @@ pub(super) async fn run(
             slots.close();
             startup.receiver.close();
             while let Ok(call) = startup.receiver.try_recv() {
-                let _ = call
-                    .reply
-                    .send(Err(error(ClientErrorKind::Backend, Outcome::NotSent)));
+                reject_unstarted(call, error(ClientErrorKind::Backend, Outcome::NotSent)).await;
             }
             let _ = startup.claim.finish().await;
             shared
@@ -477,6 +552,7 @@ pub(super) async fn run(
     let blocking = Arc::new(tokio::sync::Mutex::new(JoinSet::<()>::new()));
     let mut active = HashMap::<u64, Pending>::new();
     let mut next_id = 0u64;
+    let mut unstarted = Vec::new();
     let mut driver_exit = None;
     let reason = loop {
         if shared.closed.load(Ordering::Acquire) {
@@ -488,7 +564,9 @@ pub(super) async fn run(
         };
         let deadline = active
             .values()
-            .filter(|pending| !pending.state.done.load(Ordering::Acquire))
+            .filter(|pending| {
+                pending.enforce_deadline && !pending.state.done.load(Ordering::Acquire)
+            })
             .map(|pending| pending.deadline)
             .min();
         tokio::select! { biased;
@@ -499,7 +577,7 @@ pub(super) async fn run(
             _=tokio::time::sleep_until(lease)=> {if startup.claim.live().is_err() {break ClientErrorKind::Session;}}
             _=async {match deadline {Some(deadline)=>tokio::time::sleep_until(deadline).await,None=>std::future::pending().await}}=> {
                 let now=tokio::time::Instant::now();
-                if active.values().any(|pending|!pending.state.done.load(Ordering::Acquire) && pending.deadline<=now && pending.state.is_pending()) {break ClientErrorKind::Timeout;}
+                if active.values().any(|pending|pending.enforce_deadline && !pending.state.done.load(Ordering::Acquire) && pending.deadline<=now && pending.state.is_pending()) {break ClientErrorKind::Timeout;}
             }
             result=&mut driver=> {driver_exit=Some(result);break ClientErrorKind::Backend;}
             completed=jobs.join_next(),if !jobs.is_empty()=> {
@@ -512,16 +590,18 @@ pub(super) async fn run(
                 }
             }
             call=startup.receiver.recv()=> {
-                let Some(call)=call else {break ClientErrorKind::Closed;};
-                if shared.closed.load(Ordering::Acquire) {let _=call.reply.send(Err(error(ClientErrorKind::Closed,Outcome::NotSent)));break ClientErrorKind::Closed;}
-                if tokio::time::Instant::now()>=call.deadline {let _=call.reply.send(Err(error(ClientErrorKind::Timeout,Outcome::NotSent)));continue;}
-                if startup.claim.live().is_err() {let _=call.reply.send(Err(error(ClientErrorKind::Session,Outcome::NotSent)));break ClientErrorKind::Session;}
-                let Some(id)=next_id.checked_add(1) else {let _=call.reply.send(Err(error(ClientErrorKind::Capacity,Outcome::NotSent)));break ClientErrorKind::Capacity;};
+                let Some(mut call)=call else {break ClientErrorKind::Closed;};
+                if shared.closed.load(Ordering::Acquire) {unstarted.push(call);break ClientErrorKind::Closed;}
+                if startup.claim.live().is_err() {unstarted.push(call);break ClientErrorKind::Session;}
+                let Some(id)=next_id.checked_add(1) else {unstarted.push(call);break ClientErrorKind::Capacity;};
                 next_id=id;
                 let reply=Arc::new(Mutex::new(Some(call.reply)));
                 let slot=Arc::new(Mutex::new(Some(call.permit)));
-                let state=Arc::new(CallState::default());
-                active.insert(id,Pending {reply:reply.clone(),_slot:slot.clone(),deadline:call.deadline,state:state.clone()});
+                let state=Arc::new(CallState {source_owner:Mutex::new(call.source_owner.take()),..CallState::default()});
+                // Stale queue entries need owned native disposal, but never
+                // started work whose timeout would fence the shared driver.
+                let expired_at_admission=tokio::time::Instant::now()>=call.deadline;
+                active.insert(id,Pending {reply:reply.clone(),_slot:slot.clone(),deadline:call.deadline,enforce_deadline:!expired_at_admission,state:state.clone()});
                 let context=Context {handle:handle.clone(),session:startup.claim.session(),max_response_bytes:options.max_response_bytes,state:state.clone(),shared:shared.clone(),deadline:call.deadline,blocking:blocking.clone(),#[cfg(test)]before_compute:options.before_compute,#[cfg(test)]before_dc_confirm:options.before_dc_confirm};
                 let shared=shared.clone();
                 let session_health=context.handle.session.clone();
@@ -532,9 +612,12 @@ pub(super) async fn run(
                 #[cfg(test)]
                 let before_accept=options.before_accept;
                 jobs.spawn(async move {
-                    let result=if tokio::time::Instant::now()>=call.deadline {Err(error(ClientErrorKind::Timeout,state.seal()))}
-                        else if shared.closed.load(Ordering::Acquire) {Err(error(ClientErrorKind::Closed,state.seal()))}
-                        else {(call.action)(context).await};
+                    let cleanup_context=context.clone();
+                    let expired_before_start=expired_at_admission || tokio::time::Instant::now()>=call.deadline;
+                    let (mut result,unpolled)=if expired_before_start {(Err(error(ClientErrorKind::Timeout,state.seal())),Some(call.action))}
+                        else if shared.closed.load(Ordering::Acquire) {(Err(error(ClientErrorKind::Closed,state.seal())),Some(call.action))}
+                        else {((call.action)(context).await,None)};
+                    if let Err(failure)=cleanup_context.release_source_owner(unpolled).await {cleanup_context.stop_after_action();result=Err(failure);}
                     #[cfg(test)]
                     if let Some(delay)=before_fence {tokio::time::sleep(delay).await;}
                     #[cfg(test)]
@@ -553,7 +636,7 @@ pub(super) async fn run(
                         *completion=Completion::Accepted;
                         state.done.store(true,Ordering::Release);
                         if override_failure.is_none() && result.is_ok() && state.logout_confirmed.load(Ordering::Acquire) {shared.logout_confirmed.store(true,Ordering::Release);}
-                        let fence=if state.stop_generation.load(Ordering::Acquire) {Some(ClientErrorKind::Closed)} else {failure.as_ref().filter(|failure|failure.kind()==ClientErrorKind::Timeout || (failure.outcome()==Outcome::Unknown && (state.authorization_transition() || matches!(failure.kind(),ClientErrorKind::Backend|ClientErrorKind::Session|ClientErrorKind::Decode|ClientErrorKind::Capacity|ClientErrorKind::IdentityMismatch)))).map(ClientError::kind)};
+                        let fence=if state.stop_generation.load(Ordering::Acquire) {Some(ClientErrorKind::Closed)} else {failure.as_ref().filter(|failure|(failure.kind()==ClientErrorKind::Timeout && !expired_before_start) || (failure.outcome()==Outcome::Unknown && (state.authorization_transition() || matches!(failure.kind(),ClientErrorKind::Backend|ClientErrorKind::Session|ClientErrorKind::Decode|ClientErrorKind::Capacity|ClientErrorKind::IdentityMismatch)))).map(|failure|match failure.kind(){ClientErrorKind::Rpc|ClientErrorKind::FloodWait=>ClientErrorKind::Closed,kind=>kind})};
                         if fence.is_some() {shared.closed.store(true,Ordering::Release);}
                         (override_failure,fence)
                     };
@@ -590,7 +673,7 @@ pub(super) async fn run(
         }
     }
     while let Ok(call) = startup.receiver.try_recv() {
-        let _ = call.reply.send(Err(error(reason, Outcome::NotSent)));
+        unstarted.push(call);
     }
     handle.quit();
     let driver_result = match driver_exit {
@@ -602,12 +685,33 @@ pub(super) async fn run(
     let mut blocking_failed = false;
     {
         let mut jobs = blocking.lock().await;
-        jobs.abort_all();
+        // Queued native cleanup must run too: aborting its closure could drop an
+        // arbitrary owner outside the protected worker and skip session cleanup.
         while let Some(result) = jobs.join_next().await {
             blocking_failed |= result.is_err_and(|error| error.is_panic());
         }
+        for pending in active.values() {
+            if let Some(owner) = pending.state.take_source_owner() {
+                // One cleanup at a time, preserving the shared native work bound.
+                let waiting = dispose_native(&mut jobs, owner);
+                while let Some(result) = jobs.join_next().await {
+                    blocking_failed |= result.is_err_and(|error| error.is_panic());
+                }
+                blocking_failed |= !waiting.await.unwrap_or(false);
+            }
+        }
     }
     drop(active);
+    for call in unstarted {
+        // These calls never invoked their action; another call's RPC failure is
+        // not their remote outcome. Preserve only their own elapsed deadline.
+        let kind = if tokio::time::Instant::now() >= call.deadline {
+            ClientErrorKind::Timeout
+        } else {
+            ClientErrorKind::Closed
+        };
+        blocking_failed |= !reject_unstarted(call, error(kind, Outcome::NotSent)).await;
+    }
     startup.updates.close().await;
     drop(handle);
     let stored = if shared.logout_confirmed.load(Ordering::Acquire) {

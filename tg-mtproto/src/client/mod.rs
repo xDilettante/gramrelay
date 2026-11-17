@@ -112,6 +112,7 @@ type Action = Box<dyn FnOnce(runtime::Context) -> JobFuture + Send>;
 type Factory = Box<dyn FnOnce(Arc<crate::session::BackendSession>, i32) -> SenderPool + Send>;
 struct Call {
     action: Action,
+    source_owner: Option<bytes::Bytes>,
     reply: oneshot::Sender<Result<Value>>,
     permit: OwnedSemaphorePermit,
     deadline: tokio::time::Instant,
@@ -313,6 +314,19 @@ impl Client {
         F: FnOnce(runtime::Context) -> Fut + Send + 'static,
         Fut: Future<Output = Result<T>> + Send + 'static,
     {
+        self.submit_with_source(reservation, None, action).await
+    }
+    async fn submit_with_source<T, F, Fut>(
+        &self,
+        reservation: (OwnedSemaphorePermit, tokio::time::Instant),
+        source_owner: Option<bytes::Bytes>,
+        action: F,
+    ) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(runtime::Context) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<T>> + Send + 'static,
+    {
         if tokio::time::Instant::now() >= reservation.1 {
             return Err(error(ClientErrorKind::Timeout, Outcome::NotSent));
         }
@@ -322,6 +336,7 @@ impl Client {
         }
         let (reply, waiting) = oneshot::channel();
         let call = Call {
+            source_owner,
             action: Box::new(move |context| {
                 Box::pin(async move { action(context).await.map(|value| Box::new(value) as Value) })
             }),
@@ -329,10 +344,13 @@ impl Client {
             permit: reservation.0,
             deadline: reservation.1,
         };
-        self.inner
-            .sender
-            .try_send(call)
-            .map_err(|_| error(ClientErrorKind::Closed, Outcome::NotSent))?;
+        if let Err(rejected) = self.inner.sender.try_send(call) {
+            runtime::reject_unstarted(
+                rejected.into_inner(),
+                error(ClientErrorKind::Closed, Outcome::NotSent),
+            )
+            .await;
+        }
         waiting
             .await
             .map_err(|_| error(ClientErrorKind::Backend, Outcome::Unknown))??

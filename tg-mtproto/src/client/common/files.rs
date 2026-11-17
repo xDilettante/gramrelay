@@ -29,7 +29,20 @@ impl fmt::Debug for SendDocument {
 impl SendDocument {
     pub fn bytes(name: impl Into<String>, mime: impl Into<String>, bytes: Vec<u8>) -> Result<Self> {
         let source = Source::bytes(bytes);
-        if matches!(&source, Source::Bytes(bytes) if bytes.is_empty()) {
+        if matches!(&source, Source::Bytes {bytes,..} if bytes.is_empty()) {
+            return Err(invalid());
+        }
+        Self::new(source, name, mime)
+    }
+    /// Retains stable immutable bytes without a full copy. The trusted owner must
+    /// account storage beyond its exposed slice and keep it valid until Drop.
+    pub fn owned_bytes(
+        name: impl Into<String>,
+        mime: impl Into<String>,
+        owner: impl AsRef<[u8]> + Send + 'static,
+    ) -> Result<Self> {
+        let source = Source::owned(owner);
+        if matches!(&source, Source::Bytes { bytes,.. } if bytes.is_empty()) {
             return Err(invalid());
         }
         Self::new(source, name, mime)
@@ -128,8 +141,8 @@ impl SendDocument {
         {
             return Err(invalid());
         }
-        if let Source::Bytes(bytes) = &self.source
-            && (bytes.len() as u64 > self.max_bytes || bytes.capacity() as u64 > self.max_bytes)
+        if let Source::Bytes { bytes, retained } = &self.source
+            && (bytes.len() as u64 > self.max_bytes || *retained > self.max_bytes)
         {
             return Err(invalid());
         }
@@ -184,184 +197,208 @@ impl Account {
         peer: &Peer,
         intent: SendDocument,
     ) -> Result<DocumentReceipt> {
+        self.send_document_inner(peer, intent, None).await
+    }
+    /// Absolute cap for identity, native preparation, every part and final send.
+    pub async fn send_document_until(
+        &self,
+        peer: &Peer,
+        intent: SendDocument,
+        deadline: std::time::Instant,
+    ) -> Result<DocumentReceipt> {
+        self.send_document_inner(peer, intent, Some(deadline)).await
+    }
+    async fn send_document_inner(
+        &self,
+        peer: &Peer,
+        intent: SendDocument,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<DocumentReceipt> {
         intent.validate()?;
         let byte_limit = self.client.inner.options.max_request_bytes;
         let part_size = part_size(byte_limit)?;
         let references = self.references();
         peer.check(&references)?;
         let peer = peer.clone();
-        self.run(move |context, session| async move {
-            peer.check(&references)?;
-            let input_peer = input_peer(&session, peer.id, references.expected)
-                .await?
-                .ok_or_else(|| error(ClientErrorKind::PeerUnavailable, Outcome::NotSent))?;
-            let SendDocument {
-                source,
-                name,
-                mime,
-                caption,
-                random_id,
-                file_id,
-                max_bytes,
-                parallelism,
-                expected_sha256,
-                silent,
-            } = intent;
-            let guard = context.clone();
-            let prepared = context
-                .compute(move || {
-                    Prepared::open(source, part_size, max_bytes, expected_sha256, &|| {
-                        guard.check_active()
-                    })
-                })
-                .await?;
-            let size = prepared.size();
-            let total = i32::try_from(size.div_ceil(part_size as u64)).map_err(|_| invalid())?;
-            let big = size > 10 * 1024 * 1024;
-            let mut final_bytes = {
-                let file = if big {
-                    tl::enums::InputFile::Big(tl::types::InputFileBig {
-                        id: file_id,
-                        parts: total,
-                        name: name.to_string(),
-                    })
-                } else {
-                    tl::enums::InputFile::File(tl::types::InputFile {
-                        id: file_id,
-                        parts: total,
-                        name: name.to_string(),
-                        md5_checksum: prepared.md5_checksum().to_owned(),
-                    })
-                };
-                let request = MediaRequest(tl::functions::messages::SendMedia {
-                    silent,
-                    background: false,
-                    clear_draft: false,
-                    noforwards: false,
-                    update_stickersets_order: false,
-                    invert_media: false,
-                    allow_paid_floodskip: false,
-                    peer: input_peer,
-                    reply_to: None,
-                    media: tl::enums::InputMedia::UploadedDocument(
-                        tl::types::InputMediaUploadedDocument {
-                            nosound_video: false,
-                            force_file: true,
-                            spoiler: false,
-                            file,
-                            thumb: None,
-                            mime_type: mime.to_string(),
-                            attributes: vec![tl::enums::DocumentAttribute::Filename(
-                                tl::types::DocumentAttributeFilename {
-                                    file_name: name.to_string(),
-                                },
-                            )],
-                            stickers: None,
-                            video_cover: None,
-                            video_timestamp: None,
-                            ttl_seconds: None,
-                        },
-                    ),
-                    message: caption.to_string(),
+        self.run_until_owned(
+            deadline,
+            intent.source.owner_guard(),
+            move |context, session| async move {
+                peer.check(&references)?;
+                let input_peer = input_peer(&session, peer.id, references.expected)
+                    .await?
+                    .ok_or_else(|| error(ClientErrorKind::PeerUnavailable, Outcome::NotSent))?;
+                let SendDocument {
+                    source,
+                    name,
+                    mime,
+                    caption,
                     random_id,
-                    reply_markup: None,
-                    entities: None,
-                    schedule_date: None,
-                    schedule_repeat_period: None,
-                    send_as: None,
-                    quick_reply_shortcut: None,
-                    effect: None,
-                    allow_paid_stars: None,
-                    suggested_post: None,
-                });
-                super::super::encode_request(&request.0, byte_limit)?
-            };
-            let mut prepared = Some(prepared);
-            let mut pending = FuturesUnordered::new();
-            let mut failure = None;
-            let mut index = 0;
-            while prepared.as_ref().is_some_and(Prepared::has_remaining) {
-                if pending.len() == parallelism
-                    && let Some(Err(error)) = pending.next().await
-                {
-                    failure = Some(error);
-                    break;
-                }
-                let source = prepared.take().ok_or_else(malformed)?;
+                    file_id,
+                    max_bytes,
+                    parallelism,
+                    expected_sha256,
+                    silent,
+                } = intent;
                 let guard = context.clone();
-                match context
-                    .compute(move || source.read_next(&|| guard.check_active()))
-                    .await
-                {
-                    Ok((next, bytes)) => {
-                        prepared = Some(next);
-                        pending.push(save_part(
-                            context.clone(),
-                            file_id,
-                            index,
-                            total,
-                            big,
-                            bytes,
-                            byte_limit,
-                        ));
-                        index += 1;
-                    }
-                    Err(error) => {
+                let prepared = context
+                    .compute(move || {
+                        Prepared::open(source, part_size, max_bytes, expected_sha256, &|| {
+                            guard.check_active()
+                        })
+                    })
+                    .await?;
+                let size = prepared.size();
+                let total =
+                    i32::try_from(size.div_ceil(part_size as u64)).map_err(|_| invalid())?;
+                let big = size > 10 * 1024 * 1024;
+                let mut final_bytes = {
+                    let file = if big {
+                        tl::enums::InputFile::Big(tl::types::InputFileBig {
+                            id: file_id,
+                            parts: total,
+                            name: name.to_string(),
+                        })
+                    } else {
+                        tl::enums::InputFile::File(tl::types::InputFile {
+                            id: file_id,
+                            parts: total,
+                            name: name.to_string(),
+                            md5_checksum: prepared.md5_checksum().to_owned(),
+                        })
+                    };
+                    let request = MediaRequest(tl::functions::messages::SendMedia {
+                        silent,
+                        background: false,
+                        clear_draft: false,
+                        noforwards: false,
+                        update_stickersets_order: false,
+                        invert_media: false,
+                        allow_paid_floodskip: false,
+                        peer: input_peer,
+                        reply_to: None,
+                        media: tl::enums::InputMedia::UploadedDocument(
+                            tl::types::InputMediaUploadedDocument {
+                                nosound_video: false,
+                                force_file: true,
+                                spoiler: false,
+                                file,
+                                thumb: None,
+                                mime_type: mime.to_string(),
+                                attributes: vec![tl::enums::DocumentAttribute::Filename(
+                                    tl::types::DocumentAttributeFilename {
+                                        file_name: name.to_string(),
+                                    },
+                                )],
+                                stickers: None,
+                                video_cover: None,
+                                video_timestamp: None,
+                                ttl_seconds: None,
+                            },
+                        ),
+                        message: caption.to_string(),
+                        random_id,
+                        reply_markup: None,
+                        entities: None,
+                        schedule_date: None,
+                        schedule_repeat_period: None,
+                        send_as: None,
+                        quick_reply_shortcut: None,
+                        effect: None,
+                        allow_paid_stars: None,
+                        suggested_post: None,
+                    });
+                    super::super::encode_request(&request.0, byte_limit)?
+                };
+                let mut prepared = Some(prepared);
+                let mut pending = FuturesUnordered::new();
+                let mut failure = None;
+                let mut index = 0;
+                while prepared.as_ref().is_some_and(Prepared::has_remaining) {
+                    if pending.len() == parallelism
+                        && let Some(Err(error)) = pending.next().await
+                    {
                         failure = Some(error);
                         break;
                     }
+                    let source = prepared.take().ok_or_else(malformed)?;
+                    let guard = context.clone();
+                    match context
+                        .compute(move || source.read_next(&|| guard.check_active()))
+                        .await
+                    {
+                        Ok((next, bytes)) => {
+                            prepared = Some(next);
+                            pending.push(save_part(
+                                context.clone(),
+                                file_id,
+                                index,
+                                total,
+                                big,
+                                bytes,
+                                byte_limit,
+                            ));
+                            index += 1;
+                        }
+                        Err(error) => {
+                            failure = Some(error);
+                            break;
+                        }
+                    }
                 }
-            }
-            while let Some(result) = pending.next().await {
-                if let Err(error) = result {
-                    failure.get_or_insert(error);
+                while let Some(result) = pending.next().await {
+                    if let Err(error) = result {
+                        failure.get_or_insert(error);
+                    }
                 }
-            }
-            if let Some(failure) = failure {
-                return Err(failure);
-            }
-            let source = prepared.take().ok_or_else(malformed)?;
-            let guard = context.clone();
-            let stats = context
-                .compute(move || source.finish(&|| guard.check_active()))
-                .await?;
-            let response = context
-                .invoke::<tl::functions::messages::SendMedia>(std::mem::take(&mut *final_bytes))
-                .await?;
-            let message = match response {
-                tl::enums::Updates::UpdateShortSentMessage(sent) => {
-                    document_matches(sent.media.as_ref(), size, &name, &mime)?;
-                    text::short_receipt(peer.id, &sent)?
+                if let Some(failure) = failure {
+                    return Err(failure);
                 }
-                response => {
-                    let updates = text::unpack(response, &session, references.expected).await?;
-                    let id = text::sent_id(&updates, random_id)?;
-                    let receipt = text::matching_message(&updates, peer.id, id, &caption, false)?;
-                    let media = updates
-                        .iter()
-                        .find_map(|update| {
-                            let raw = match update {
-                                tl::enums::Update::NewMessage(raw) => &raw.message,
-                                tl::enums::Update::NewChannelMessage(raw) => &raw.message,
-                                _ => return None,
-                            };
-                            let tl::enums::Message::Message(raw) = raw else {
-                                return None;
-                            };
-                            (raw.id == id && PeerId::from_tl(&raw.peer_id).ok() == Some(peer.id))
+                let source = prepared.take().ok_or_else(malformed)?;
+                let guard = context.clone();
+                let stats = context
+                    .compute(move || source.finish(&|| guard.check_active()))
+                    .await?;
+                let response = context
+                    .invoke::<tl::functions::messages::SendMedia>(std::mem::take(&mut *final_bytes))
+                    .await?;
+                let message = match response {
+                    tl::enums::Updates::UpdateShortSentMessage(sent) => {
+                        document_matches(sent.media.as_ref(), size, &name, &mime)?;
+                        text::short_receipt(peer.id, &sent)?
+                    }
+                    response => {
+                        let updates = text::unpack(response, &session, references.expected).await?;
+                        let id = text::sent_id(&updates, random_id)?;
+                        let receipt =
+                            text::matching_message(&updates, peer.id, id, &caption, false)?;
+                        let media = updates
+                            .iter()
+                            .find_map(|update| {
+                                let raw = match update {
+                                    tl::enums::Update::NewMessage(raw) => &raw.message,
+                                    tl::enums::Update::NewChannelMessage(raw) => &raw.message,
+                                    _ => return None,
+                                };
+                                let tl::enums::Message::Message(raw) = raw else {
+                                    return None;
+                                };
+                                (raw.id == id
+                                    && PeerId::from_tl(&raw.peer_id).ok() == Some(peer.id))
                                 .then_some(raw.media.as_ref())
-                        })
-                        .flatten();
-                    document_matches(media, size, &name, &mime)?;
-                    receipt
-                }
-            };
-            Ok(DocumentReceipt {
-                message,
-                size: stats.size,
-                sha256: stats.sha256,
-            })
-        })
+                            })
+                            .flatten();
+                        document_matches(media, size, &name, &mime)?;
+                        receipt
+                    }
+                };
+                Ok(DocumentReceipt {
+                    message,
+                    size: stats.size,
+                    sha256: stats.sha256,
+                })
+            },
+        )
         .await
     }
 }

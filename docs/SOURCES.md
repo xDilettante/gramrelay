@@ -1,5 +1,11 @@
 # Implementation sources
 
+- Owner-backed immutable upload bytes use the pinned bytes 1.12.1 implementation
+  of [Bytes::from_owner](https://docs.rs/bytes/1.12.1/bytes/struct.Bytes.html#method.from_owner),
+  inspected in the installed primary source. It pins the owner, calls AsRef once
+  and drops the owner after the last clone. MTProto adds explicit accepted-call
+  ownership and bounded joined native disposal, rather than a second file copy.
+
 - MTProto bot callback answers and observation fields, rechecked 17 November 2026:
   [messages.setBotCallbackAnswer](https://core.telegram.org/method/messages.setBotCallbackAnswer.md),
   [updateBotCallbackQuery](https://core.telegram.org/constructor/updateBotCallbackQuery.md) and

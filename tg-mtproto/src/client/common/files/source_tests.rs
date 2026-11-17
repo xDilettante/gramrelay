@@ -2,6 +2,77 @@ use super::*;
 use crate::{ClientErrorKind, Outcome};
 
 #[test]
+fn shared_source_keeps_the_original_owner_without_copy_until_preparation_finishes() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    struct Owner {
+        bytes: Vec<u8>,
+        dropped: Arc<AtomicBool>,
+    }
+    impl AsRef<[u8]> for Owner {
+        fn as_ref(&self) -> &[u8] {
+            &self.bytes
+        }
+    }
+    impl Drop for Owner {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::SeqCst);
+        }
+    }
+    let dropped = Arc::new(AtomicBool::new(false));
+    let owner = Owner {
+        bytes: vec![1, 2, 3],
+        dropped: dropped.clone(),
+    };
+    let pointer = owner.bytes.as_ptr();
+    let mut prepared = Prepared::open(Source::owned(owner), 2, 3, None, &|| Ok(())).unwrap();
+    assert_eq!(prepared.bytes_pointer(), Some(pointer));
+    assert!(!dropped.load(Ordering::SeqCst));
+    while prepared.has_remaining() {
+        let (next, _) = prepared.read_next(&|| Ok(())).unwrap();
+        prepared = next;
+    }
+    assert_eq!(prepared.finish(&|| Ok(())).unwrap().size, 3);
+    assert!(dropped.load(Ordering::SeqCst));
+}
+
+#[test]
+fn shared_guard_keeps_owner_when_a_read_error_consumes_prepared_source() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    struct Owner(Arc<AtomicBool>);
+    impl AsRef<[u8]> for Owner {
+        fn as_ref(&self) -> &[u8] {
+            b"abc"
+        }
+    }
+    impl Drop for Owner {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    let dropped = Arc::new(AtomicBool::new(false));
+    let source = Source::owned(Owner(dropped.clone()));
+    let guard = source.owner_guard();
+    let prepared = Prepared::open(source, 2, 3, None, &|| Ok(())).unwrap();
+    assert!(
+        prepared
+            .read_next(&|| Err(super::super::super::error(
+                ClientErrorKind::Closed,
+                Outcome::Unknown
+            )))
+            .is_err()
+    );
+    assert!(!dropped.load(Ordering::SeqCst));
+    drop(guard);
+    assert!(dropped.load(Ordering::SeqCst));
+}
+
+#[test]
 fn owned_bytes_are_hashed_without_copy_and_read_back_in_bounded_parts() {
     let data = b"hello world".to_vec();
     let pointer = data.as_ptr();

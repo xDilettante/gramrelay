@@ -3,6 +3,205 @@ use crate::SendDocument;
 #[path = "download_tests.rs"]
 mod download;
 
+#[tokio::test]
+async fn panicking_document_owner_cannot_skip_joined_session_cleanup_after_success_or_timeout() {
+    struct Owner;
+    impl AsRef<[u8]> for Owner {
+        fn as_ref(&self) -> &[u8] {
+            b"abc"
+        }
+    }
+    impl Drop for Owner {
+        fn drop(&mut self) {
+            panic!("synthetic owner cleanup");
+        }
+    }
+    for case in 0..3 {
+        let (_dir, stored) = session().await;
+        let delayed = Arc::new(AtomicBool::new(false));
+        let delay = delayed.clone();
+        let client = fixture(
+            stored.clone(),
+            ClientOptions::default().request_timeout(Duration::from_millis(150)),
+            move |_, bytes| {
+                let delay = delay.clone();
+                async move {
+                    if let Some(reply) = self_reply(&bytes) {
+                        if case == 2 && delay.load(Ordering::SeqCst) {
+                            std::future::pending::<()>().await;
+                        }
+                        return Ok(reply);
+                    }
+                    if bytes[..4]
+                        == tl::functions::upload::SaveFilePart::CONSTRUCTOR_ID.to_le_bytes()
+                    {
+                        return Ok(true.to_bytes());
+                    }
+                    if case == 1 {
+                        std::future::pending().await
+                    } else {
+                        Ok(document_reply(3))
+                    }
+                }
+            },
+        );
+        let account = client.account(expected());
+        let peer = account
+            .cached_peer(crate::PeerId::user(42).unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        delayed.store(true, Ordering::SeqCst);
+        let error = account
+            .send_document(
+                &peer,
+                SendDocument::owned_bytes("private.bin", "application/octet-stream", Owner)
+                    .unwrap(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.kind(),
+            if case != 0 {
+                ClientErrorKind::Timeout
+            } else {
+                ClientErrorKind::Backend
+            }
+        );
+        // Shutdown can succeed if cleanup panic was already normalized by the job.
+        let _ = client.close().await;
+        assert_eq!(
+            stored.remembered_account().unwrap_err().kind(),
+            crate::SessionErrorKind::Closed
+        );
+    }
+}
+
+#[tokio::test]
+async fn shared_document_owner_lives_through_final_rpc_and_cancelled_caller() {
+    struct Owner {
+        bytes: Vec<u8>,
+        dropped: Arc<AtomicBool>,
+    }
+    impl AsRef<[u8]> for Owner {
+        fn as_ref(&self) -> &[u8] {
+            &self.bytes
+        }
+    }
+    impl Drop for Owner {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::SeqCst);
+        }
+    }
+    let (_dir, stored) = session().await;
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let (ready, blocked) = (entered.clone(), release.clone());
+    let client = fixture(
+        stored,
+        ClientOptions::default().max_pending(1),
+        move |_, bytes| {
+            let (ready, blocked) = (ready.clone(), blocked.clone());
+            async move {
+                if let Some(reply) = self_reply(&bytes) {
+                    return Ok(reply);
+                }
+                if bytes[..4] == tl::functions::upload::SaveFilePart::CONSTRUCTOR_ID.to_le_bytes() {
+                    return Ok(true.to_bytes());
+                }
+                assert_eq!(
+                    bytes[..4],
+                    tl::functions::messages::SendMedia::CONSTRUCTOR_ID.to_le_bytes()
+                );
+                ready.notify_one();
+                blocked.notified().await;
+                Ok(document_reply(3))
+            }
+        },
+    );
+    let account = client.account(expected());
+    let peer = account
+        .cached_peer(crate::PeerId::user(42).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let dropped = Arc::new(AtomicBool::new(false));
+    let intent = SendDocument::owned_bytes(
+        "private.bin",
+        "application/octet-stream",
+        Owner {
+            bytes: vec![1, 2, 3],
+            dropped: dropped.clone(),
+        },
+    )
+    .unwrap();
+    let caller = tokio::spawn(async move { account.send_document(&peer, intent).await });
+    tokio::time::timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .unwrap();
+    let released_early = dropped.load(Ordering::SeqCst);
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    let released_after_cancel = dropped.load(Ordering::SeqCst);
+    release.notify_one();
+    client.close().await.unwrap();
+    assert!(!released_early, "owner must survive final SendMedia");
+    assert!(
+        !released_after_cancel,
+        "caller cancellation must not release admitted source ownership"
+    );
+    assert!(dropped.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn document_absolute_caps_cover_identity_and_parts_without_late_media_dispatch() {
+    for identity_wait in [false, true] {
+        let (_dir, stored) = session().await;
+        let delaying = Arc::new(AtomicBool::new(false));
+        let delay = delaying.clone();
+        let parts = Arc::new(AtomicUsize::new(0));
+        let writes = Arc::new(AtomicUsize::new(0));
+        let (seen, sent) = (parts.clone(), writes.clone());
+        let client = fixture(stored, ClientOptions::default(), move |_, bytes| {
+            let (delay, seen, sent) = (delay.clone(), seen.clone(), sent.clone());
+            async move {
+                if let Some(reply) = self_reply(&bytes) {
+                    if identity_wait && delay.load(Ordering::SeqCst) {
+                        std::future::pending::<()>().await;
+                    }
+                    return Ok(reply);
+                }
+                if bytes[..4] == tl::functions::upload::SaveFilePart::CONSTRUCTOR_ID.to_le_bytes() {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    std::future::pending::<()>().await;
+                }
+                sent.fetch_add(1, Ordering::SeqCst);
+                Ok(document_reply(3))
+            }
+        });
+        let account = client.account(expected());
+        let peer = account
+            .cached_peer(crate::PeerId::user(42).unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        delaying.store(true, Ordering::SeqCst);
+        let error = account
+            .send_document_until(
+                &peer,
+                SendDocument::owned_bytes("private.bin", "application/octet-stream", vec![1, 2, 3])
+                    .unwrap(),
+                std::time::Instant::now() + Duration::from_millis(100),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), ClientErrorKind::Timeout);
+        assert_eq!(parts.load(Ordering::SeqCst), usize::from(!identity_wait));
+        assert_eq!(writes.load(Ordering::SeqCst), 0);
+        client.close().await.unwrap();
+    }
+}
+
 #[test]
 fn document_names_mime_captions_and_ids_reject_invalid_input_without_io() {
     for mime in [

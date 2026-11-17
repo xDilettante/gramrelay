@@ -9,6 +9,7 @@ description = "Explicit Telegram MTProto sessions and client for humans and agen
 test-kit = ["grammers-mtsender/tg-test-kit"]
 
 [dependencies]
+bytes = "1.12"
 chacha20poly1305 = { version = "=0.11.0", default-features = false, features = ["alloc", "zeroize"] }
 getrandom = "0.4"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }

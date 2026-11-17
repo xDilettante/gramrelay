@@ -13,19 +13,36 @@ use std::{
 use zeroize::Zeroizing;
 
 pub(super) enum Source {
-    Bytes(Zeroizing<Vec<u8>>),
+    Bytes { bytes: bytes::Bytes, retained: u64 },
     Path(PathBuf),
 }
 impl Source {
+    pub fn owner_guard(&self) -> Option<bytes::Bytes> {
+        match self {
+            Self::Bytes { bytes, .. } => Some(bytes.clone()),
+            Self::Path(_) => None,
+        }
+    }
     pub fn bytes(bytes: Vec<u8>) -> Self {
-        Self::Bytes(Zeroizing::new(bytes))
+        let retained = bytes.capacity() as u64;
+        Self::Bytes {
+            bytes: bytes::Bytes::from_owner(Zeroizing::new(bytes)),
+            retained,
+        }
+    }
+    pub fn owned(owner: impl AsRef<[u8]> + Send + 'static) -> Self {
+        let bytes = bytes::Bytes::from_owner(owner);
+        Self::Bytes {
+            retained: bytes.len() as u64,
+            bytes,
+        }
     }
     pub fn path(path: PathBuf) -> Self {
         Self::Path(path)
     }
 }
 enum Opened {
-    Bytes(Zeroizing<Vec<u8>>),
+    Bytes(bytes::Bytes),
     File(File),
 }
 pub(super) struct Prepared {
@@ -60,8 +77,8 @@ impl Prepared {
             return Err(error(ClientErrorKind::InvalidInput, Outcome::NotSent));
         }
         let (mut source, size) = match source {
-            Source::Bytes(bytes) => {
-                if bytes.capacity() as u64 > max_bytes {
+            Source::Bytes { bytes, retained } => {
+                if retained > max_bytes {
                     return Err(error(ClientErrorKind::InvalidInput, Outcome::NotSent));
                 }
                 let size = bytes.len() as u64;
