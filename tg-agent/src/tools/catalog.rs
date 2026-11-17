@@ -2,6 +2,10 @@ use crate::executor::Action;
 use serde::Serialize;
 use serde_json::{Value, json};
 const DRAFT: &str = "https://json-schema.org/draft/2020-12/schema";
+#[cfg(feature = "mtproto")]
+mod mtproto;
+#[cfg(feature = "mtproto")]
+pub use mtproto::{extended_catalog, extended_request_schema, extended_response_schema};
 
 #[derive(Serialize)]
 pub struct ToolCatalog {
@@ -68,7 +72,7 @@ fn text(min: usize, max: usize) -> Value {
 // Decimal strings preserve i64 precision in JavaScript. Enumerate prefix ranges
 // for nineteen-digit boundaries; shorter positive decimals share one branch.
 fn positive(maximum: &str) -> String {
-    let mut branches = vec!["[1-9][0-9]{0,17}".to_owned()];
+    let mut branches = vec![format!("[1-9][0-9]{{0,{}}}", maximum.len() - 2)];
     for (index, digit) in maximum.bytes().enumerate() {
         let lower = if index == 0 { b'1' } else { b'0' };
         if digit > lower {

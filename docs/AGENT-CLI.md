@@ -13,6 +13,20 @@ contains eight tools in stable order, strict schemas, effect/replay hints and
 examples. Schemas are checked in at tg-agent/schemas/v1; run
 `python tools/agent_schema.py check` to verify deterministic regeneration.
 
+With `--features cli,mtproto`, explicitly select `tools --mtproto` or
+`schema [request|response|catalog] --mtproto` for extended inventory v2: the
+unchanged eight Bot tools followed by eight `mtproto_*` tools. Requests and
+responses still use envelope version 1. Verify its three separate artifacts with
+`python tools/agent_schema.py check --mtproto`; default discovery stays v1.
+
+Embedded `run_json`/`serve_jsonl` accept both typed protocols when their trusted
+`ToolSession` has `.with_mtproto(executor)`. Authority still comes from the
+registered exact profile and shared current PolicyStore. Use host-only
+`approve_mtproto` for an exact request. MT write recovery is
+`mtproto_get_operation` with the original operation key. This does not enable
+standalone MT configuration: protected Session/Client bootstrap in Host remains
+the next M3 increment. The configuration below is the supported Bot configuration.
+
 ## Configure the trusted host
 
 Use a protected operator-controlled UTF-8 config file. Its path, journal_path and

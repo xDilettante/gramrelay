@@ -1,8 +1,8 @@
 //! Bounded JSON adapters for an explicitly configured trusted-host ToolSession.
 //! Standalone execution loads operator configuration through the shared Host.
-use crate::{
-    executor::Request,
-    tools::{ExecutionMode, OutputLimit, ToolError, ToolResponse, ToolSession, encode_response},
+use crate::tools::{
+    ExecutionMode, OutputLimit, ToolError, ToolRequest, ToolResponse, ToolSession,
+    encode_tool_response,
 };
 use std::{io::Write, process::ExitCode};
 use tokio::io::{
@@ -18,11 +18,11 @@ pub async fn run_json<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
 ) -> Result<bool, ToolError> {
     let mut input = Vec::new();
     reader
-        .take(Request::MAX_JSON_BYTES as u64 + 1)
+        .take(ToolRequest::MAX_JSON_BYTES as u64 + 1)
         .read_to_end(&mut input)
         .await
         .map_err(|_| io_error())?;
-    if input.len() > Request::MAX_JSON_BYTES {
+    if input.len() > ToolRequest::MAX_JSON_BYTES {
         let error = oversize();
         emit(
             &mut writer,
@@ -74,7 +74,7 @@ async fn frame<R: AsyncBufRead + Unpin>(reader: &mut R) -> Result<Option<Vec<u8>
         if input
             .len()
             .checked_add(count)
-            .is_none_or(|length| length > Request::MAX_JSON_BYTES)
+            .is_none_or(|length| length > ToolRequest::MAX_JSON_BYTES)
         {
             return Err(oversize());
         }
@@ -92,9 +92,9 @@ async fn execute_frame<W: AsyncWrite + Unpin>(
     mode: ExecutionMode,
     limit: OutputLimit,
 ) -> Result<bool, ToolError> {
-    let request = Request::from_json(input).ok();
+    let request = ToolRequest::from_json(input).ok();
     let response = match &request {
-        Some(request) => session.execute_for(request.action(), request, mode).await,
+        Some(request) => session.execute_named(request.name(), request, mode).await,
         None => ToolResponse::Error(ToolError::invalid_input()),
     };
     emit(writer, &response, request.as_ref(), limit).await
@@ -102,28 +102,28 @@ async fn execute_frame<W: AsyncWrite + Unpin>(
 async fn emit<W: AsyncWrite + Unpin>(
     writer: &mut W,
     response: &ToolResponse,
-    request: Option<&Request>,
+    request: Option<&ToolRequest>,
     limit: OutputLimit,
 ) -> Result<bool, ToolError> {
-    let (bytes, is_error) = match encode_response(response, request, limit) {
+    let (bytes, is_error) = match encode_tool_response(response, request, limit) {
         Ok(bytes) => (bytes, response.is_error()),
         Err(error) => (
-            encode_response(&ToolResponse::Error(error), request, limit)?,
+            encode_tool_response(&ToolResponse::Error(error), request, limit)?,
             true,
         ),
     };
     writer
         .write_all(&bytes)
         .await
-        .map_err(|_| ToolError::output_io(request))?;
+        .map_err(|_| ToolError::tool_output_io(request))?;
     writer
         .write_all(b"\n")
         .await
-        .map_err(|_| ToolError::output_io(request))?;
+        .map_err(|_| ToolError::tool_output_io(request))?;
     writer
         .flush()
         .await
-        .map_err(|_| ToolError::output_io(request))?;
+        .map_err(|_| ToolError::tool_output_io(request))?;
     Ok(is_error)
 }
 fn oversize() -> ToolError {
@@ -158,19 +158,59 @@ pub fn entrypoint() -> ExitCode {
         .iter()
         .map(|value| value.to_str())
         .collect::<Option<Vec<_>>>();
-    let value = match args.as_deref() {
+    let (args, extended) = match args.as_deref() {
+        Some([prefix @ .., "--mtproto"]) => (Some(prefix), true),
+        args => (args, false),
+    };
+    let schemas: Option<(
+        crate::tools::ToolCatalog,
+        serde_json::Value,
+        serde_json::Value,
+    )> = if extended {
+        #[cfg(feature = "mtproto")]
+        {
+            Some((
+                crate::tools::extended_catalog(),
+                crate::tools::extended_request_schema(),
+                crate::tools::extended_response_schema(),
+            ))
+        }
+        #[cfg(not(feature = "mtproto"))]
+        {
+            eprintln!("agent_mtproto_feature_required");
+            return ExitCode::from(2);
+        }
+    } else {
+        None
+    };
+    let value = match args {
         Some(["--help"] | ["help"]) => {
             println!(
-                "tg-agent tools\ntg-agent schema [request|response|catalog]\ntg-agent run --config ABSOLUTE_PATH [--dry-run]\ntg-agent serve --config ABSOLUTE_PATH [--dry-run]\ntg-agent mcp --config ABSOLUTE_PATH [--dry-run] (feature mcp)\n\nDiscovery requires no credentials. Execution uses protected host configuration and environment-only tokens."
+                "tg-agent tools [--mtproto]\ntg-agent schema [request|response|catalog] [--mtproto]\ntg-agent run --config ABSOLUTE_PATH [--dry-run]\ntg-agent serve --config ABSOLUTE_PATH [--dry-run]\ntg-agent mcp --config ABSOLUTE_PATH [--dry-run] (feature mcp)\n\nDiscovery requires no credentials. --mtproto selects extended inventory v2 (feature mtproto). Execution uses protected host configuration and environment-only secrets."
             );
             return ExitCode::SUCCESS;
         }
-        Some(["tools"] | ["schema", "catalog"]) => serde_json::to_value(crate::tools::catalog()),
-        Some(["schema", "request"]) => Ok(crate::tools::request_schema()),
-        Some(["schema", "response"]) => Ok(crate::tools::response_schema()),
-        Some(["schema"]) => Ok(
-            serde_json::json!({"schema_version":1,"request":crate::tools::request_schema(),"response":crate::tools::response_schema(),"catalog":crate::tools::catalog()}),
-        ),
+        Some(["tools"] | ["schema", "catalog"]) => {
+            serde_json::to_value(schemas.map_or_else(crate::tools::catalog, |v| v.0))
+        }
+        Some(["schema", "request"]) => {
+            Ok(schemas.map_or_else(crate::tools::request_schema, |v| v.1))
+        }
+        Some(["schema", "response"]) => {
+            Ok(schemas.map_or_else(crate::tools::response_schema, |v| v.2))
+        }
+        Some(["schema"]) => {
+            let (catalog, request, response) = schemas.unwrap_or_else(|| {
+                (
+                    crate::tools::catalog(),
+                    crate::tools::request_schema(),
+                    crate::tools::response_schema(),
+                )
+            });
+            Ok(
+                serde_json::json!({"schema_version":catalog.schema_version,"request":request,"response":response,"catalog":catalog}),
+            )
+        }
         _ => {
             let response = ToolResponse::Error(ToolError::new(
                 "agent_usage",

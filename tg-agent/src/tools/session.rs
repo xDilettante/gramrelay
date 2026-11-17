@@ -1,3 +1,4 @@
+use super::{ToolCatalog, ToolRequest};
 use crate::executor::{
     Action, Approval, DryRun, ExecutionResult, Executor, ExecutorError, Principal, Request,
 };
@@ -18,6 +19,8 @@ pub struct ToolSession {
     executor: Executor,
     principal: Principal,
     approvals: Arc<RwLock<BTreeMap<[u8; 32], Approval>>>,
+    #[cfg(feature = "mtproto")]
+    mtproto: Option<crate::mtproto::Executor>,
 }
 impl ToolSession {
     pub fn new(executor: Executor, principal: Principal) -> Self {
@@ -25,7 +28,22 @@ impl ToolSession {
             executor,
             principal,
             approvals: Default::default(),
+            #[cfg(feature = "mtproto")]
+            mtproto: None,
         }
+    }
+    /// Trusted host attachment. No request can enable this provider.
+    #[cfg(feature = "mtproto")]
+    pub fn with_mtproto(mut self, executor: crate::mtproto::Executor) -> Self {
+        self.mtproto = Some(executor);
+        self
+    }
+    pub fn catalog(&self) -> ToolCatalog {
+        #[cfg(feature = "mtproto")]
+        if self.mtproto.is_some() {
+            return super::extended_catalog();
+        }
+        super::catalog()
     }
     /// Trusted host confirmation, never an exposed tool or input field.
     pub async fn approve(&self, request: &Request, expires_at_ms: i64) -> Result<(), ToolError> {
@@ -34,8 +52,10 @@ impl ToolSession {
             .approve(&self.principal, request, expires_at_ms)
             .await
             .map_err(|error| ToolError::from_executor(&error, request))?;
+        self.save_approval(request.fingerprint(), approval)
+    }
+    fn save_approval(&self, key: [u8; 32], approval: Approval) -> Result<(), ToolError> {
         let mut approvals = self.approvals.write().map_err(|_| ToolError::session())?;
-        let key = request.fingerprint();
         if approvals.len() >= 256 && !approvals.contains_key(&key) {
             return Err(ToolError::new(
                 "agent_capacity",
@@ -55,9 +75,77 @@ impl ToolSession {
         Ok(())
     }
     pub async fn dispatch_json(&self, input: &[u8], mode: ExecutionMode) -> ToolResponse {
-        match Request::from_json(input) {
-            Ok(request) => self.execute_for(request.action(), &request, mode).await,
+        match ToolRequest::from_json(input) {
+            Ok(request) => self.execute_named(request.name(), &request, mode).await,
             Err(_) => ToolResponse::Error(ToolError::invalid_input()),
+        }
+    }
+    /// Binds an adapter-selected tool name before either provider is entered.
+    pub async fn execute_named(
+        &self,
+        selected: &str,
+        request: &ToolRequest,
+        mode: ExecutionMode,
+    ) -> ToolResponse {
+        if selected != request.name() {
+            return ToolResponse::Error(
+                ToolError::new(
+                    "agent_tool_mismatch",
+                    "Selected tool does not match the request.",
+                )
+                .with_tool_request(request),
+            );
+        }
+        match request {
+            ToolRequest::BotApi(request) => self.execute_for(request.action(), request, mode).await,
+            #[cfg(feature = "mtproto")]
+            ToolRequest::Mtproto(request) => self.execute_mtproto(request, mode).await,
+        }
+    }
+    /// Exact MT confirmation supplied only by the trusted host.
+    #[cfg(feature = "mtproto")]
+    pub async fn approve_mtproto(
+        &self,
+        request: &crate::mtproto::Request,
+        expires_at_ms: i64,
+    ) -> Result<(), ToolError> {
+        let executor = self.mtproto.as_ref().ok_or_else(protocol_unavailable)?;
+        let approval = executor
+            .approve(&self.principal, request, expires_at_ms)
+            .await
+            .map_err(|error| ToolError::from_mtproto(&error, request))?;
+        self.save_approval(request.fingerprint(), approval)
+    }
+    #[cfg(feature = "mtproto")]
+    async fn execute_mtproto(
+        &self,
+        request: &crate::mtproto::Request,
+        mode: ExecutionMode,
+    ) -> ToolResponse {
+        let Some(executor) = &self.mtproto else {
+            return ToolResponse::Error(protocol_unavailable().with_mtproto_request(request));
+        };
+        let approval = match self.approvals.read() {
+            Ok(approvals) => approvals.get(&request.fingerprint()).cloned(),
+            Err(_) => {
+                return ToolResponse::Error(ToolError::session().with_mtproto_request(request));
+            }
+        };
+        match mode {
+            ExecutionMode::Execute => match executor
+                .execute(&self.principal, request, approval.as_ref())
+                .await
+            {
+                Ok(value) => ToolResponse::MtprotoSuccess(value),
+                Err(error) => ToolResponse::Error(ToolError::from_mtproto(&error, request)),
+            },
+            ExecutionMode::DryRun => match executor
+                .dry_run(&self.principal, request, approval.as_ref())
+                .await
+            {
+                Ok(value) => ToolResponse::MtprotoDryRun(value),
+                Err(error) => ToolResponse::Error(ToolError::from_mtproto(&error, request)),
+            },
         }
     }
     /// Bind an adapter-selected name independently of model-provided arguments.
@@ -133,6 +221,11 @@ impl ToolError {
         Self::new("agent_session", "Host session is unavailable.")
     }
     fn from_executor(error: &ExecutorError, request: &Request) -> Self {
+        let mut result = Self::executor_error(error);
+        result.bind_request(request);
+        result
+    }
+    fn executor_error(error: &ExecutorError) -> Self {
         let mut result = Self::new(
             error.code(),
             "The request did not return a result. Inspect its code and original operation.",
@@ -142,14 +235,70 @@ impl ToolError {
             tg::EffectOutcome::Rejected => "rejected",
             _ => "unknown",
         });
-        result.bind_request(request);
         result
     }
     fn bind_request(&mut self, request: &Request) {
-        if request.action().is_write() {
-            self.operation_id = request.operation_id().map(str::to_owned);
-            self.next_action = Some("get_operation");
+        self.bind(
+            request.action().is_write(),
+            request.operation_id(),
+            "get_operation",
+        );
+    }
+    fn bind(&mut self, is_write: bool, operation_id: Option<&str>, recovery: &'static str) {
+        if is_write {
+            self.operation_id = operation_id.map(str::to_owned);
+            self.next_action = Some(recovery);
         }
+    }
+    #[cfg(feature = "mtproto")]
+    fn from_mtproto(error: &ExecutorError, request: &crate::mtproto::Request) -> Self {
+        Self::executor_error(error).with_mtproto_request(request)
+    }
+    #[cfg(feature = "mtproto")]
+    fn with_mtproto_request(mut self, request: &crate::mtproto::Request) -> Self {
+        self.bind(
+            request.action().is_write(),
+            request.operation_id(),
+            "mtproto_get_operation",
+        );
+        self
+    }
+    fn with_tool_request(mut self, request: &ToolRequest) -> Self {
+        self.bind(
+            request.is_write(),
+            request.operation_id(),
+            request.recovery_tool(),
+        );
+        self
+    }
+    pub(crate) fn tool_output_too_large(request: Option<&ToolRequest>) -> Self {
+        Self::tool_delivery_error(
+            "agent_output_too_large",
+            "Response exceeded the output limit.",
+            request,
+        )
+    }
+    #[cfg(feature = "cli")]
+    pub(crate) fn tool_output_io(request: Option<&ToolRequest>) -> Self {
+        Self::tool_delivery_error(
+            "agent_io",
+            "JSON transport failed. Recover writes using their original operation keys.",
+            request,
+        )
+    }
+    fn tool_delivery_error(
+        code: &'static str,
+        message: &'static str,
+        request: Option<&ToolRequest>,
+    ) -> Self {
+        let mut result = Self::new(code, message);
+        if let Some(request) = request {
+            result = result.with_tool_request(request);
+            if request.is_write() {
+                result.effect_outcome = Some("unknown");
+            }
+        }
+        result
     }
     fn with_request(mut self, request: &Request) -> Self {
         self.bind_request(request);
@@ -159,14 +308,6 @@ impl ToolError {
         Self::delivery_error(
             "agent_output_too_large",
             "Response exceeded the output limit.",
-            request,
-        )
-    }
-    #[cfg(feature = "cli")]
-    pub(crate) fn output_io(request: Option<&Request>) -> Self {
-        Self::delivery_error(
-            "agent_io",
-            "JSON transport failed. Recover writes using their original operation keys.",
             request,
         )
     }
@@ -195,6 +336,10 @@ pub enum ToolResponse {
     Success(ExecutionResult),
     DryRun(DryRun),
     Error(ToolError),
+    #[cfg(feature = "mtproto")]
+    MtprotoSuccess(crate::mtproto::ExecutionResult),
+    #[cfg(feature = "mtproto")]
+    MtprotoDryRun(crate::mtproto::DryRun),
 }
 impl ToolResponse {
     pub fn is_error(&self) -> bool {
@@ -210,9 +355,20 @@ impl Serialize for ToolResponse {
             Self::Success(value) => map.serialize_entry("result", value)?,
             Self::DryRun(value) => map.serialize_entry("dry_run", value)?,
             Self::Error(value) => map.serialize_entry("error", value)?,
+            #[cfg(feature = "mtproto")]
+            Self::MtprotoSuccess(value) => map.serialize_entry("result", value)?,
+            #[cfg(feature = "mtproto")]
+            Self::MtprotoDryRun(value) => map.serialize_entry("dry_run", value)?,
         }
         map.end()
     }
 }
 macro_rules! redacted {($($type:ident),+)=>{$(impl fmt::Debug for $type {fn fmt(&self,f:&mut fmt::Formatter<'_>)->fmt::Result {f.write_str(concat!(stringify!($type),"([REDACTED])"))}})+};}
 redacted!(ToolSession, ToolError, ToolResponse);
+#[cfg(feature = "mtproto")]
+fn protocol_unavailable() -> ToolError {
+    ToolError::new(
+        "agent_protocol_unavailable",
+        "This host session has no MTProto provider.",
+    )
+}

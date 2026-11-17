@@ -112,6 +112,22 @@ execution reviews are clear; cross-model skipped in this autonomous continuation
 Audit: unchanged 363 dependencies, known chrono informational warning. M3 remains
 open for CLI/MCP dispatch/host bootstrap; Q1–Q4 and the full goal remain active.
 
+Shared MT tooling implemented against SPEC-mtproto-agent-tools.md: strict typed
+ToolRequest, explicit host attachment, bounded exact approvals, session catalog,
+protocol-specific recovery and common CLI/MCP dispatch. All eight actions run
+through embedded adapters; explicit --mtproto discovery produces separate v2
+artifacts while the original v1 files and Cargo.lock remain byte-identical.
+Standalone MT Host configuration/bootstrap is still M3 and not claimed here.
+
+Verified: 13 new tool cases, 653 all-feature / 389 default workspace tests,
+16 doctests, fmt/Clippy, isolated storage/executor/MT/MCP and CLI-only Clippy,
+25 Python tests, protocol and both agent inventories, four SDK verifiers.
+Fresh contract/schema/execution reviews are clear after strengthening actual-error
+schema validation and separating notification cancellation from EOF evidence.
+An observed CLI-only E0282 has a passing isolated build/discovery regression.
+Cross-model skipped in this autonomous continuation. Fresh audit: unchanged 363
+dependencies, known chrono warning. M3 Host bootstrap, Q1–Q4 and full goal remain.
+
 ## Release gates
 
 - [ ] Q1: task-based docs, migration guide, examples, agent index and 30-task evaluation.

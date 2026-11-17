@@ -1,4 +1,4 @@
-use super::{ToolError, ToolResponse};
+use super::{ToolError, ToolRequest, ToolResponse};
 use crate::executor::Request;
 use std::io::{self, Write};
 
@@ -26,12 +26,22 @@ pub fn encode_response(
     request: Option<&Request>,
     limit: OutputLimit,
 ) -> Result<Vec<u8>, ToolError> {
+    encode(response, limit).map_err(|_| ToolError::output_too_large(request))
+}
+/// Bounded serialization with protocol-specific write recovery advice.
+pub fn encode_tool_response(
+    response: &ToolResponse,
+    request: Option<&ToolRequest>,
+    limit: OutputLimit,
+) -> Result<Vec<u8>, ToolError> {
+    encode(response, limit).map_err(|_| ToolError::tool_output_too_large(request))
+}
+fn encode(response: &ToolResponse, limit: OutputLimit) -> Result<Vec<u8>, serde_json::Error> {
     let mut writer = Buffer {
         bytes: Vec::with_capacity(8192.min(limit.0)),
         limit: limit.0,
     };
-    serde_json::to_writer(&mut writer, response)
-        .map_err(|_| ToolError::output_too_large(request))?;
+    serde_json::to_writer(&mut writer, response)?;
     Ok(writer.bytes)
 }
 struct Buffer {

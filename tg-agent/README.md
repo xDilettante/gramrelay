@@ -11,7 +11,8 @@
 привязку атомарно с созданием feed и не принимает имя MTProto-профиля. Новых
 привязок по умолчанию не более 64 (`JournalOptions::max_profiles`, максимум 1024),
 без удаления прежних ключей. Bot API CLI/MCP продолжают использовать v1;
-CLI/MCP MTProto ещё реализуется в M3.
+расширенный каталог MTProto выбирается явно. Самостоятельная загрузка MTProto
+профилей из конфигурации ещё реализуется в M3.
 
 Если старые операции или квоты не имели feed и известной идентичности, попытка
 назначить этому имени аккаунт получает `Conflict`. Их ручной журнал сохраняется;
@@ -25,8 +26,9 @@ Bot API chat/thread options, access hashes, пути или произвольн
 тот же principal/profile и ревизии, что Bot grants; смешения разрешений нет.
 Подтверждение связано со всем неизменяемым запросом и operation_id. Проверка
 политики локальная: она не резервирует квоту и не проверяет вход. Исполнение
-доступно через отдельный Rust `mtproto::Executor`; CLI/MCP MTProto ещё остаётся
-M3, а каталог Bot API содержит прежние восемь инструментов.
+доступно через отдельный Rust `mtproto::Executor` и встроенные CLI/MCP адаптеры
+с явно подключённым провайдером. Загрузка MTProto-профилей в самостоятельном
+процессе остаётся M3; каталог Bot API содержит прежние восемь инструментов.
 
 `mtproto::Executor` принимает `register_profile(feed, client)` от хоста и выполняет
 восемь действий: get_me, get_peer, read_updates, send_message, edit_message_text,
@@ -182,6 +184,30 @@ cargo run --locked --offline -p tg-agent --features executor --example authorize
 ## Общий JSON-интерфейс и CLI (A2)
 
 tools::ToolSession создаётся доверенным Rust-хостом из Executor и Principal. execute_for дополнительно связывает выбранное имя инструмента с Request.call.tool до допуска; входной JSON не получает прав задавать principal, grant или approval. Host-only approve хранит точное подтверждение запроса; clear_approvals удаляет сохранённые подтверждения для последующих вызовов. Для отзыва capability, уже переданного выполняющемуся вызову, нужно изменить/отозвать grant в PolicyStore; допущенный удалённый эффект нельзя отменить. Текущие права и ревизия политики проверяются исполнителем и при чтении кеша.
+
+При опции `mtproto` хост явно подключает второй исполнитель:
+
+```rust,no_run
+use tg_agent::{executor::{Executor, Principal}, tools::ToolSession};
+fn session(bot: Executor, mt: tg_agent::mtproto::Executor, principal: Principal) -> ToolSession {
+    ToolSession::new(bot, principal).with_mtproto(mt)
+}
+```
+
+`ToolRequest::from_json` принимает строго один из существующих запросов без
+смешения типов. `execute_named` проверяет отдельное выбранное имя до допуска;
+`approve_mtproto` сохраняет точное host-подтверждение в общем ограниченном
+хранилище. Ошибки MT-записи направляют к `mtproto_get_operation` с исходным
+ключом; обрыв доставки оставляет `unknown`. Хост сначала закрывает MT Executor,
+затем Client, затем Journal; `ToolSession` не владеет их завершением.
+
+`session.catalog()` содержит 8 Bot инструментов, либо 16 при явном подключении
+MT. Команды `tools --mtproto` и `schema [request|response|catalog] --mtproto`
+открывают расширенный каталог/набор схем версии 2 без конфигурации или RPC.
+Отдельные запросы и ответы сохраняют `schema_version=1`. Прежние схемы `v1`
+не изменены; `python tools/agent_schema.py check --mtproto` проверяет `schemas/v2`.
+Самостоятельный `Host::load` пока принимает Bot-конфигурацию; MT выполняется
+во встраиваемом хосте с подготовленными Session/Client/feed.
 
 Ответ имеет schema_version=1, ok и result/dry_run/error. ok=true означает получение результата исполнителя: для записи нужно проверить operation.state и result_availability. Ошибки содержат статический code/message и automatic_retry_allowed=false; ошибки проверенной записи сохраняют operation_id и next_action=get_operation. Сбой вывода после действия также сохраняет ключ и unknown; Debug/Display не показывают payload или идентификаторы.
 

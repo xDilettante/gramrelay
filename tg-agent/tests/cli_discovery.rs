@@ -34,3 +34,18 @@ fn executable_discovery_is_json_only_and_needs_no_config_or_credentials() {
     assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE"));
     assert!(output.stderr.is_empty());
 }
+
+#[cfg(not(feature = "mtproto"))]
+#[test]
+fn extended_discovery_requires_the_explicit_mtproto_build_feature() {
+    let output = Command::new(env!("CARGO_BIN_EXE_tg-agent"))
+        .args(["tools", "--mtproto"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap().trim(),
+        "agent_mtproto_feature_required"
+    );
+}

@@ -1,4 +1,4 @@
-"""Generate/check version-1 agent schemas through the real offline CLI."""
+"""Generate/check explicit Bot v1 or extended v2 schemas through the offline CLI."""
 import argparse
 import json
 from pathlib import Path
@@ -11,10 +11,13 @@ ROOT = Path(__file__).resolve().parents[1]
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("generate", "check"))
+    parser.add_argument("--mtproto", action="store_true", help="extended inventory v2")
     args = parser.parse_args()
+    version, count = (2, 16) if args.mtproto else (1, 8)
     result = subprocess.run(
         ["cargo", "run", "--locked", "--offline", "--quiet", "-p", "tg-agent",
-         "--features", "cli", "--bin", "tg-agent", "--", "schema"],
+         "--features", "cli,mtproto" if args.mtproto else "cli", "--bin", "tg-agent", "--", "schema"]
+        + (["--mtproto"] if args.mtproto else []),
         cwd=ROOT, stdout=subprocess.PIPE, check=False,
     )
     if result.returncode:
@@ -24,7 +27,8 @@ def main() -> int:
         bundle = json.loads(result.stdout)
         if set(bundle) != {"schema_version", "request", "response", "catalog"}:
             raise ValueError("unexpected schema bundle")
-        if bundle["schema_version"] != 1 or len(bundle["catalog"]["tools"]) != 8:
+        if (bundle["schema_version"] != version or bundle["catalog"]["schema_version"] != version
+                or len(bundle["catalog"]["tools"]) != count):
             raise ValueError("unexpected schema version/inventory")
         artifacts = {
             name: (json.dumps(bundle[name], ensure_ascii=False, indent=2,
@@ -34,7 +38,7 @@ def main() -> int:
     except (ValueError, TypeError, KeyError):
         print("invalid agent schema bundle", file=sys.stderr)
         return 1
-    directory = ROOT / "tg-agent" / "schemas" / "v1"
+    directory = ROOT / "tg-agent" / "schemas" / f"v{version}"
     if args.command == "generate":
         directory.mkdir(parents=True, exist_ok=True)
     failed = False
@@ -47,7 +51,7 @@ def main() -> int:
             failed = True
     if failed:
         return 1
-    print(f"{args.command}: 3 agent schema artifacts / 8 tools")
+    print(f"{args.command}: 3 agent schema artifacts / {count} tools (v{version})")
     return 0
 
 

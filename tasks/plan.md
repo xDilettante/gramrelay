@@ -12,3 +12,8 @@ See tasks/goal.md for completion gates and docs/ARCHITECTURE.md for module bound
 8. release: checked examples, recipes/migration guide, agent-task evaluation, comparable benchmarks, compatibility matrix, audit and packaging.
 
 Each module has a concrete spec before its implementation. Use small verified commits, keep the shared request path conservative, and update tasks/todo.md with evidence. The full goal remains active across milestones.
+
+Current M3 order: shared typed MT tool dispatch and opt-in extended schemas /
+embedded CLI/MCP adapters (SPEC-mtproto-agent-tools.md), then trusted standalone
+MT profile bootstrap and executable lifecycle fixtures; only then close M3 and
+run Q1–Q4. The original Bot v1 discovery remains unchanged.
