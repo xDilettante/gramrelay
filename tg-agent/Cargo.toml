@@ -21,7 +21,7 @@ metrics = ["tg/metrics"]
 base64 = "0.23"
 getrandom = "0.4"
 rusqlite = { version = "0.43", default-features = false, features = ["bundled"] }
-rmcp = { version = "=3.10.0", default-features = false, features = ["server"], optional = true }
+rmcp = { version = "=3.11.0", default-features = false, features = ["server"], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = { version = "0.11", default-features = false }
@@ -33,7 +33,7 @@ tokio = { version = "1", features = ["rt", "sync"] }
 tokio-util = { version = "0.7", features = ["rt"], optional = true }
 
 [dev-dependencies]
-rmcp = { version = "=3.10.0", default-features = false, features = ["client", "server"] }
+rmcp = { version = "=3.11.0", default-features = false, features = ["client", "server"] }
 jsonschema = { version = "0.61.2", default-features = false }
 wiremock = "0.6"
 reqwest = { version = "0.13", default-features = false, features = ["json"] }

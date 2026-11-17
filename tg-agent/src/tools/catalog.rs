@@ -364,7 +364,9 @@ fn output(action: Action) -> Value {
         ],
         &["schema_version", "ok", "dry_run"],
     );
-    json!({"$schema":DRAFT,"oneOf":[success,dry,error()]})
+    // Every envelope variant is an object. An explicit root type also keeps
+    // outputSchema visible to legacy peers under rmcp 3.11's SEP-2106 filter.
+    json!({"$schema":DRAFT,"type":"object","oneOf":[success,dry,error()]})
 }
 fn example(action: Action) -> Value {
     let arguments = match action {

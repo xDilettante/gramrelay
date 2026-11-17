@@ -46,6 +46,15 @@ async fn current_protocol_works_without_legacy_initialize() {
     assert!(first["result"]["ttlMs"].is_u64());
     assert!(first["result"]["cacheScope"].is_string());
     assert_eq!(first["result"]["tools"].as_array().unwrap().len(), 8);
+    for (actual, expected) in first["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(catalog().tools)
+    {
+        assert_eq!(actual["outputSchema"], expected.output_schema);
+        assert_eq!(actual["outputSchema"]["type"], "object");
+    }
     frame = serde_json::to_vec(
         &json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":meta}}),
     )

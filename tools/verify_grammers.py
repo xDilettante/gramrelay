@@ -19,7 +19,7 @@ LOCAL = {"Cargo.lock", "src/tg_safety_tests.rs", "src/tg_rpc_fixture.rs", "src/t
 PACKAGES = {
     "grammers-session": (
         "221a58eaf6bfb61ecd1cb8bc58c20d2bc7ec3749b968bc90d52bcf9a8547d4e6",
-        {"Cargo.toml", "src/message_box/mod.rs", "src/message_box/adaptor.rs"},
+        {"Cargo.toml", "src/message_box/mod.rs", "src/message_box/adaptor.rs", "src/types.rs"},
         {"PATCH.md", "tg-backlog.patch", "LICENSE-APACHE", "Cargo.lock"},
         "tg-backlog.patch",
     ),

@@ -11,7 +11,15 @@ uses i64 intermediates so i32 inputs cannot silently wrap in release or panic in
 debug during duplicate handling. These preserve mathematical sequence comparisons;
 no custom update sequencing, storage, schema or cryptography is introduced.
 
-Cargo.toml adds only the sibling hardened TL override for standalone library tests.
+Cargo.toml adds the sibling hardened TL override for standalone library tests.
+The sole serde_with use (Option<[u8;256]> hex) is replaced with serde with/default
+attributes and the already-locked hex 0.4.3. This removes its disabled chrono
+integration from the workspace lockfile (Cargo issue rust-lang/cargo#10801).
+The types.rs adapter preserves lowercase output, mixed-case input and
+None/null/missing behavior, decoding only exactly 512 hex characters into a fixed
+array. Malformed string errors are static and never echo key material. Public
+DcOption golden tests passed against upstream before the replacement and against
+the patch afterward; complete encrypted snapshot/restart tests also apply.
 All other upstream source bytes are unchanged. The application uses bounded
 input/output accounting, a privacy dispatcher and explicit durable gap handling.
 

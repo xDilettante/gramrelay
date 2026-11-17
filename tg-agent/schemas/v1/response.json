@@ -146,7 +146,8 @@
           ],
           "type": "object"
         }
-      ]
+      ],
+      "type": "object"
     },
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -304,7 +305,8 @@
           ],
           "type": "object"
         }
-      ]
+      ],
+      "type": "object"
     },
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -536,7 +538,8 @@
           ],
           "type": "object"
         }
-      ]
+      ],
+      "type": "object"
     },
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -759,7 +762,8 @@
           ],
           "type": "object"
         }
-      ]
+      ],
+      "type": "object"
     },
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -982,7 +986,8 @@
           ],
           "type": "object"
         }
-      ]
+      ],
+      "type": "object"
     },
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1205,7 +1210,8 @@
           ],
           "type": "object"
         }
-      ]
+      ],
+      "type": "object"
     },
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1433,7 +1439,8 @@
           ],
           "type": "object"
         }
-      ]
+      ],
+      "type": "object"
     },
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1656,7 +1663,8 @@
           ],
           "type": "object"
         }
-      ]
+      ],
+      "type": "object"
     }
   ],
   "title": "Telegram agent response v1"

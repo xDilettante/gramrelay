@@ -39,7 +39,7 @@ resolver = "2"
 default = ["sqlite-storage"]
 serde = [
     "dep:serde",
-    "dep:serde_with",
+    "dep:hex",
 ]
 sqlite-storage = [
     "dep:libsql",
@@ -68,9 +68,8 @@ version = "1"
 features = ["derive"]
 optional = true
 
-[dependencies.serde_with]
-version = "3"
-features = ["hex"]
+[dependencies.hex]
+version = "0.4.3"
 optional = true
 
 [dependencies.tokio]

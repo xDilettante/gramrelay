@@ -232,7 +232,8 @@
             ],
             "type": "object"
           }
-        ]
+        ],
+        "type": "object"
       },
       "replay_safety": "read_only"
     },
@@ -494,7 +495,8 @@
             ],
             "type": "object"
           }
-        ]
+        ],
+        "type": "object"
       },
       "replay_safety": "read_only"
     },
@@ -857,7 +859,8 @@
             ],
             "type": "object"
           }
-        ]
+        ],
+        "type": "object"
       },
       "replay_safety": "read_only"
     },
@@ -1248,7 +1251,8 @@
             ],
             "type": "object"
           }
-        ]
+        ],
+        "type": "object"
       },
       "replay_safety": "never"
     },
@@ -1616,7 +1620,8 @@
             ],
             "type": "object"
           }
-        ]
+        ],
+        "type": "object"
       },
       "replay_safety": "never"
     },
@@ -2000,7 +2005,8 @@
             ],
             "type": "object"
           }
-        ]
+        ],
+        "type": "object"
       },
       "replay_safety": "never"
     },
@@ -2338,7 +2344,8 @@
             ],
             "type": "object"
           }
-        ]
+        ],
+        "type": "object"
       },
       "replay_safety": "read_only"
     },
@@ -2717,7 +2724,8 @@
             ],
             "type": "object"
           }
-        ]
+        ],
+        "type": "object"
       },
       "replay_safety": "never"
     }

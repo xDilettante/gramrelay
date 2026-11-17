@@ -1,3 +1,6 @@
 * text=auto eol=lf
 # Unified diff context lines contain one space for an empty source line.
 vendor/grammers-*/tg-*.patch -whitespace
+vendor/rmcp/tg-timestamps.patch -whitespace
+# Preserve the authenticated upstream comment's trailing Markdown break.
+vendor/rmcp/tests/test_json_schema_detection.rs whitespace=-blank-at-eol

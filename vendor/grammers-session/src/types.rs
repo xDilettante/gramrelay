@@ -17,7 +17,6 @@ pub use crate::peer::{ChannelKind, PeerAuth, PeerId, PeerInfo, PeerKind, PeerRef
 /// This is very similar to Telegram's own `dcOption` type, except it also
 /// contains the permanent authentication key and serves as a stable interface.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", serde_with::serde_as)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DcOption {
     /// Datacenter identifier.
@@ -40,8 +39,44 @@ pub struct DcOption {
     pub auth_key: Option<[u8; 256]>,
 
     #[cfg(feature = "serde")]
-    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[serde(default, with = "auth_key_hex")]
     pub auth_key: Option<[u8; 256]>,
+}
+
+// Keep the existing snapshot representation without serde_with's unused chrono
+// integration in Cargo.lock. Hex decoding writes directly into the fixed array.
+#[cfg(feature = "serde")]
+mod auth_key_hex {
+    use std::borrow::Cow;
+
+    use serde::{Deserialize, Deserializer, Serializer, de::Error};
+
+    pub(super) fn serialize<S: Serializer>(
+        key: &Option<[u8; 256]>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match key {
+            Some(key) => serializer.serialize_some(&hex::encode(key)),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<[u8; 256]>, D::Error> {
+        let Some(text) = Option::<Cow<'de, str>>::deserialize(deserializer)
+            .map_err(|_| D::Error::custom("invalid authentication key"))?
+        else {
+            return Ok(None);
+        };
+        if text.len() != 512 {
+            return Err(D::Error::custom("invalid authentication key"));
+        }
+        let mut key = [0; 256];
+        hex::decode_to_slice(text.as_bytes(), &mut key)
+            .map_err(|_| D::Error::custom("invalid authentication key"))?;
+        Ok(Some(key))
+    }
 }
 
 /// Full update state needed to process updates in order without gaps.
