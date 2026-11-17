@@ -25,10 +25,18 @@ publish or a claim that an unknown production registry has been configured.
   lock is the acceptance lock. Excluding per-package locks avoids resolving
   unrelated optional SDK features while assembling the mutually dependent
   archives. Do not treat --no-verify as successful build verification.
+- Staging expands an SDK's restrictive include list to retain its existing
+  license, PATCH.md and patch file, without editing those assets.
+  Preserve the existing SDK Cargo.toml.orig bytes as Cargo.upstream.toml in
+  staging: Cargo reserves the former name for its new generated staging manifest.
 - Independently inspect each Cargo-generated normalized manifest and content:
   exact package name/version/publish/license, all internal registry edges,
-  absence of paths/git/patch/replace/workspace inheritance, unchanged package
+  absence of dependency path/git sources and patch/replace/workspace inheritance,
+  exact internal registry-index URLs, unchanged package
   source/assets, original staging manifest, and expected generated files only.
+  Compare Cargo's complete staged/registry package target models (build script,
+  library/binary/example/test targets, edition, feature gates and attributes),
+  with source paths relative to each package. Keep declared/example/test assets.
 - Prepare a minimal local Git registry index with file-URL downloads using the
   exact .crate checksums. No HTTP service, network publish API or token exists.
   The registry URL is tied to the candidate directory; these archives are local
@@ -36,14 +44,19 @@ publish or a claim that an unknown production registry has been configured.
   repackaging/acceptance; do not claim cross-directory archive reproducibility.
 - Reuse tools/fixtures/external-consumer through an independent workspace with
   exact registry versions, no path/git dependencies, patch or source replacement.
-  Bootstrap only the owned file registry, then resolve and run offline. Verify
+  Bootstrap only the owned file registry with
+  cargo info --registry telegram-private PACKAGE@VERSION for each exact package
+  from a separate directory with no workspace manifest, then resolve and run offline. Verify
   exactly eight private registry nodes/versions/checksums, no duplicate hardened
   packages and no chrono; run the existing public Bot/MCP/MT fixture and joined
   close. All eight sources must be Cargo's registry copies, not staging files.
 - Copy only checksum-verified public registry archives and their public sparse
   index records needed by the committed root lock into an isolated Cargo home.
   Never read/copy credential files or private registry configuration. Preserve
-  the caller's rustup toolchain setup. No implicit public network access.
+  the caller's installed rustup toolchain setup with auto-install disabled.
+  Scratch ancestors must contain neither Cargo configuration nor Cargo.toml;
+  check existence only and refuse if no neutral location is available.
+  No implicit public network access.
 - Keep small identity/commands/metadata/lock/runtime logs outside Cargo targets.
   Record failure before running each child; do not leave a successful result
   after failure. Source commit/archive hash and tool versions identify evidence.
@@ -63,7 +76,7 @@ python tools/private_packages.py --toolchain 1.100.0
 python tools/verify_grammers.py check
 python tools/verify_rmcp.py check
 python tools/schema.py check
-cargo audit
+cargo audit --no-fetch
 ```
 
 Increment order: pure staging/index/content regression tests (observe RED),
@@ -72,6 +85,8 @@ runtime acceptance, fresh scoped review, documentation/evidence and commit.
 
 Always retain source and third-party license bytes; use synthetic fixture data.
 Never publish, push, contact Telegram or modify cryptographic implementation.
+The offline audit uses the previously refreshed local advisory database; database
+refresh is a separate verification action, outside this local-only rehearsal.
 Actual registry choice, transfer/publication and final externally owned names
 require a separate user instruction; continue other release gates meanwhile.
 
