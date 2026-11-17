@@ -82,7 +82,7 @@ their source from queue through identity, part drain, final media and native
 cleanup. Queued/rejected and panicking owners cannot skip session finalization;
 stale queued work stays NotSent without fencing a healthy driver. Host cleanup
 panic payload retention is explicit in ADR 0018. The eighth MT executor action,
-its integration/example and CLI/MCP remain unimplemented M3 work.
+its integration/example and CLI/MCP were still pending at that checkpoint.
 
 Verified foundations: ten further M2 lifecycle/source cases (183 M2 library
 checks), including four observed RED→GREEN failures plus a stale-queue regression
@@ -94,6 +94,23 @@ Fresh audit scans 363 dependencies with the known chrono-unmaintained warning;
 only a direct edge to already-pinned bytes 1.12.1 was added. Registry/source/
 disposal/queue reviews are reconciled with scoped clean re-reviews. Cross-model
 skipped in the autonomous continuation. The full goal remains active.
+
+MT document provider implemented against SPEC-mtproto-agent-files.md. All eight
+Rust executor actions now run through current scope/approval checks and durable
+prepare/begin/confirmation. Host-only immutable snapshots share bounded storage;
+full-size upload quotas, original file/lease caps, exact receipt/hash validation,
+same-key NotSent restoration and minimal cached/get_operation results are covered.
+Strict v9 rebuild changes only the file-profile FK, preserving old handles,
+metadata, operations/scopes and budgets while refusing orphan/mismatched old data.
+
+Verified: four further migration cases (20 total), twelve real-TL file integration
+cases and one policy-wait/file-expiry unit case; 640 all-feature / 389 default
+workspace tests, 16 doctests, fmt/Clippy, isolated builds, 25 Python checks,
+protocol/agent schemas, four SDK verifiers and offline authorized document example
+pass. CLI/MCP binaries rebuilt after executable checks. Fresh migration/authority/
+execution reviews are clear; cross-model skipped in this autonomous continuation.
+Audit: unchanged 363 dependencies, known chrono informational warning. M3 remains
+open for CLI/MCP dispatch/host bootstrap; Q1–Q4 and the full goal remain active.
 
 ## Release gates
 

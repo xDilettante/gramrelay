@@ -241,7 +241,7 @@ async fn hash(input: OwnedInput) -> Result<(OwnedInput, [u8; 32])> {
     .await
     .map_err(|_| ExecutorError::new(ExecutorErrorKind::Storage))
 }
-fn validate_filename(name: &str) -> Result<()> {
+pub(crate) fn validate_filename(name: &str) -> Result<()> {
     if name.is_empty()
         || name.len() > 255
         || name == "."

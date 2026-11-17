@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    executor::{ExecutorError, ExecutorErrorKind, PolicyTime, storage_error},
+    executor::{ExecutorError, ExecutorErrorKind, PolicyTime, file_store, storage_error},
     journal::{
         self, Completion, Journal, JournalError, JournalErrorKind, OperationRequest, Preparation,
         authorization::{BudgetContext, charge_invocation_checked},
@@ -19,8 +19,10 @@ use tokio::{
     task::JoinSet,
 };
 mod callbacks;
+mod files;
 mod output;
 mod write;
+pub use crate::executor::{FileLimits, RegisteredFile};
 pub use callbacks::{CallbackClockPolicy, CallbackReference};
 pub use output::*;
 type Result<T> = std::result::Result<T, ExecutorError>;
@@ -33,6 +35,7 @@ pub struct ExecutorOptions {
     callback_ttl: Duration,
     max_callback_references: usize,
     callback_clock_policy: CallbackClockPolicy,
+    file_limits: FileLimits,
 }
 impl Default for ExecutorOptions {
     fn default() -> Self {
@@ -43,10 +46,15 @@ impl Default for ExecutorOptions {
             callback_ttl: Duration::from_secs(10),
             max_callback_references: 1024,
             callback_clock_policy: CallbackClockPolicy::JournalMonotonic,
+            file_limits: FileLimits::default(),
         }
     }
 }
 impl ExecutorOptions {
+    pub fn file_limits(mut self, value: FileLimits) -> Self {
+        self.file_limits = value;
+        self
+    }
     pub fn callback_ttl(mut self, value: Duration) -> Self {
         self.callback_ttl = value;
         self
@@ -97,6 +105,7 @@ pub struct Executor {
     slots: Arc<Semaphore>,
     jobs: Arc<Mutex<Jobs>>,
     callback_references: Arc<std::sync::Mutex<callbacks::Registry>>,
+    files: Arc<file_store::FileRegistry>,
 }
 impl std::fmt::Debug for Executor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -104,15 +113,7 @@ impl std::fmt::Debug for Executor {
     }
 }
 impl Executor {
-    pub const ACTIONS: [Action; 7] = [
-        Action::GetMe,
-        Action::GetPeer,
-        Action::ReadUpdates,
-        Action::SendMessage,
-        Action::EditMessageText,
-        Action::AnswerCallbackQuery,
-        Action::GetOperation,
-    ];
+    pub const ACTIONS: [Action; 8] = Action::ALL;
     pub fn new(policy: PolicyStore, options: ExecutorOptions) -> Result<Self> {
         if !(1..=1024).contains(&options.max_in_flight)
             || !(1..=64 * 1024 * 1024).contains(&options.max_read_bytes)
@@ -124,10 +125,12 @@ impl Executor {
         {
             return Err(invalid_policy());
         }
+        options.file_limits.validate()?;
         Ok(Self {
             policy,
             profiles: Arc::default(),
             slots: Arc::new(Semaphore::new(options.max_in_flight)),
+            files: Arc::new(file_store::FileRegistry::new(options.file_limits)),
             options,
             jobs: Arc::default(),
             callback_references: Arc::default(),
@@ -189,6 +192,7 @@ impl Executor {
             policy: self.policy.clone(),
             options: self.options.clone(),
             callback_references: self.callback_references.clone(),
+            files: self.files.clone(),
         })
     }
     pub async fn dry_run(
@@ -329,8 +333,29 @@ struct Authorization {
     expected: ProfileIdentity,
     scope: Option<Scope>,
     reference: Option<callbacks::Context>,
+    file: Option<RegisteredFile>,
 }
 impl Authorization {
+    fn write_checked(&self, time: i64) -> Result<(DryRun, Grant)> {
+        let value = self.checked(time)?;
+        if let Some(file) = &self.file {
+            file_store::ensure_live(file.expires_at_ms, now()?.max(time))?;
+        }
+        Ok(value)
+    }
+    fn write_budget(&self, time: i64) -> journal::Result<BudgetContext> {
+        let context = self.budget(time)?;
+        if let Some(file) = &self.file {
+            file_store::ensure_live(
+                file.expires_at_ms,
+                now()
+                    .map_err(|_| JournalError::new(JournalErrorKind::Storage))?
+                    .max(time),
+            )
+            .map_err(|_| JournalError::new(JournalErrorKind::Denied))?;
+        }
+        Ok(context)
+    }
     fn checked(&self, time: i64) -> Result<(DryRun, Grant)> {
         let scope = self.scope.as_ref().map(Scope::policy_scope);
         let result = self.policy.authorized_mtproto(
@@ -386,6 +411,7 @@ struct Worker {
     policy: PolicyStore,
     options: ExecutorOptions,
     callback_references: Arc<std::sync::Mutex<callbacks::Registry>>,
+    files: Arc<file_store::FileRegistry>,
 }
 impl Worker {
     async fn authorization(
@@ -395,6 +421,21 @@ impl Worker {
         approval: Option<&Approval>,
     ) -> Result<Authorization> {
         let mut reference = None;
+        let file = if let Call::SendDocument(args) = request.call() {
+            self.policy
+                .check_mtproto_lookup(principal, request, self.profile.expected, now()?)?;
+            let file = self
+                .profile
+                .journal
+                .file_metadata(request.profile(), principal.as_str(), &args.file_handle)
+                .await
+                .map_err(storage_error)?
+                .ok_or_else(|| ExecutorError::new(ExecutorErrorKind::NotFound))?;
+            files::validate_metadata(&file)?;
+            Some(file)
+        } else {
+            None
+        };
         let scope = if let Call::GetOperation(args) = request.call() {
             self.policy
                 .check_mtproto_lookup(principal, request, self.profile.expected, now()?)?;
@@ -432,6 +473,7 @@ impl Worker {
             expected: self.profile.expected,
             scope,
             reference,
+            file,
         })
     }
     async fn run(
@@ -506,9 +548,10 @@ impl Worker {
                 }
                 output::project(operation, &scope)?
             }
-            Call::SendMessage(_) | Call::EditMessageText(_) | Call::AnswerCallbackQuery(_) => {
-                self.write(&auth).await?
-            }
+            Call::SendMessage(_)
+            | Call::EditMessageText(_)
+            | Call::AnswerCallbackQuery(_)
+            | Call::SendDocument(_) => self.write(&auth).await?,
             _ => return Err(ExecutorError::new(ExecutorErrorKind::UnsupportedAction)),
         };
         let (dry, _) = auth.checked(now()?).map_err(|e| {

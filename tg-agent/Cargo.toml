@@ -86,3 +86,7 @@ required-features = ["mtproto-test-kit"]
 [[example]]
 name = "mtproto_authorized_callback"
 required-features = ["mtproto-test-kit"]
+
+[[example]]
+name = "mtproto_authorized_document"
+required-features = ["mtproto-test-kit"]

@@ -483,7 +483,7 @@ async fn unsupported_capabilities_duplicate_profiles_and_invalid_lease_budgets_a
                 json!({"peer":peer(),"file_handle":"missing"}),
                 Some("file"),
             ),
-            ExecutorErrorKind::UnsupportedAction,
+            ExecutorErrorKind::Denied,
         ),
     ] {
         assert_eq!(

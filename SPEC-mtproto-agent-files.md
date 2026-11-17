@@ -12,7 +12,13 @@ Bot API. Extract the protocol-independent registry rather than copy its checks.
 Register/restore/discard/prune remain trusted-host methods. Profile identity comes
 only from the registered Feed. Handles are random, immutable and never reused;
 restoration requires exact owner/profile/hash/size. A handle grants no permission.
-No journal migration or changes to Bot wire/ID semantics are required.
+Journal v9 rebuilds executor_files with the same immutable columns/index and
+profile FK to account_profiles, replacing the Bot-only update_feeds FK. Verify
+exact v1–v8 schemas and original foreign keys before copying, preserve every
+handle/owner/hash/size/name/time plus operations/scopes/budgets, and validate exact
+new DDL/FKs before commit. Reject malformed/orphan old data without inferring MT
+ownership. Copy/drop/rename/index recreation is one immediate transaction; rollback
+keeps the original schema/version/rows. Existing Bot wire/ID meanings are unchanged.
 
 Reserve actual Vec capacity and a snapshot slot before metadata/hash waits.
 Cancelled native hash work keeps input and permits until completion. Active upload
@@ -114,7 +120,40 @@ scans 363 dependencies with one known chrono-unmaintained informational warning.
 Registry/source/disposal/queue reviews are reconciled; cross-model skipped in
 this non-interactive continuation. ADR 0018 records cleanup ownership/trade-offs.
 
-Remaining: implement eighth-action host file registration/authorization, exact
+At the foundation checkpoint, remaining work was eighth-action host registration/authorization, exact
 file-scope/fingerprint, quota/deadline dispatch and safe receipt verification in
 mtproto::Executor; complete the real-TL provider acceptance cases and offline
 example above. CLI/MCP and Q1–Q4 remain open. No live-server or performance claim.
+
+## Document-provider outcome
+
+Implemented all eight Rust executor actions. MT host registration/restoration
+reuses the shared bounded store, validates M2 names/nonempty data, and supplies
+fixed MIME and expected SHA-256 without a second full copy. Current metadata,
+peer/file/action/approval, canonical intent, atomic full-size quotas, lease/file
+caps and minimal confirmed receipts use the shared write path. Cache and retained
+scope remain readable after expiry/discard/restart under current original grants.
+Executor joins wrappers/confirmation; host then joins Client/native cleanup and
+Journal, in that order. No implicit close of independent host resources is added.
+
+Four new migration cases include observed pre-fix failures for v9 absence,
+orphan old metadata and contradictory account kind. The v9 rebuild preserves rows and
+all prior migrations (20 migration cases pass). Twelve real-TL integration cases
+cover user/bot accounts, ownership/profile/grants/approval/revocation, immutable
+restore, memory retention after cancellation, resumed close, cache, expiry,
+NotSent/Rejected/Unknown, malformed media, two executors, persistent quotas and
+actual journal restart. A policy-lock unit case proves original file cap anchoring
+and atomic denial/zero quota/admission after expiry. The socket-free
+mtproto_authorized_document example performs one part/media upload and a cached
+second invocation after resident discard.
+
+Workspace: 640 all-feature / 389 default tests, 16 doctests; fmt/Clippy, isolated
+storage/executor/MT builds, 25 Python checks, protocol/agent schemas and four SDK
+verifiers pass. All-feature CLI/MCP binaries rebuilt after executable checks.
+Migration, authority and execution reviews found no remaining substantive defects;
+cross-model skipped in this non-interactive continuation. Fresh audit scans 363
+unchanged dependencies with the known chrono RUSTSEC-2026-0543 informational
+warning. No clean audit, live-server, platform or performance claim.
+
+M3 now remains open for shared CLI/MCP dispatch and host bootstrap. Q1–Q4 and the
+full completion goal remain active.

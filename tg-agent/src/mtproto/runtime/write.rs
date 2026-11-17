@@ -11,12 +11,21 @@ impl Worker {
                 account: self.profile.expected,
                 action: request.action(),
                 peer: request.call().peer(),
-                file: None,
+                file: auth
+                    .file
+                    .as_ref()
+                    .map(|f| journal::authorization::FileScope {
+                        handle: f.handle.clone(),
+                        sha256: f.sha256,
+                        bytes: f.byte_size,
+                    }),
                 reference_hash: None,
             }
         };
         let payload = if let Some(reference) = &auth.reference {
             callbacks::payload(request, reference)?
+        } else if let Some(file) = &auth.file {
+            serde_json::json!({"request":request,"file":{"handle":file.handle,"sha256":file.sha256,"byte_size":file.byte_size,"filename":file.filename,"expires_at_ms":file.expires_at_ms}})
         } else {
             serde_json::to_value(request).map_err(|_| invalid_policy())?
         };
@@ -44,7 +53,7 @@ impl Worker {
             }
         };
         let preparation = async {
-            auth.checked(now()?)?;
+            auth.write_checked(now()?)?;
             if let Call::AnswerCallbackQuery(args) = request.call() {
                 let reference = auth
                     .reference
@@ -56,6 +65,35 @@ impl Worker {
                     intent = intent.text(text.clone()).map_err(remote)?;
                 }
                 return Ok(Input::Callback(intent));
+            }
+            if let Call::SendDocument(args) = request.call() {
+                let file = auth.file.as_ref().expect("resolved file metadata");
+                let owner = self.files.upload_owner(file)?;
+                let mut intent = tg_mtproto::SendDocument::owned_bytes(
+                    file.filename.clone(),
+                    "application/octet-stream",
+                    owner,
+                )
+                .map_err(remote)?
+                .expected_sha256(file.sha256)
+                .max_bytes(file.byte_size);
+                if let Some(caption) = &args.caption {
+                    intent = intent.caption(caption.clone()).map_err(remote)?;
+                }
+                let deadline = files::cap(
+                    file,
+                    Instant::now(),
+                    now()?,
+                    self.profile.client.request_budget(),
+                )?;
+                let peer = self
+                    .profile
+                    .account
+                    .cached_peer_until(args.peer.as_client_id(), deadline)
+                    .await
+                    .map_err(remote)?
+                    .ok_or_else(|| ExecutorError::new(ExecutorErrorKind::NotFound))?;
+                return Ok(Input::Document(peer, intent));
             }
             let intent = if let Call::SendMessage(args) = request.call() {
                 Some(
@@ -88,7 +126,9 @@ impl Worker {
         let flight = match self
             .profile
             .journal
-            .begin_mtproto(prepared, scope.clone(), move |time| admission.budget(time))
+            .begin_mtproto(prepared, scope.clone(), move |time| {
+                admission.write_budget(time)
+            })
             .await
         {
             Ok(flight) => flight,
@@ -110,6 +150,19 @@ impl Worker {
             }
         };
         let response = match (input, request.call()) {
+            (Input::Document(peer, intent), Call::SendDocument(_)) => self
+                .profile
+                .account
+                .send_document_until(&peer, intent, deadline)
+                .await
+                .map(|receipt| {
+                    let file = auth.file.as_ref().expect("resolved file metadata");
+                    if receipt.size() != file.byte_size || receipt.sha256() != file.sha256 {
+                        None
+                    } else {
+                        message_value(receipt.message(), scope.peer, None)
+                    }
+                }),
             (Input::Callback(intent), Call::AnswerCallbackQuery(_)) => self
                 .profile
                 .account
@@ -133,7 +186,7 @@ impl Worker {
                 )
                 .await
                 .map(|r| message_value(r, scope.peer, Some(args.message_id.get()))),
-            _ => unreachable!("supported text action"),
+            _ => unreachable!("prepared write action"),
         };
         let completion = match response {
             Ok(Some(value)) => Completion::succeeded(value),
@@ -171,6 +224,7 @@ impl Worker {
 enum Input {
     Text(tg_mtproto::Peer, Option<tg_mtproto::SendText>),
     Callback(tg_mtproto::CallbackAnswer),
+    Document(tg_mtproto::Peer, tg_mtproto::SendDocument),
 }
 fn message_value(
     receipt: tg_mtproto::MessageReceipt,
@@ -193,9 +247,10 @@ fn rpc_deadline(
 ) -> Result<Instant> {
     // Anchor before UTC and policy lock waits; neither can extend this cap.
     let sampled = Instant::now();
+    let time = now()?;
     let remaining = flight
         .lease_until_ms()
-        .checked_sub(now()?)
+        .checked_sub(time)
         .and_then(|v| u64::try_from(v).ok())
         .map(Duration::from_millis)
         .ok_or_else(capacity)?;
@@ -203,7 +258,17 @@ fn rpc_deadline(
         .checked_add(remaining)
         .and_then(|d| d.checked_sub(receipt_margin))
         .ok_or_else(capacity)?;
-    auth.checked(now()?)?;
+    let deadline = if let Some(file) = &auth.file {
+        files::cap(
+            file,
+            sampled,
+            time,
+            deadline.saturating_duration_since(sampled),
+        )?
+    } else {
+        deadline
+    };
+    auth.write_checked(now()?)?;
     let deadline = auth
         .reference
         .as_ref()

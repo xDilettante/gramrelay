@@ -435,6 +435,7 @@ async fn callback_policy_wait_cannot_disclose_after_grant_or_approval_expiry() {
             expected: f.profile.expected,
             scope: Some(context.scope.clone()),
             reference: Some(context),
+            file: None,
         };
         let (held, ready) = std::sync::mpsc::channel();
         let (release, wait) = std::sync::mpsc::channel();
@@ -511,6 +512,7 @@ async fn buffered_callback_results_recheck_revision_and_reference_expiry_at_call
                 expected: f.profile.expected,
                 scope: write.then(|| context.scope.clone()),
                 reference: write.then(|| context.clone()),
+                file: None,
             };
             let revision = auth.checked(now().unwrap()).unwrap().0.grant_revision;
             // The output has passed worker authorization and is buffered in oneshot.

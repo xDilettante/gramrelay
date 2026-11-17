@@ -21,7 +21,8 @@ mod runtime;
 mod types;
 pub use runtime::{
     AccountInfo, CallbackClockPolicy, CallbackReference, ExecutionResult, Executor,
-    ExecutorOptions, FailureReceipt, MessageReceipt, OperationReceipt, PeerInfo,
+    ExecutorOptions, FailureReceipt, FileLimits, MessageReceipt, OperationReceipt, PeerInfo,
+    RegisteredFile,
 };
 pub mod updates;
 pub use crate::executor::{

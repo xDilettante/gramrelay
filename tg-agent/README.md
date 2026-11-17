@@ -11,7 +11,7 @@
 привязку атомарно с созданием feed и не принимает имя MTProto-профиля. Новых
 привязок по умолчанию не более 64 (`JournalOptions::max_profiles`, максимум 1024),
 без удаления прежних ключей. Bot API CLI/MCP продолжают использовать v1;
-интеграция исполнения MTProto ещё реализуется в M3.
+CLI/MCP MTProto ещё реализуется в M3.
 
 Если старые операции или квоты не имели feed и известной идентичности, попытка
 назначить этому имени аккаунт получает `Conflict`. Их ручной журнал сохраняется;
@@ -29,11 +29,10 @@ Bot API chat/thread options, access hashes, пути или произвольн
 M3, а каталог Bot API содержит прежние восемь инструментов.
 
 `mtproto::Executor` принимает `register_profile(feed, client)` от хоста и выполняет
-семь действий: get_me, get_peer, read_updates, send_message, edit_message_text,
-answer_callback_query и get_operation с префиксом `mtproto_`. `get_peer` проверяет личность и доступность
+восемь действий: get_me, get_peer, read_updates, send_message, edit_message_text,
+answer_callback_query, get_operation и send_document с префиксом `mtproto_`. `get_peer` проверяет личность и доступность
 собеседника в зашифрованном кеше; подготовку username/cache выполняет хост.
-Документы пока возвращают `UnsupportedAction`. `Executor::ACTIONS`
-показывает фактически исполняемый набор. Вход/выход из аккаунта и raw TL не
+`Executor::ACTIONS` показывает фактически исполняемый набор. Вход/выход из аккаунта и raw TL не
 являются действиями агента.
 
 Миграция v8 добавляет отдельные точные MTProto scopes в общий журнал ключей и
@@ -54,6 +53,34 @@ receipt margin; timeout берётся у M2 Client. Timeout + margin должн
 Офлайн-пример с синтетической зашифрованной сессией и настоящим TL-кодеком:
 `cargo run --locked --offline -p tg-agent --features mtproto-test-kit --example mtproto_authorized_text`.
 Он проверяет две попытки с одним ключом и одну отправку без сокетов.
+
+Файлы хост регистрирует через `register_file(principal, profile, filename, bytes,
+expires_at_ms)`; агент получает только handle и отдельное право на него. Снимок
+неизменяем: `restore_file` принимает лишь прежние размер/хеш и владельца, а
+`discard_file`/`prune_files` освобождают резидентные ссылки. Активная загрузка
+удерживает свой снимок и permit, включая отмену вызывающего кода. По умолчанию
+FileLimits: 50 MiB на файл/активные загрузки, 100 MiB и 1024 снимка на Executor;
+учитывается фактическая ёмкость Vec до hash/metadata ожиданий. Байты не копируются
+во второй полный буфер M2. Пустые MT документы и небезопасные имена отклоняются;
+MIME фиксирован как `application/octet-stream`. Пути, URL и file IDs не являются
+аргументами инструмента.
+
+Свежая отправка проверяет current peer/file/action grants, точный approval,
+резидентные байты, expiry и квоты; полная длина файла учитывается атомарно с
+допуском записи. Абсолютный дедлайн ограничивает cache identity и всю загрузку.
+Квитанция содержит лишь peer/message ID. Cached/get_operation читаются после
+discard, expiry и рестарта при текущих исходных правах, без SDK/RPC или байтов.
+`Unknown`/`Rejected` не повторяются с прежним ключом. Подтверждённый `NotSent`
+можно продолжить с тем же намерением после точного восстановления.
+
+Миграция v9 сохраняет метаданные и прежние handles, заменяя Bot-only FK файлов
+привязкой к общим account_profiles. Старые сироты и противоречивые виды аккаунта
+отклоняются с полным откатом; байты после рестарта восстанавливает хост.
+Сначала закрывается Executor (jobs/квитанции), затем Client (SDK/native cleanup),
+затем Journal. Контракт: [SPEC-mtproto-agent-files.md](../SPEC-mtproto-agent-files.md).
+
+`cargo run --locked --offline -p tg-agent --features mtproto-test-kit --example mtproto_authorized_document`
+проверяет настоящие TL-части и сохранённую квитанцию без сокетов.
 
 Ответ callback принимает только непрозрачный `reference`, текст и `show_alert`.
 `read_updates` добавляет `callback_reference` к разрешённому событию; доверенный
@@ -99,8 +126,8 @@ Client. Общие лимиты feeds/строк/байтов учитывают
 неподдержанный TL constructor виден как unscoped marker. Graphs entities, access
 hashes, file references и callback query ID в сериализованный вывод не входят.
 Монотонное наблюдение callback локальное, теряется после рестарта и не доказывает
-возраст запроса на сервере. Executor выдаёт callback references; провайдер файлов
-ещё остаётся в M3. `mtproto-test-kit` — явная опция для офлайн-тестов,
+возраст запроса на сервере. Executor выдаёт callback references и принимает
+host-only файлы. `mtproto-test-kit` — явная опция для офлайн-тестов,
 не настройка инструмента агента.
 
 `mtproto::updates::Reader::new(feed, policy, ReadOptions::default())` открывает
