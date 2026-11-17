@@ -447,7 +447,7 @@ fn budget_context(principal: &Principal, request: &Request, grant: &Grant) -> Bu
 fn now() -> Result<i64> {
     journal::now().map_err(storage_error)
 }
-fn storage_error(error: JournalError) -> ExecutorError {
+pub(crate) fn storage_error(error: JournalError) -> ExecutorError {
     ExecutorError::new(match error.kind() {
         JournalErrorKind::Validation => ExecutorErrorKind::InvalidInput,
         JournalErrorKind::Denied => ExecutorErrorKind::Denied,

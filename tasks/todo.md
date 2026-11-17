@@ -50,6 +50,8 @@ See tasks/goal.md. The active goal includes every unchecked module below.
 
   - MTProto update intake implemented against SPEC-mtproto-agent-updates.md: strict journal v7, bounded safe projection, shared Bot/MT limits, fixed-size replay watermark and fenced real M2 commit-before-ACK. Nineteen additional tests cover source metadata, migration, storage and intake, including actual process kills before append/before ACK/after ACK, caller Drop, encrypted replay, private callback provenance and exact byte accounting. Workspace: 555 all-feature / 365 default tests, 15 doctests; Clippy/fmt, isolated builds, deterministic schemas, 25 Python checks, four SDK verifiers and audit 363 pass. Fresh storage/source/projection reviews have no unresolved findings. M3 stays open for authorized reads, persistent write admission, callback/file providers, executor and CLI/MCP integration.
 
+  - Authorized MTProto event reads implemented against SPEC-mtproto-agent-read.md: reusable host-bound Reader shares current grants/approvals and persistent invocation/cost ledgers, filters primary peers/unscoped records, bounds scan/bytes/jobs and checks revision immediately before disclosure. Ten new unit cases and an extended real M2 intake integration pass. Review exposed cancellation releasing a still-owned native slot; deterministic RED-to-GREEN coverage proves the fix, with a clean re-review. Workspace: 565 all-feature / 365 default tests, 16 doctests; Clippy/fmt, isolated builds, Python/schema/SDK checks and audit 363 pass. M3 remains open for persistent write scopes/admission, callback/file providers, remote action execution and CLI/MCP integration.
+
 ## Release gates
 
 - [ ] Q1: task-based docs, migration guide, examples, agent index and 30-task evaluation.

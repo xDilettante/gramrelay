@@ -145,23 +145,7 @@ impl Journal {
         authorize: impl FnOnce(i64) -> Result<(BudgetContext, u64)> + Send + 'static,
     ) -> Result<()> {
         self.run(move |connection, options, _| {
-            let transaction = connection
-                .transaction_with_behavior(TransactionBehavior::Immediate)
-                .map_err(|_| storage())?;
-            let time = now()?;
-            let (context, cost) = authorize(time)?;
-            charge(
-                &transaction,
-                options,
-                &context,
-                Charge {
-                    invocations: 1,
-                    cost_units: cost,
-                    ..Charge::default()
-                },
-                time,
-            )?;
-            transaction.commit().map_err(|_| storage())
+            charge_invocation_checked(connection, options, None, authorize)
         })
         .await
     }
@@ -193,6 +177,35 @@ impl Journal {
         })
         .await
     }
+}
+pub(crate) fn charge_invocation_checked(
+    connection: &mut Connection,
+    options: &JournalOptions,
+    expected: Option<ProfileIdentity>,
+    authorize: impl FnOnce(i64) -> Result<(BudgetContext, u64)>,
+) -> Result<()> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| storage())?;
+    let time = now()?;
+    let (context, cost) = authorize(time)?;
+    if let Some(expected) = expected
+        && crate::profiles::load(&transaction, &context.profile)? != Some(expected)
+    {
+        return Err(JournalError::new(JournalErrorKind::Denied));
+    }
+    charge(
+        &transaction,
+        options,
+        &context,
+        Charge {
+            invocations: 1,
+            cost_units: cost,
+            ..Charge::default()
+        },
+        time,
+    )?;
+    transaction.commit().map_err(|_| storage())
 }
 fn load_scope(connection: &Connection, profile: &str, id: &str) -> Result<Option<OperationScope>> {
     let stored = connection.query_row("SELECT bot_id,action,chat_id,file_handle,file_sha256,file_bytes,reference_hash FROM executor_operation_scopes WHERE profile=?1 AND operation_id=?2", params![profile,id], |row| {

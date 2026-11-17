@@ -180,3 +180,19 @@ reviews have no unresolved findings; external cross-model review was skipped in
 the autonomous continuation. Authorized reads, persistent action scopes/admission,
 callback/file providers, executor and CLI/MCP integration remain M3. See the intake
 spec for source-replacement and backup-restore host preconditions.
+
+## Authorized event-read evidence
+
+SPEC-mtproto-agent-read.md is implemented as a reusable Reader over the same
+PolicyStore, exact Feed and durable budget ledger. Primary-peer/unscoped filtering,
+metadata-only cursor checks, approval/revision guards and private projected output
+have ten new unit cases plus an extended actual M2 intake integration. A cancelled
+call retains its native-job concurrency slot; the regression failed before the
+review-driven fix and passes afterward. The final caller-side guard also refuses
+revocation while a completed page waits in the reply channel. Fresh re-review has
+no unresolved findings; cross-model review was skipped in this autonomous run.
+
+Windows/Rust 1.98.0: 565 all-feature / 365 default tests, 16 doctests, Clippy/fmt,
+isolated builds, deterministic schemas, 25 Python checks, four SDK verifiers and
+audit of 363 dependencies pass. Persistent write scopes/admission, callback/file
+providers, remote action execution and CLI/MCP integration remain M3.

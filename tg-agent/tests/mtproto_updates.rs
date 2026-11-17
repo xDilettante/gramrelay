@@ -210,6 +210,65 @@ async fn intake_commits_whole_projection_before_ack_and_never_exports_entity_aut
     assert!(!wire.contains("access_hash"));
     assert!(!wire.contains("777"));
     assert_eq!(acknowledgements.load(Ordering::SeqCst), 4);
+    // The agent-facing provider consumes this actual M2 projection, without RPC.
+    {
+        use tg_agent::{
+            executor::ReadUpdatesArgs,
+            mtproto::{
+                Action, Budget, Call, Grant, PeerId, PeerKind, PeerScope, PolicyStore, Principal,
+                Request,
+                updates::{ReadOptions, Reader},
+            },
+        };
+        let actor = Principal::new("alice").unwrap();
+        let policy = PolicyStore::default();
+        let req = Request::new(
+            "personal",
+            None,
+            Call::ReadUpdates(ReadUpdatesArgs {
+                cursor: None,
+                limit: 10,
+            }),
+        )
+        .unwrap();
+        let authority = |id| {
+            Grant::new(account(false), Budget::new("intake-read").unwrap())
+                .unwrap()
+                .allow(Action::ReadUpdates)
+                .peers(PeerScope::only([PeerId::new(PeerKind::User, id).unwrap()]))
+        };
+        policy
+            .replace_mtproto(&actor, "personal", authority(99))
+            .unwrap();
+        let reader = Reader::new(feed.clone(), policy.clone(), ReadOptions::default()).unwrap();
+        assert!(
+            reader
+                .read(&actor, &req, None)
+                .await
+                .unwrap()
+                .events()
+                .is_empty(),
+            "sender is not primary peer authority"
+        );
+        policy
+            .replace_mtproto(&actor, "personal", authority(7))
+            .unwrap();
+        let visible = reader.read(&actor, &req, None).await.unwrap();
+        assert_eq!(
+            visible.events().len(),
+            2,
+            "baseline needs separate unscoped authority"
+        );
+        let output = serde_json::to_string(&visible).unwrap();
+        for secret in ["PRIVATE_", "access_hash", "callback_query"] {
+            assert!(!output.contains(secret));
+        }
+        assert_eq!(
+            acknowledgements.load(Ordering::SeqCst),
+            4,
+            "durable read performs no RPC"
+        );
+    }
     assert!(matches!(
         feed.ingest(&mut lease, &mut receiver, Duration::ZERO)
             .await

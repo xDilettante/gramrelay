@@ -94,7 +94,52 @@ pub(super) fn insert(
     c.execute("UPDATE mtproto_update_feeds SET last_sequence=?1,last_received_at_ms=?2,entry_count=entry_count+?3,byte_count=byte_count+?4 WHERE profile=?5",params![seq,time,events.len() as i64,added as i64,feed.profile]).map_err(|_|storage())?;
     Ok((start, seq))
 }
+// Metadata-only cursor validation is shared by dry-run and actual payload reads.
+fn cursor_start(c: &Connection, feed: &Feed, cursor: Option<&Cursor>) -> Result<(i64, i64)> {
+    if cursor.is_some_and(|v| v.profile != feed.profile) {
+        return Err(JournalError::new(JournalErrorKind::Denied));
+    }
+    if crate::profiles::load(c, &feed.profile)? != Some(feed.account) {
+        return Err(lost());
+    }
+    let (last, saved_floor): (i64, i64) = c
+        .query_row(
+            "SELECT last_sequence,floor_sequence FROM mtproto_update_feeds WHERE profile=?1",
+            [&feed.profile],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|_| storage())?;
+    let expired: i64 = c.query_row(
+        "SELECT COALESCE(MAX(sequence),0) FROM mtproto_updates WHERE profile=?1 AND expires_at_ms<=?2",
+        params![feed.profile,now()?], |r| r.get(0),
+    ).map_err(|_| storage())?;
+    let floor = saved_floor.max(expired);
+    let end = cursor.map_or(floor, |v| v.sequence);
+    if end < floor {
+        return Err(JournalError::new(JournalErrorKind::CursorExpired));
+    }
+    if end > last {
+        return Err(invalid());
+    }
+    Ok((end, last))
+}
 impl Feed {
+    pub(super) async fn check_cursor_position(&self, cursor: Option<&Cursor>) -> Result<()> {
+        let feed = self.clone();
+        let cursor = cursor.cloned();
+        self.journal
+            .run(move |c, _, _| feed.check_cursor_stored(c, cursor.as_ref()))
+            .await
+    }
+    pub(super) fn check_cursor_stored(
+        &self,
+        c: &mut Connection,
+        cursor: Option<&Cursor>,
+    ) -> Result<()> {
+        let tx = c.transaction().map_err(|_| storage())?;
+        cursor_start(&tx, self, cursor)?;
+        tx.commit().map_err(|_| storage())
+    }
     pub(super) async fn append(
         &self,
         lease: &SourceLease,
@@ -153,35 +198,82 @@ impl Feed {
         }
         let feed = self.clone();
         let cursor = cursor.cloned();
-        let tracker = self.journal.callback_receipts.clone();
+        self.journal
+            .run(move |c, _, _| feed.read_stored(c, cursor.as_ref(), limit, budget))
+            .await
+    }
+    pub(super) fn read_stored(
+        &self,
+        c: &mut Connection,
+        cursor: Option<&Cursor>,
+        limit: usize,
+        budget: usize,
+    ) -> Result<Page> {
+        let tracker = &self.journal.callback_receipts;
         let origin = self.journal.origin_token();
-        self.journal.run(move |c,_,_| {
-            let tx=c.transaction().map_err(|_|storage())?;
-            if crate::profiles::load(&tx,&feed.profile)?!=Some(feed.account) {return Err(lost());}
-            let (last,saved_floor):(i64,i64)=tx.query_row("SELECT last_sequence,floor_sequence FROM mtproto_update_feeds WHERE profile=?1",[&feed.profile],|r|Ok((r.get(0)?,r.get(1)?))).map_err(|_|storage())?;
-            let expired:i64=tx.query_row("SELECT COALESCE(MAX(sequence),0) FROM mtproto_updates WHERE profile=?1 AND expires_at_ms<=?2",params![feed.profile,now()?],|r|r.get(0)).map_err(|_|storage())?;
-            let floor=saved_floor.max(expired);let mut end=cursor.as_ref().map_or(floor,|v|v.sequence);
-            if end<floor {return Err(JournalError::new(JournalErrorKind::CursorExpired));}
-            if end>last {return Err(invalid());}
-            let mut statement=tx.prepare("SELECT sequence,byte_size,length(payload),payload,payload_hash,callback_query,received_at_ms,checkpoint_acknowledged FROM mtproto_updates WHERE profile=?1 AND sequence>?2 ORDER BY sequence LIMIT ?3").map_err(|_|storage())?;
-            let mut rows=statement.query(params![feed.profile,end,limit as i64]).map_err(|_|storage())?;
-            let mut used=0usize;let mut events=Vec::new();
-            while let Some(row)=rows.next().map_err(|_|storage())? {
-                let size=usize::try_from(row.get::<_,i64>(1).map_err(|_|storage())?).map_err(|_|storage())?;
-                let length=usize::try_from(row.get::<_,i64>(2).map_err(|_|storage())?).map_err(|_|storage())?;
-                if size>feed.options.max_event_bytes||length>size {return Err(storage());}
-                if size>budget.saturating_sub(used) {if events.is_empty() {return Err(capacity());}break;}
-                let payload:Vec<u8>=row.get(3).map_err(|_|storage())?;let hash:[u8;32]=blob(row,4).map_err(|_|storage())?.ok_or_else(storage)?;
-                let query=blob(row,5).map_err(|_|storage())?.map(i64::from_le_bytes);
-                if payload.len()!=length||size!=length+query.map_or(0,|_|8)||hash!=project::digest(&payload,query) {return Err(storage());}
-                let decoded:Payload=serde_json::from_slice(&payload).map_err(|_|storage())?;
-                if decoded.schema_version!=1||matches!(decoded.event,Event::Callback{..})!=query.is_some() {return Err(storage());}
-                let seq:i64=row.get(0).map_err(|_|storage())?;
-                events.push(StoredEvent {cursor:Cursor {profile:feed.profile.clone(),sequence:seq},event:decoded.event,received_at_ms:row.get(6).map_err(|_|storage())?,checkpoint_acknowledged:row.get(7).map_err(|_|storage())?,callback_query:query,origin:origin.clone(),callback_received:tracker.get(&feed.profile,seq)});
-                used+=size;end=seq;
+        let tx = c.transaction().map_err(|_| storage())?;
+        let (mut end, last) = cursor_start(&tx, self, cursor)?;
+        let mut statement=tx.prepare("SELECT sequence,byte_size,length(payload),payload,payload_hash,callback_query,received_at_ms,checkpoint_acknowledged FROM mtproto_updates WHERE profile=?1 AND sequence>?2 ORDER BY sequence LIMIT ?3").map_err(|_|storage())?;
+        let mut rows = statement
+            .query(params![self.profile, end, limit as i64])
+            .map_err(|_| storage())?;
+        let mut used = 0usize;
+        let mut events = Vec::new();
+        while let Some(row) = rows.next().map_err(|_| storage())? {
+            let size = usize::try_from(row.get::<_, i64>(1).map_err(|_| storage())?)
+                .map_err(|_| storage())?;
+            let length = usize::try_from(row.get::<_, i64>(2).map_err(|_| storage())?)
+                .map_err(|_| storage())?;
+            if size > self.options.max_event_bytes || length > size {
+                return Err(storage());
             }
-            drop(rows);drop(statement);tx.commit().map_err(|_|storage())?;
-            Ok(Page {events,cursor:Cursor {profile:feed.profile,sequence:end},has_more:end<last})
-        }).await
+            if size > budget.saturating_sub(used) {
+                if events.is_empty() {
+                    return Err(capacity());
+                }
+                break;
+            }
+            let payload: Vec<u8> = row.get(3).map_err(|_| storage())?;
+            let hash: [u8; 32] = blob(row, 4).map_err(|_| storage())?.ok_or_else(storage)?;
+            let query = blob(row, 5).map_err(|_| storage())?.map(i64::from_le_bytes);
+            if payload.len() != length
+                || size != length + query.map_or(0, |_| 8)
+                || hash != project::digest(&payload, query)
+            {
+                return Err(storage());
+            }
+            let decoded: Payload = serde_json::from_slice(&payload).map_err(|_| storage())?;
+            if decoded.schema_version != 1
+                || matches!(decoded.event, Event::Callback { .. }) != query.is_some()
+            {
+                return Err(storage());
+            }
+            let seq: i64 = row.get(0).map_err(|_| storage())?;
+            events.push(StoredEvent {
+                cursor: Cursor {
+                    profile: self.profile.clone(),
+                    sequence: seq,
+                },
+                event: decoded.event,
+                received_at_ms: row.get(6).map_err(|_| storage())?,
+                checkpoint_acknowledged: row.get(7).map_err(|_| storage())?,
+                callback_query: query,
+                origin: origin.clone(),
+                callback_received: tracker.get(&self.profile, seq),
+            });
+            used += size;
+            end = seq;
+        }
+        drop(rows);
+        drop(statement);
+        tx.commit().map_err(|_| storage())?;
+        Ok(Page {
+            events,
+            cursor: Cursor {
+                profile: self.profile.clone(),
+                sequence: end,
+            },
+            has_more: end < last,
+        })
     }
 }

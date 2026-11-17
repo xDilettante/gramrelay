@@ -5,6 +5,8 @@
 
 mod policy;
 mod runtime;
+#[cfg(feature = "mtproto")]
+pub(crate) use runtime::storage_error;
 mod types;
 #[cfg(feature = "host")]
 pub(crate) use runtime::validate_cursor;

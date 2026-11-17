@@ -18,6 +18,8 @@
 //! }
 //! ```
 mod project;
+mod reader;
+pub use reader::{ReadEvent, ReadOptions, ReadPage, ReadScope, Reader};
 mod source;
 mod store;
 #[cfg(test)]
