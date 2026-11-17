@@ -3,7 +3,8 @@ mod client;
 mod session;
 pub use client::auth;
 pub use client::{
-    Account, AppCredentials, BotToken, Client, ClientError, ClientErrorKind, ClientOptions,
+    Account, AppCredentials, BotToken, Client, ClientError, ClientErrorKind, ClientOptions, Dialog,
+    DialogContinuation, DialogCursor, DialogFolder, DialogId, DialogPage, DialogPageIssue,
     HistoryCursor, HistoryMessage, HistoryMessageKind, HistoryPage, MessageReceipt, Outcome, Peer,
     PeerId, PeerKind, SendText,
 };

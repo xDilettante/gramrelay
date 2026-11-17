@@ -15,7 +15,11 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
+mod dialogs;
 mod history;
+pub use dialogs::{
+    Dialog, DialogContinuation, DialogCursor, DialogFolder, DialogId, DialogPage, DialogPageIssue,
+};
 mod text;
 pub use history::{HistoryCursor, HistoryMessage, HistoryMessageKind, HistoryPage};
 pub use text::{MessageReceipt, SendText};

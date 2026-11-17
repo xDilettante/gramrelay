@@ -3,8 +3,9 @@
 Separate MTProto package, currently implementing M2. Encrypted local session
 storage and the owned network Client with typed raw TL calls are implemented.
 Bot/user login, 2FA, confirmed login migration, live identity verification,
-opaque peer lookup/cache references, text send/edit and bounded paginated history
-are available. Dialogs, files and observable update recovery remain open.
+opaque peer lookup/cache references, text send/edit, bounded paginated history
+and Main/Archive dialogs are available. Files and observable update recovery
+remain open.
 This package does not route MTProto operations through the Bot API.
 
 ```rust,no_run
@@ -136,6 +137,42 @@ count describes the whole history, not the remaining number of records.
 `HistoryMessage::raw()` is a trusted Rust escape hatch for full pinned fields;
 raw media may contain file access hashes and must not be dumped into tools/logs.
 See SPEC-mtproto-history.md. History is user-only; bot facades fail before RPC.
+
+Dialogs include a separate pinned phase, followed by ordinary chronological
+pages. Match the explicit continuation status; an incomplete page contains
+useful entries but cannot prove the scan finished:
+
+```rust,no_run
+use tg_mtproto::{Account, ClientError, DialogContinuation, DialogFolder};
+
+async fn inspect_dialogs(account: &Account) -> Result<(), ClientError> {
+    let mut cursor = None;
+    for _ in 0..3 {
+        let page = account.dialogs(DialogFolder::Main, 50, cursor.as_ref()).await?;
+        for dialog in page.dialogs() {
+            println!("{:?}", dialog.id());
+        }
+        match page.continuation() {
+            DialogContinuation::More(next) => cursor = Some(next.clone()),
+            DialogContinuation::Complete => break,
+            DialogContinuation::Incomplete(issue) => {
+                println!("Dialog scan incomplete: {issue:?}");
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+```
+
+Folder/community entries are explicit containers; `peer()` returns a sendable
+reference only for a conversation with full cached authority. Cleared dialogs
+remain visible. Display names and last-message content require explicit access;
+Debug is redacted. Pinned pages share one bounded RAM snapshot and still verify
+the current self account on every page. Concurrent pin/unpin/move can repeat
+entries; this is navigation, not a transactional snapshot or update checkpoint.
+See SPEC-mtproto-dialogs.md. User-only dialogs support Main and Archive API peer
+folders, distinct from custom chat filters.
 
 For a user account, the trusted host supplies UI callbacks and an independent
 expected ID. `NewAccount` is an explicit alternative for first login; it refuses

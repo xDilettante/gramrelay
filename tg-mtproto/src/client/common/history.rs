@@ -84,7 +84,7 @@ impl HistoryMessage {
         &self.raw
     }
 
-    fn checked(raw: tl::enums::Message, peer: PeerId) -> Result<Self> {
+    pub(super) fn checked(raw: tl::enums::Message, peer: PeerId) -> Result<Self> {
         let message = Self { raw, peer };
         if message.id() <= 0
             || message.date().is_some_and(|date| date <= 0)
