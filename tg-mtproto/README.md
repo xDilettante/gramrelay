@@ -79,9 +79,11 @@ gzip expansion and envelope nesting limits apply before SDK control/update
 decoding. Arbitrary Rust deserializers are trusted; decoded TL heap/stack fuzzing
 remains a release gate.
 
-Build this development package from the repository workspace. Its hardened
-grammers dependency graph currently uses workspace patch overrides; external
-distribution is still a release gate. Do not remove those overrides.
+Build this development package from the repository workspace.
+The hardened grammers graph uses direct relative SDK paths throughout the full
+source tree. External path/pinned-Git consumers need no patch table; preserve
+the complete vendor tree. See [source installation](../docs/INSTALL-SOURCE.md)
+and [local private package preparation](../docs/PRIVATE-DISTRIBUTION.md).
 
 `verify_account(expected)` queries the current self user and checks its ID/kind
 against the host expectation and remembered account. It commits matching identity
@@ -434,7 +436,8 @@ to 4096 updates, 1024 total entities and 1 MiB encoded data, with at most 10000
 channel checkpoints. The sender queue remains bounded at 100 envelopes; encoded
 limits do not establish decoded heap/stack or performance targets. No secret-chat
 decryption or exactly-once external side effect is claimed. See
-SPEC-mtproto-updates.md; M3 agent integration and release gates remain open.
+SPEC-mtproto-updates.md; M3 agent integration is implemented through ToolSession
+and Host v2. Release gates remain open.
 
 Run `cargo test --locked -p tg-mtproto --all-targets` from the workspace root.
 The optional `test-kit` feature adds `test_kit::client` for synthetic socket-free

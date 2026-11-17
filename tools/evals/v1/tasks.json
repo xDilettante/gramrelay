@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "suite": "rust-api-usability-v1",
+  "status": "draft_until_executable_fixture_acceptance",
+  "target_first_check_passed": 24,
+  "controlled_context_max_utf8_bytes": 49152,
+  "tasks": [
+    {
+      "id": "T01", "area": "client", "title": "Plain text",
+      "prompt": "Отправьте переданный plain text в переданный ChatId через Bot и верните типизированный MessageId результата.",
+      "acceptance": ["Проверяются разные ID и Unicode-тексты", "Ровно один sendMessage, без лишних опций", "Возвращён фактический message_id ответа"]
+    },
+    {
+      "id": "T02", "area": "client", "title": "Silent reply",
+      "prompt": "Отправьте тихий ответ на заданный MessageId в заданный чат. Текст передаётся параметром; thread/business scope не задан.",
+      "acceptance": ["disable_notification=true", "Корректный reply_parameters.message_id", "Целевой чат и текст не захардкожены"]
+    },
+    {
+      "id": "T03", "area": "client", "title": "Inline keyboard",
+      "prompt": "Отправьте сообщение с одной строкой из одной inline callback-кнопки. Текст сообщения, подпись и callback data приходят параметрами.",
+      "acceptance": ["Корректный InlineKeyboardMarkup", "Заданный callback_data, без URL", "Одна отправка; кнопка не трактуется как разрешение на бизнес-действие"]
+    },
+    {
+      "id": "T04", "area": "client", "title": "Callback acknowledgement",
+      "prompt": "Подтвердите callback по переданному CallbackQueryId с переданным текстом уведомления. Сообщение или chat ID не предоставлены.",
+      "acceptance": ["Ровно один answerCallbackQuery", "Точный непрозрачный ID", "Не придумывается чат и не отправляется sendMessage"]
+    },
+    {
+      "id": "T05", "area": "files", "title": "Owned bytes upload",
+      "prompt": "Отправьте документ из переданного имени и owned bytes в заданный чат, не записывая его на диск.",
+      "acceptance": ["Multipart содержит исходные байты и допустимое имя", "Ровно один sendDocument", "Никаких произвольных локальных файлов"]
+    },
+    {
+      "id": "T06", "area": "files", "title": "Existing Telegram file",
+      "prompt": "Отправьте документ по уже полученному FileId. Локальных байтов и пути нет.",
+      "acceptance": ["Исходный file_id передан в sendDocument", "Никаких upload attachments", "Типизированный MessageId результата сохранён"]
+    },
+    {
+      "id": "T07", "area": "client", "title": "Generated edit method",
+      "prompt": "Используйте полный типизированный Bot API для редактирования заданного сообщения в заданном чате. Новый текст передан параметром; inline_message_id нет.",
+      "acceptance": ["Корректные chat_id/message_id/text", "Один editMessageText", "Ответ разобран соответствующим выходным типом"]
+    },
+    {
+      "id": "T08", "area": "errors", "title": "Read retry policy",
+      "prompt": "Выполните getMe с явной ограниченной политикой повторов для чтения. Дано: не более двух попыток и короткий общий бюджет; запись не выполняется.",
+      "acceptance": ["Один transient отказ затем успешное чтение дают две попытки", "Не больше заданного лимита", "Постоянный подтверждённый отказ не превращается в бесконечный retry"]
+    },
+    {
+      "id": "T09", "area": "client", "title": "Lazy request",
+      "prompt": "Подготовьте sendMessage, измените необязательную опцию и отбросьте builder без await. Функция не должна выполнять запрос.",
+      "acceptance": ["Транспорт наблюдает ноль запросов", "Нет скрытого spawn или блокирующего выполнения", "Исходный Bot можно использовать после возврата"]
+    },
+    {
+      "id": "T10", "area": "errors", "title": "Ambiguous write timeout",
+      "prompt": "Попробуйте один sendMessage и верните его EffectOutcome при ошибке. При тайм-ауте не отправляйте сообщение заново и не подменяйте Unknown на NotSent.",
+      "acceptance": ["Моделируется timeout после dispatch", "Вернулся Unknown", "Транспорт наблюдает ровно одну попытку"]
+    },
+    {
+      "id": "T11", "area": "client", "title": "Unicode entities",
+      "prompt": "Создайте RichText с bold для переданного корректного диапазона UTF-8 байтов исходного текста. В тексте есть emoji; ParseMode не используется.",
+      "acceptance": ["Entity offset/length корректны в Telegram UTF-16", "Текст сохранён дословно", "Неверная граница Unicode отвергается без panic"]
+    },
+    {
+      "id": "T12", "area": "client", "title": "Future response fields",
+      "prompt": "Разберите Message из переданного JSON, прочитайте неизвестное future-поле через публичный API и сериализуйте Message обратно без потери этого поля.",
+      "acceptance": ["Неизвестные поля доступны без изменения публичной map", "Известные обязательные поля проверяются", "Round-trip сохраняет вложенные future-значения"]
+    },
+    {
+      "id": "T13", "area": "runtime", "title": "Accessible callback message",
+      "prompt": "Из Update с callback верните текст доступного сообщения, если он есть. Inline и inaccessible callbacks должны дать None без panic и без выдуманного текста.",
+      "acceptance": ["Проверены доступное, недоступное и отсутствующее сообщение", "Правильно используется MaybeInaccessibleMessage", "Повреждённый известный Update не принимается как неизвестный"]
+    },
+    {
+      "id": "T14", "area": "files", "title": "Bounded download",
+      "prompt": "Скачайте заданный Telegram файл в предоставленный async writer через публичный download API. Соблюдайте переданный лимит байтов и не скрывайте ошибку частичного потока.",
+      "acceptance": ["Байты успешного ответа записаны без искажения", "Превышение лимита даёт ошибку", "После частичного сбоя нет скрытого повтора в тот же writer"]
+    },
+    {
+      "id": "T15", "area": "files", "title": "One-shot stream",
+      "prerequisite": "public_input_file_async_reader",
+      "prompt": "Отправьте документ из предоставленного одноразового async-потока с известным размером. Не буферизуйте весь файл скрыто и не пытайтесь повторно открыть поток.",
+      "acceptance": ["Поток и имя передаются через InputFile", "Заявленный и фактический размер проверяются", "Сбой после dispatch не вызывает replay upload"]
+    },
+    {
+      "id": "T16", "area": "files", "title": "Two media attachments",
+      "prompt": "Через полный Bot API отправьте media group из двух переданных документов в один чат, сохранив порядок и различимые исходные байты.",
+      "acceptance": ["Две отдельные attach-ссылки и части multipart", "Порядок документов сохранён", "Нет collision имён вложений и повторной отправки"]
+    },
+    {
+      "id": "T17", "area": "runtime", "title": "Command context",
+      "prompt": "Создайте Router для команды /echo: ответьте её аргументами через MessageContext. Ответ должен сохранять thread/business/reply scope исходного сообщения.",
+      "acceptance": ["Точное имя команды и command_args", "Неподходящая команда не обрабатывается", "Проверены обычное сообщение и scoped message"]
+    },
+    {
+      "id": "T18", "area": "runtime", "title": "Callback route",
+      "prompt": "Создайте Router с точным callback data 'confirm'. Подтверждайте callback, даже если у него нет доступного сообщения; другие data не должны запускать обработчик.",
+      "acceptance": ["Правильный answerCallbackQuery ID", "Inline callback обрабатывается без reply", "Неизвестные data не вызывают запрос"]
+    },
+    {
+      "id": "T19", "area": "runtime", "title": "Polling subscriptions",
+      "prompt": "Настройте PollingOptions для message, callback_query и edited_message, с ограниченным параллелизмом. Запустите управляемый polling до предоставленного shutdown-сигнала.",
+      "acceptance": ["Явный allowed_updates", "Не превышается настроенная конкурентность", "Остановка не подтверждает незавершённые updates преждевременно"]
+    },
+    {
+      "id": "T20", "area": "runtime", "title": "Authenticated webhook",
+      "prompt": "Настройте memory webhook с заданным секретом и Router. Обрабатывайте только аутентифицированные ограниченные по размеру запросы; дождитесь штатной остановки.",
+      "acceptance": ["Неверный/отсутствующий секрет не допускает обработчик", "Правильный запрос даёт один dispatch", "Ограничения тела и owned shutdown сохранены"]
+    },
+    {
+      "id": "T21", "area": "agent", "title": "Durable journal",
+      "prompt": "Откройте журнал по предоставленному защищённому пути, сохраните операцию и прочитайте её после штатного закрытия/повторного открытия. Сохраняйте исходный ключ.",
+      "acceptance": ["Запись переживает reopen", "Исходные operation key/payload identity сохранены", "Ресурсы закрываются до повторного открытия"]
+    },
+    {
+      "id": "T22", "area": "agent", "title": "Denied chat scope",
+      "prompt": "Настройте разрешение на send_message только для заданного чата и выполните запрос в другой чат через Executor. Отказ должен произойти до Telegram dispatch.",
+      "acceptance": ["Grant привязан к Principal/profile", "Нет fallback all_chats", "Ноль исходящих запросов при отказе"]
+    },
+    {
+      "id": "T23", "area": "agent", "title": "Stable operation key",
+      "prompt": "Вызовите разрешённый send_message дважды с одним operation_id и одинаковым payload. Верните квитанции, сохранив возможность проверить исходную операцию.",
+      "acceptance": ["Одна отправка, повтор получает прежнюю квитанцию", "Payload/target нельзя менять с тем же ключом", "Unknown не обходится новым ключом"]
+    },
+    {
+      "id": "T24", "area": "agent", "title": "Strict tool envelope",
+      "prompt": "Создайте типизированные ToolRequest для send_message со стабильным ключом и для get_chat без ключа. Telegram ID в JSON представлены десятичными строками.",
+      "acceptance": ["schema_version=1 и корректный профиль", "Чтение без operation_id, запись с ним", "Неизвестные аргументы не маскируются raw JSON обходом"]
+    },
+    {
+      "id": "T25", "area": "agent", "title": "Static discovery",
+      "prompt": "Получите публичный каталог инструментов для Bot и расширенный каталог с MTProto, не открывая Host, журнал или сетевой клиент.",
+      "acceptance": ["В Bot v1 восемь инструментов", "В extended v2 сохранены Bot-инструменты и добавлены восемь MT", "Нет токена, среды, сети или startup RPC"]
+    },
+    {
+      "id": "T26", "area": "agent", "title": "Opaque file handle",
+      "prompt": "Зарегистрируйте предоставленные owned bytes как неизменяемый host-only файловый handle для заданного профиля/чата, затем отправьте по разрешённому handle через Executor.",
+      "acceptance": ["Точные file/profile/chat scopes", "Инструмент не получает произвольный путь", "Подмена байтов/handle не повторяет прежнюю операцию"]
+    },
+    {
+      "id": "T27", "area": "mtproto", "title": "Encrypted session",
+      "prompt": "Создайте Session по заданному защищённому пути, SessionBinding и первому предоставленному SessionKey. Не выполняйте вход или RPC; штатно закройте и повторно откройте её со вторым эквивалентным ключом, отдельно предоставленным хостом. Ключи потребляются открытием; Clone или getter не предполагаются.",
+      "acceptance": ["Правильная привязка и ключ", "Нет сети и раскрытия секрета", "Close/reopen сохраняет валидное хранилище"]
+    },
+    {
+      "id": "T28", "area": "mtproto", "title": "Open existing only",
+      "prompt": "Откройте только существующую инициализированную Session через предназначенный для этого API. Отсутствующий или пустой файл должен дать отказ без создания/инициализации.",
+      "acceptance": ["Missing/empty store отвергнуты", "Не используется provisioning fallback", "Готовая Session открывается с правильными binding/key"]
+    },
+    {
+      "id": "T29", "area": "mtproto", "title": "Typed raw ping",
+      "prompt": "Через предоставленный fixture Client выполните типизированный TL Ping с переданным ping_id и верните Pong. Доступен только synthetic TL transport; raw не становится агентским инструментом.",
+      "acceptance": ["Исходный ping_id передан в TL", "Ответ десериализован в Pong", "Одна попытка, без Bot API и login"]
+    },
+    {
+      "id": "T30", "area": "mtproto", "title": "Joined client shutdown",
+      "prompt": "Штатно закройте предоставленный Client после завершения или отказа вызова. Дождитесь owned driver/jobs, прежде чем освобождать хранилище Session; простого drop недостаточно.",
+      "acceptance": ["Используется ожидаемое async close", "Закрытие ждёт оставшуюся owned работу", "После close хранилище можно безопасно использовать заново"]
+    }
+  ]
+}

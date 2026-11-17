@@ -7,6 +7,10 @@
 проверенные платформы. Собственный код пока [закрыт](LICENSE);
 [статус поставки](docs/PRIVATE-DISTRIBUTION.md) сохраняет отдельные лицензии SDK.
 
+[Первый бот: команда и кнопка](docs/START.md) → [рецепты](docs/RECIPES.md) →
+[указатель для агента](docs/AGENT-INDEX.md). Общие обработчики из примера
+проверяются offline; live-запуск выбирается явно.
+
 Реализованы awaitable builders для send_message, answer_callback_query и send_document; inline-кнопки, разбор callback Update, типизированные ID, ограничения нагрузки и локальные HTTP mock-тесты.
 
 ## Подключение

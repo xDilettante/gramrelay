@@ -25,3 +25,9 @@ Continue all Q1–Q4 documentation, evaluation, measurement, platform and securi
 acceptance. The user chose to keep original code closed; record private licensing
 separately, preserving third-party licenses and publish=false. This does not
 remove or weaken any remaining completion gate.
+
+Q1 task documentation and the shared command/callback example now have local
+MSRV/stable acceptance. The 30-task corpus remains draft, with no LLM score.
+Its feasibility review exposed the missing public one-shot AsyncRead upload;
+implement that separate client capability before reference fixture acceptance
+and evaluation freeze, retaining the original task and full goal scope.

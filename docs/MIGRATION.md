@@ -26,7 +26,7 @@ Root Message, Update, User, Chat, Document, CallbackQuery and WebhookInfo now re
 
 - Message.id becomes Message.message_id, still the strong root MessageId scalar. User.id and Chat.id keep their names.
 - Unknown fields are read through unknown_fields(), not a mutable public map. They are retained by serialization.
-- Optional nested objects are Option<Box<T>>. Read access normally uses as_deref(); generated setters take T and allocate the box.
+- Optional concrete nested objects are Option<Box<T>>. Read those through as_deref(); generated setters take T and allocate the box. Optional unions remain Option<Enum> (for example, Message.forward_origin and CallbackQuery.message); use as_ref() and the union's accessors/matching there.
 - CallbackQuery.message is Option<MaybeInaccessibleMessage>. Use accessible() before reading message content, or chat()/message_id() for either variant.
 - Update models every pinned event. Malformed known events now fail decoding, and multiple known events are rejected by decoding and Router::dispatch. Unknown future events still round-trip.
 - Document.file_size and WebhookInfo.pending_update_count follow the wire's signed Integer representation. Validate non-negative sizes before using them as local byte counts.
@@ -49,6 +49,16 @@ Text and document replies share delivery validation. reply_document/ephemeral_re
 ## Explicit retry policy
 
 Requests still make one attempt by default. Generated Call accepts RetryPolicy for reviewed reads, with bounded elapsed time, attempt count and backoff/jitter. Confirmed ordinary JSON 429 refusals require retry_rejected_writes(true); Unknown writes, credential/session operations, migrations and temporal references remain ineligible. Multipart replay is rejected before dispatch. Downloads do not retry into a potentially partially written destination.
+
+## MCP SDK timestamp builders
+
+Direct users of the vendored rmcp 3.11 SDK now pass rmcp::model::Timestamp
+(Jiff) to typed timestamp convenience builders instead of chrono::DateTime.
+The typed instant range is narrower and typed leap seconds are not represented.
+Annotations.last_modified remains an opaque Option<String> on the wire; incoming
+date-only/invalid strings are preserved. tg-agent's own JSON/tool request types
+do not gain a timestamp migration. See [ADR0019](decisions/0019-maintained-mcp-clock.md)
+for exact compatibility bounds and SDK source verification.
 
 ## Agent journal v5
 
@@ -92,4 +102,5 @@ The MT Rust executor now supports all eight typed actions. New document attempts
 need owner-bound restored bytes plus current file/peer/action authority and any
 exact approval. Retained get_operation/cache uses original grants without bytes
 or a live file expiry. Terminal Unknown/Rejected keys never resend. CLI/MCP MT
-integration and release gates remain open.
+integration is available through ToolSession/Host v2. Release gates remain open;
+see [task guide](RECIPES.md) and [agent index](AGENT-INDEX.md) for current entry points.

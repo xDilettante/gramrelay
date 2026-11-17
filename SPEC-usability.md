@@ -42,7 +42,11 @@ For example, sent.message_id is the current scalar; do not reproduce the former
 prototype's sent.id. Callback answer and application authorization are separate.
 Unknown writes keep their operation key and never automatically resend.
 
-No runtime/library API changes in the documentation slice. All examples use
+No runtime/library API changes in the documentation slice. If corpus feasibility
+exposes an explicit architecture capability missing from the public API, retain
+that task and track a separately specified implementation prerequisite before
+freezing; do not replace it with an easier supported task to improve the score.
+All examples use
 synthetic in-memory/localhost tests. Credentials stay in the prepared host
 environment, never source/config values, arguments, logs or evaluation artifacts.
 Keep explicit feature flags and graceful owned-resource shutdown in recipes.
@@ -68,3 +72,31 @@ the architecture's new-human 15-minute live result; that requires a separately
 authorized live onboarding observation. Keep unmeasured criteria explicit.
 Both macOS cells, Q2 and Q4 remain required independent gates. Private licensing,
 publish=false, source/SDK identity, migrations and permission semantics stay intact.
+
+## Documentation increment evidence
+
+START/RECIPES/AGENT-INDEX and the shared command_callback example are implemented.
+Both negative controls failed with the stub router/mode selector; final example
+passes two behavioral tests and its default actual offline run on Windows MSVC
+with Rust 1.89.0 and 1.100.0. The body check includes exact target, reply parent,
+text/full keyboard, callback ID/text, two requests and no unexpected data route.
+Workspace default+tg/test-kit Clippy -D warnings, fmt, 16 workspace doctests,
+52 Python tests, schema193/425 and fresh audit337 pass. Evidence: target/q1-*.log.
+87 local documentation links and the complete 30-ID/six-area draft corpus pass
+structural checks; the corpus SHA256 is
+d02972399424e50b5de258f8573c51f785f0e55520ca2af25cb5ddb070992767.
+Two scoped example review cycles and two docs/corpus contract cycles are clear
+after strengthening body assertions, correcting path-only MT setup, boxed-object
+vs union guidance and consumed-key reopening. Cross-model skipped autonomous.
+
+T15 exposed a missing public AsyncRead upload entry point. Keep this required
+one-shot-streaming task and its explicit prerequisite, rather than simplifying
+the corpus. Its implementation belongs to a separate client/API slice before
+fixture acceptance/freeze. Reference fixtures, 30-task fresh-agent first-check
+score, ten-task MCP action score and new-human live timing remain unmeasured.
+No actual Telegram library calls/live mode were used by these checks.
+
+After all processes terminated, Cargo cleaned both alternate dev targets:
+1.9 GiB current-stable and 701.3 MiB MSRV; logs are retained outside them.
+Total target is 2.53 GiB, free C: 426.63 GiB. Previously policy-blocked old
+directories were not touched. Q1 and the full goal remain active.
