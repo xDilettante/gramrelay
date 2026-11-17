@@ -77,8 +77,12 @@ def run(source: Path, target: Path, *, execute: bool, git=False) -> None:
         if subprocess.check_output(["git", "status", "--porcelain"], cwd=source):
             raise ValueError("Git consumer requires a clean committed source snapshot")
         revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source, text=True).strip()
-    target.mkdir(parents=True, exist_ok=True)
-    if shutil.disk_usage(target).free < 20 * 1024**3:
+    # Let Cargo create/tag its build directory. Precreating it with evidence
+    # files makes recent Cargo refuse clean because CACHEDIR.TAG is missing.
+    target.parent.mkdir(parents=True, exist_ok=True)
+    evidence = target.with_name(target.name + "-evidence")
+    evidence.mkdir(parents=True, exist_ok=True)
+    if shutil.disk_usage(target.parent).free < 20 * 1024**3:
         raise ValueError("less than 20 GiB free; clean completed build caches first")
     # Owned temp tree is outside the library workspace; no consumer patch table.
     with tempfile.TemporaryDirectory(prefix="telegram external consumer ") as temporary:
@@ -92,16 +96,16 @@ def run(source: Path, target: Path, *, execute: bool, git=False) -> None:
         # metadata step may refresh the public registry index; run stays offline.
         command = ["cargo", "metadata", *([] if git else ["--offline"]), "--format-version", "1", "--manifest-path", str(consumer / "Cargo.toml")]
         result = subprocess.run(command, cwd=source, capture_output=True, check=False)
-        (target / "metadata.log").write_bytes(result.stderr)
+        (evidence / "metadata.log").write_bytes(result.stderr)
         if result.returncode:
-            raise ValueError("external metadata failed; see target metadata.log")
-        (target / "metadata.json").write_bytes(result.stdout)
+            raise ValueError("external metadata failed; see sibling *-evidence/metadata.log")
+        (evidence / "metadata.json").write_bytes(result.stdout)
         metadata = json.loads(result.stdout)
         check_graph(metadata, source, revision=revision)
         lock = (consumer / "Cargo.lock").read_bytes()
         if any(package["name"] == "chrono" for package in tomllib.loads(lock.decode())["package"]):
             raise ValueError("chrono returned to the external lockfile")
-        (target / "consumer.Cargo.lock").write_bytes(lock)
+        (evidence / "consumer.Cargo.lock").write_bytes(lock)
         print("external graph: 3 libraries / 5 hardened SDKs, no overrides or chrono", flush=True)
         if execute:
             command = ["cargo", "run", "--locked", "--offline", "--manifest-path", str(consumer / "Cargo.toml"), "--target-dir", str(target)]

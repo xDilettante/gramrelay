@@ -111,6 +111,22 @@ The old registry graph failed before the fix. Manifest regressions also reject
 path+version fallback on our own library edges. Workspace: 681 all-feature tests,
 16 doctests, clean workspace/isolated production Clippy; 30 Python checks and all
 five source verifiers. Session20/sender16 tests validate the standalone path
-graph. Root lock versions are unchanged; audit337 is clean. Source archive stage
-and registry packaging remain unimplemented. Git mode awaits a clean committed
-snapshot for its runtime acceptance; do not infer that result from path mode.
+graph. Root lock versions are unchanged; audit337 is clean. Pinned Git runtime
+acceptance also passed on committed snapshot 8f42a0efc2db57fb9b70294ec2239488d2b53e27:
+all eight protected nodes share the exact Git source/rev and expected paths,
+with no chrono or consumer patch rules. It ran the same public fixture after
+offline locked compilation; initial local Git metadata refreshed the public
+registry index. Audit the external lock separately because its broad registry
+requirements may resolve newer compatible versions than the workspace lock.
+Source archive stage and registry packaging remain unimplemented; those are
+still required release work. Fresh implementation review's internal-library
+fallback gap was fixed, regression covered and scoped re-review is clear.
+Cross-model skipped: autonomous continuation.
+
+The pinned Git consumer's independently resolved lock was also audited: 278
+packages, zero vulnerabilities/warnings. Evidence now lives in a sibling
+*-evidence directory so Cargo itself creates/tags the build directory. This
+fixes an observed native cleanup refusal (missing CACHEDIR.TAG); metadata-only
+checking leaves the Cargo target absent, and a tiny real compile/clean proof
+passes with the corrected layout. Completed standalone and external caches are
+cleaned after their processes finish; compact workspace cache remains reusable.
