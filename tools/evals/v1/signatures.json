@@ -11,5 +11,12 @@
   "T10": "pub async fn solve(bot: &tg::Bot, chat: tg::ChatId, text: &str) -> Result<tg::MessageId, tg::EffectOutcome>",
   "T11": "pub fn solve(text: &str, range: std::ops::Range<usize>) -> tg::Result<tg::RichText>",
   "T12": "pub fn solve(input: &str, key: &str) -> serde_json::Result<(Option<serde_json::Value>, serde_json::Value)>",
-  "T15": "pub async fn solve(bot: &tg::Bot, chat: tg::ChatId, name: String, reader: impl tokio::io::AsyncRead + Send + 'static, length: u64) -> tg::Result<tg::MessageId>"
+  "T13": "pub fn solve(input: &str) -> serde_json::Result<Option<String>>",
+  "T14": "pub async fn solve<W: tokio::io::AsyncWrite + Unpin + Send>(bot: &tg::Bot, file: &tg::api::types::File, limit: u64, writer: &mut W) -> tg::Result<u64>",
+  "T15": "pub async fn solve(bot: &tg::Bot, chat: tg::ChatId, name: String, reader: impl tokio::io::AsyncRead + Send + 'static, length: u64) -> tg::Result<tg::MessageId>",
+  "T16": "pub async fn solve(bot: &tg::Bot, chat: tg::ChatId, documents: [(String, Vec<u8>); 2]) -> tg::Result<Vec<tg::Message>>",
+  "T17": "pub fn solve() -> tg::Router",
+  "T18": "pub fn solve() -> tg::Router",
+  "T19": "pub async fn solve<S: Send + Sync + 'static>(bot: &tg::Bot, router: tg::Router<S>, max_concurrency: usize, stop: tg::CancellationToken) -> tg::Result<()>",
+  "T20": "pub async fn solve<S: Send + Sync + 'static>(bot: &tg::Bot, router: tg::Router<S>, secret: tg::webhook::WebhookSecret, listener: tokio::net::TcpListener, max_body_bytes: usize, stop: tg::CancellationToken) -> tg::Result<()>"
 }

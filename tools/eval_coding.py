@@ -100,6 +100,7 @@ def stage(root, crate, ids):
     manifest = check_external.manifest(root, test_kit=True)
     manifest = manifest.replace('name = "telegram-external-consumer"', 'name = "telegram-eval-coding"')
     manifest += '\ntokio-util = { version = "0.7", features = ["rt"] }\n'
+    manifest += 'reqwest = { version = "0.13", default-features = false, features = ["json"] }\n'
     (crate / "Cargo.toml").write_text(manifest, encoding="utf-8")
     for task_id in ids:
         case = crate / "tests" / task_id.lower()
@@ -133,7 +134,9 @@ def run(args):
     cargo = ["cargo", "+" + args.toolchain]
     env = os.environ | {"RUSTUP_AUTO_INSTALL": "0", "CARGO_INCREMENTAL": "0",
                        "CARGO_BUILD_JOBS": "3", "CARGO_PROFILE_DEV_DEBUG": "line-tables-only",
-                       "CARGO_PROFILE_TEST_DEBUG": "line-tables-only"}
+                       "CARGO_PROFILE_TEST_DEBUG": "line-tables-only", "RUSTC_WRAPPER": "",
+                       "RUSTC_WORKSPACE_WRAPPER": "", "CARGO_ENCODED_RUSTFLAGS": ""}
+    env.pop("CARGO_BUILD_TARGET", None)
 
     def command(argv, name, cwd, timeout=900, runtime=False):
         # The fixture needs OS/temp discovery, but no service or Cargo credentials.
@@ -161,8 +164,11 @@ def run(args):
         summary.update(corpus_sha256=digest(read(source / EVALS / "tasks.json")),
                        suite=suite["suite"], context_max_utf8_bytes=suite["controlled_context_max_utf8_bytes"],
                        selected=ids, denominator=30, frozen=suite["status"] == "frozen")
-        if command(["rustup", "run", args.toolchain, "rustc", "-Vv"], "rustc", scratch):
+        if command(["rustup", "which", "--toolchain", args.toolchain, "rustc"], "compiler", scratch):
             raise ValueError("installed compiler unavailable")
+        env["RUSTC"] = read(evidence / "compiler.stdout").decode().strip()
+        if command([env["RUSTC"], "-Vv"], "rustc", scratch):
+            raise ValueError("installed compiler did not report its version")
         summary["rustc"] = read(evidence / "rustc.stdout").decode().strip()
         crate = scratch / "consumer"
         stage(source, crate, ids)
@@ -192,6 +198,10 @@ def run(args):
                 item.update(status="missing")
                 record(receipt, summary)
                 continue
+            except (ValueError, OSError) as error:
+                item.update(status="invalid-answer", error_type=type(error).__name__)
+                record(receipt, summary)
+                continue
             (evidence / f"{task_id}.answer.rs").write_bytes(answer)
             (crate / "tests" / name / "solution.rs").write_bytes(answer)
             build = [*cargo, "test", "--locked", "--offline", "--no-run",
@@ -210,7 +220,9 @@ def run(args):
                 record(receipt, summary)
                 try:
                     result = command(test, name + "-test", crate, timeout=30, runtime=True)
-                    item.update(test_exit=result, status="passed" if result == 0 else "test-failed")
+                    output = read(evidence / (name + "-test.stdout"), 1024 * 1024)
+                    completed = re.search(rb"^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;", output, re.MULTILINE)
+                    item.update(test_exit=result, status="passed" if result == 0 and completed else "test-failed")
                 except subprocess.TimeoutExpired:
                     # Only reviewed answers are executed here. They may not spawn child processes.
                     item["status"] = "test-timeout"
