@@ -96,6 +96,40 @@ minimum. At the default limit of 32 in-flight requests the initial buffers
 hold at most 512 KiB before transport buffering and allocator overhead.
 Named multipart parts still allocate their read buffers on demand.
 
+## Direct upload and HTTP admission results
+
+Three repeats of the comparison on 3d44253 passed all four cases against
+both competitors. They use the same lock, fixture, native compiler and
+sample protocol as the baseline. The table again gives the median of the
+three per-run median p95 values in microseconds.
+
+| Method | tg | teloxide | frankenstein |
+| --- | ---: | ---: | ---: |
+| getMe | 64.0 | 63.0 | 59.5 |
+| sendMessage | 70.5 | 72.3 | 68.9 |
+| answerCallbackQuery | 63.4 | 61.7 | 62.6 |
+| sendDocument | 328.0 | 332.8 | 402.9 |
+
+The 64 KiB path upload improved from 598.5 to 328.0 microseconds in this
+loopback experiment. The highest tg-to-competitor ratio across the three
+release runs was 1.079. The receipts run-iq04b17r, run-e5svvg1e and
+run-flnc_tn1 retain all 108,000 samples.
+
+The same commit was tested with HTTP admission limited to eight. In all
+five bursts of 128 calls the observed server peak was eight, 120 calls
+returned Capacity/NotSent before dispatch and the next request succeeded
+after release. The receipt run-nz9m62vi records combined client, local
+server and Tokio resident memory. It ranged from 7.59 to 7.75 MiB when
+saturated and 7.60 to 7.74 MiB after each recovery, with pooled connections
+retained. The warmed baseline was 6.91 MiB.
+
+The production client change passed 163 tg all-feature tests, its
+all-feature doctest and Clippy with warnings denied on Windows MSVC.
+The document fixture checks a patterned 128 KiB plus 19-byte file,
+including the partial final chunk. Schema 193/425, 56 Python tests and
+the workspace audit of 337 dependencies passed. Separate CPU, allocation
+and wire-volume measurements remain open.
+
 The benchmark-only lock has three unmaintained-package warnings from
 upstream dependencies (chrono, paste and proc-macro-error2) and zero
 reported vulnerabilities on the recorded audit. The library's workspace
