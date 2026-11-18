@@ -115,6 +115,12 @@ loopback experiment. The highest tg-to-competitor ratio across the three
 release runs was 1.079. The receipts run-iq04b17r, run-e5svvg1e and
 run-flnc_tn1 retain all 108,000 samples.
 
+The fixture moved its unchanged 64 KiB array to one shared static after
+Clippy flagged the large constant. The subsequent complete run-hvjc0em8
+also passed all four cases. Its sendDocument median p95 values were
+377.2, 418.5 and 598.7 microseconds for tg, teloxide and frankenstein.
+Benchmark Clippy passed with warnings denied on its own code.
+
 The same commit was tested with HTTP admission limited to eight. In all
 five bursts of 128 calls the observed server peak was eight, 120 calls
 returned Capacity/NotSent before dispatch and the next request succeeded
