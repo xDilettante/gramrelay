@@ -28,7 +28,7 @@ const CHAT: i64 = -17001;
 const TEXT: &str = "Telegram Rust: Привет 🌍";
 const CALLBACK: &str = "opaque-benchmark-id";
 const FILENAME: &str = "benchmark.bin";
-const DOCUMENT: [u8; 65536] = [0x5a; 65536];
+static DOCUMENT: [u8; 65536] = [0x5a; 65536];
 const TIMEOUT: Duration = Duration::from_secs(5);
 const POOL_CAP: usize = 8;
 
@@ -179,7 +179,7 @@ async fn validate_document(request: Request) -> Result<(), StatusCode> {
             (Some(name), Some(FILENAME)) if document_part.is_none() => {
                 let name = name.to_owned();
                 let bytes = part.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
-                if bytes.as_ref() != DOCUMENT {
+                if bytes.as_ref() != DOCUMENT.as_slice() {
                     return Err(StatusCode::BAD_REQUEST);
                 }
                 document_part = Some(name);
@@ -321,7 +321,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
     let directory = tempfile::tempdir()?;
     let path = directory.path().join(FILENAME);
-    std::fs::write(&path, DOCUMENT)?;
+    std::fs::write(&path, DOCUMENT.as_slice())?;
     let mock = Arc::new(Mock {
         count: AtomicUsize::new(0),
         connections: AtomicUsize::new(0),

@@ -127,8 +127,11 @@ The production client change passed 163 tg all-feature tests, its
 all-feature doctest and Clippy with warnings denied on Windows MSVC.
 The document fixture checks a patterned 128 KiB plus 19-byte file,
 including the partial final chunk. Schema 193/425, 56 Python tests and
-the workspace audit of 337 dependencies passed. Separate CPU, allocation
-and wire-volume measurements remain open.
+the workspace audit of 337 dependencies passed. Another 36 executor,
+journal, feed and durable webhook tests passed on 3d44253 and its
+documentation follow-up. They cover budget concurrency, overload,
+durable capacity, cancellation and ownership/recovery paths.
+Separate CPU, allocation and wire-volume measurements remain open.
 
 The benchmark-only lock has three unmaintained-package warnings from
 upstream dependencies (chrono, paste and proc-macro-error2) and zero
