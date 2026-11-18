@@ -148,6 +148,20 @@ server and Tokio resident memory. It ranged from 7.59 to 7.75 MiB when
 saturated and 7.60 to 7.74 MiB after each recovery, with pooled connections
 retained. The warmed baseline was 6.91 MiB.
 
+The extended workload at 713bcd4 holds two uploads with only their first
+8 KiB available, two chunked JSON replies and four download streams.
+Each download writer observes its first bytes before the checks for overload.
+JSON is accepted at 4,096 bytes and rejected at 4,097. File uploads and
+downloads accept exactly 16,384 patterned bytes and reject 16,385.
+The two streaming download failures leave 10,234 bytes of correct prefix in
+each writer. The shared raw ingress count stays at eight during the three
+surplus-call refusals. One new request passes after the held work completes.
+Combined resident memory was 8.33 MiB during mixed saturation and 8.65 MiB
+after recovery, with the pooled connections still open.
+`run-_zm4bl3c` contains those measurements and the repeated five 128-call bursts.
+`run-35tqnc7m` rechecks all four HTTP latency cases after the profiling
+and pressure fixture changes. Both standalone benchmark builds passed Clippy.
+
 The production client change passed 163 tg all-feature tests, its
 all-feature doctest and Clippy with warnings denied on Windows MSVC.
 The document fixture checks a patterned 128 KiB plus 19-byte file,
@@ -156,6 +170,11 @@ the workspace audit of 337 dependencies passed. Another 36 executor,
 journal, feed and durable webhook tests passed on 3d44253 and its
 documentation follow-up. They cover budget concurrency, overload,
 durable capacity, cancellation and ownership/recovery paths.
+In particular the memory webhook cases verify byte reservation and release
+on cancellation and capacity-one refusal until expiry or durable settlement.
+The durable webhook tests verify quota refusal before commit and recovery
+after lease expiry. The executor tests verify shared write admission and
+that cancellation after begin leaves an unknown effect without replay.
 
 ## Client resource results
 
