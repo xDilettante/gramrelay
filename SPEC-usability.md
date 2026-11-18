@@ -141,5 +141,23 @@ the passing reference receipt, all submitted modules, packet hashes, compiler
 and fixture lock identity, and build and test logs. Negative control run
 run-wju553ov distinguished compile failure, early exit without an oracle
 result, a missing answer and an oversized answer from two real passes.
-Cargo released 10.5 GiB after the evaluator processes finished. The separate
-ten-question MCP evaluation and human onboarding timing are pending.
+Cargo released 10.5 GiB after the evaluator processes finished.
+
+## MCP archive result
+
+Ten fresh gpt-6.2-sol contexts answered all 10 synthetic archive questions
+correctly on Windows MSVC with Rust 1.100.0. Each received one question and
+written tool restrictions. The 62 successful MCP stdio calls included 60
+pages of at most three events and two chat lookups. Q09 resolved the name
+of chat -102 through get_chat. Each tool call started a fresh instance of
+the same fixed archive. Real Telegram access was unnecessary.
+
+Snapshot 8fd23e722676c82e6890424134a28acad8a289b6 and the executable, archive
+and question hashes are recorded in target/mcp-eval-evidence/run-tqgbgabg.
+That directory retains question packets, first answers with distinct session
+IDs, tool traces and the scored receipt. A separate negative-control receipt
+in run-dhzpqcks verifies foreign cursor rejection, a recorded rejected chat
+read, exclusive answer capture and refusal of further calls after submission.
+Cargo released another 1.2 GiB after the MCP processes finished.
+
+The separately authorized live human onboarding observation is pending.
