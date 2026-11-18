@@ -21,6 +21,9 @@ too; a deliberately tiny limit can refuse connection setup. Gzip uses bounded
 multi-member decoding, validates compressed input and exhausts the cumulative
 budget on failure. Malformed RPC errors cannot become confirmed refusals.
 Typed control replies and envelopes require complete TL consumption.
+The encrypted input parser checks session identity after decryption and
+before resetting frame bookkeeping or decoding the body. A mismatch returns
+a typed decode error with no session identifiers in its diagnostics.
 
 The sender integration installs limits before InitConnection and after 404
 reconnection. Plain authorization handshake responses are checked by Sender

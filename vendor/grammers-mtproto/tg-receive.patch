@@ -222,9 +222,24 @@
      /// Start building a new encrypted MTP.
      pub fn build() -> Builder {
          Builder {
-@@ -305,6 +365,56 @@
+@@ -304,7 +364,71 @@
+         self.msg_count = 0;
      }
  
++    fn process_plaintext(&mut self, plaintext: &[u8]) -> Result<(), DeserializeError> {
++        let mut buffer = Cursor::from_slice(plaintext);
++        let _salt = i64::deserialize(&mut buffer)?;
++        let session_id = i64::deserialize(&mut buffer)?;
++        if session_id != self.session_id {
++            return Err(DeserializeError::UnexpectedSession);
++        }
++
++        self.expansion_used = 0;
++        self.nesting = 0;
++        self.deserialization.clear();
++        self.process_message(manual_tl::Message::deserialize(&mut buffer)?)
++    }
++
      fn process_message(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
 +        if self.nesting >= self.nesting_limit {
 +            return Err(DeserializeError::LimitExceeded);
@@ -279,7 +294,7 @@
          if message.requires_ack() {
              self.pending_ack.push(message.msg_id);
          }
-@@ -446,90 +556,58 @@
+@@ -446,90 +570,58 @@
      /// [RPC Error]: https://core.telegram.org/mtproto/service_messages#rpc-error
      /// [Cancellation of an RPC Query]: https://core.telegram.org/mtproto/service_messages#cancellation-of-an-rpc-query
      fn handle_rpc_result(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
@@ -419,7 +434,7 @@
      }
  
      /// Updates produced by `rpc_result` must be considered as any other updates, since they can
-@@ -588,7 +666,7 @@
+@@ -588,7 +680,7 @@
      /// [Acknowledgment of Receipt]: https://core.telegram.org/mtproto/service_messages_about_messages#acknowledgment-of-receipt
      fn handle_ack(&self, message: manual_tl::Message) -> Result<(), DeserializeError> {
          // TODO notify about this somehow
@@ -428,7 +443,7 @@
          Ok(())
      }
  
-@@ -662,7 +740,7 @@
+@@ -662,7 +754,7 @@
          &mut self,
          message: manual_tl::Message,
      ) -> Result<(), DeserializeError> {
@@ -437,7 +452,7 @@
  
          if self
              .salt_request_msg_id
-@@ -732,7 +810,8 @@
+@@ -732,7 +824,8 @@
      /// ```
      ///
      /// [Request for Message Status Information]: https://core.telegram.org/mtproto/service_messages_about_messages#request-for-message-status-information
@@ -447,7 +462,7 @@
          // TODO implement
          Ok(())
      }
-@@ -773,7 +852,8 @@
+@@ -773,7 +866,8 @@
      /// valid, the message is to be wrapped in `msg_copy`).
      ///
      /// [Informational Message regarding Status of Messages]: https://core.telegram.org/mtproto/service_messages_about_messages#informational-message-regarding-status-of-messages
@@ -457,7 +472,7 @@
          // TODO implement
          Ok(())
      }
-@@ -795,7 +875,8 @@
+@@ -795,7 +889,8 @@
      /// This message does not require an acknowledgment.
      ///
      /// [Voluntary Communication of Status of Messages]: https://core.telegram.org/mtproto/service_messages_about_messages#voluntary-communication-of-status-of-messages
@@ -467,7 +482,7 @@
          // TODO implement
          Ok(())
      }
-@@ -829,7 +910,7 @@
+@@ -829,7 +924,7 @@
      ) -> Result<(), DeserializeError> {
          // TODO https://github.com/telegramdesktop/tdesktop/blob/8f82880b938e06b7a2a27685ef9301edb12b4648/Telegram/SourceFiles/mtproto/connection.cpp#L1790-L1820
          // TODO https://github.com/telegramdesktop/tdesktop/blob/8f82880b938e06b7a2a27685ef9301edb12b4648/Telegram/SourceFiles/mtproto/connection.cpp#L1822-L1845
@@ -476,7 +491,7 @@
          match msg_detailed {
              tl::enums::MsgDetailedInfo::Info(x) => {
                  self.pending_ack.push(x.answer_msg_id);
-@@ -869,7 +950,8 @@
+@@ -869,7 +964,8 @@
      ///
      /// [Explicit Request to Re-Send Answers]: https://core.telegram.org/mtproto/service_messages_about_messages#explicit-request-to-re-send-answers
      /// [Explicit Request to Re-Send Messages]: https://core.telegram.org/mtproto/service_messages_about_messages#explicit-request-to-re-send-messages
@@ -486,7 +501,7 @@
          // TODO implement
          // `msg_resend_ans_req` seems to never occur (it was even missing from `mtproto.tl`)
          Ok(())
-@@ -899,7 +981,7 @@
+@@ -899,7 +995,7 @@
      /// [Request for several future salts]: https://core.telegram.org/mtproto/service_messages#request-for-several-future-salts
      fn handle_future_salts(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
          let tl::enums::FutureSalts::Salts(salts) =
@@ -495,7 +510,7 @@
  
          if self
              .salt_request_msg_id
-@@ -924,7 +1006,7 @@
+@@ -924,7 +1020,7 @@
      }
  
      fn handle_future_salt(&mut self, _message: manual_tl::Message) -> Result<(), DeserializeError> {
@@ -504,7 +519,7 @@
      }
  
      /// **[Ping Messages (PING/PONG)]**
-@@ -959,7 +1041,7 @@
+@@ -959,7 +1055,7 @@
      /// [Ping Messages (PING/PONG)]: https://core.telegram.org/mtproto/service_messages#ping-messages-ping-pong
      /// [Deferred Connection Closure + PING]: https://core.telegram.org/mtproto/service_messages#deferred-connection-closure-ping
      fn handle_pong(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
@@ -513,7 +528,7 @@
  
          self.deserialization
              .push(Deserialization::RpcResult(RpcResult {
-@@ -983,7 +1065,8 @@
+@@ -983,7 +1079,8 @@
      /// ```
      ///
      /// [Request to Destroy Session]: https://core.telegram.org/mtproto/service_messages#request-to-destroy-session
@@ -523,7 +538,7 @@
          // TODO implement
          Ok(())
      }
-@@ -1025,7 +1108,7 @@
+@@ -1025,7 +1122,7 @@
          message: manual_tl::Message,
      ) -> Result<(), DeserializeError> {
          // TODO notify upper layers about the need to use getDifference
@@ -532,7 +547,7 @@
          match new_session {
              tl::enums::NewSession::Created(x) => {
                  self.salts.clear();
-@@ -1077,7 +1160,7 @@
+@@ -1077,7 +1174,7 @@
      /// [Containers]: https://core.telegram.org/mtproto/service_messages#containers
      /// [Simple Container]: https://core.telegram.org/mtproto/service_messages#simple-container
      fn handle_container(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
@@ -541,7 +556,7 @@
          for inner_message in container.messages {
              self.process_message(inner_message)?;
          }
-@@ -1106,7 +1189,7 @@
+@@ -1106,7 +1203,7 @@
      ///
      /// [Message Copies]: https://core.telegram.org/mtproto/service_messages#message-copies
      fn handle_msg_copy(&self, _message: manual_tl::Message) -> Result<(), DeserializeError> {
@@ -550,7 +565,7 @@
      }
  
      /// **[Packed Object]**
-@@ -1126,12 +1209,10 @@
+@@ -1126,12 +1223,10 @@
      ///
      /// [Packed Object]: https://core.telegram.org/mtproto/service_messages#packed-object
      fn handle_gzip_packed(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
@@ -567,7 +582,7 @@
      }
  
      /// **[HTTP Wait/Long Poll]**
-@@ -1180,7 +1261,8 @@
+@@ -1180,7 +1275,8 @@
      /// to ping time.
      ///
      /// [HTTP Wait/Long Poll]: https://core.telegram.org/mtproto/service_messages#http-wait-long-poll
@@ -577,18 +592,25 @@
          // TODO implement
          Ok(())
      }
-@@ -1315,6 +1397,10 @@
-     ) -> Result<Vec<Deserialization>, DeserializeError> {
+@@ -1316,16 +1412,7 @@
          crate::utils::check_message_buffer(payload)?;
  
-+        self.expansion_used = 0;
-+        self.nesting = 0;
-+        self.deserialization.clear();
-+
          let plaintext = decrypt_data_v2(payload, &self.auth_key)?;
+-
+-        let mut buffer = Cursor::from_slice(plaintext);
+-
+-        let _salt = i64::deserialize(&mut buffer)?;
+-        let session_id = i64::deserialize(&mut buffer)?;
+-        if session_id != self.session_id {
+-            panic!("wrong session id");
+-        }
+-
+-        self.process_message(manual_tl::Message::deserialize(&mut buffer)?)?;
++        self.process_plaintext(plaintext)?;
  
-         let mut buffer = Cursor::from_slice(plaintext);
-@@ -1333,6 +1419,10 @@
+         // For simplicity, and to avoid passing too much stuff around (RPC results, updates),
+         // the processing result is stored in self. After processing is done, that temporary
+@@ -1333,6 +1420,10 @@
          Ok(mem::take(&mut self.deserialization))
      }
  }
@@ -601,10 +623,21 @@
  mod tests {
 --- upstream/src/mtp/mod.rs
 +++ patched/src/mtp/mod.rs
-@@ -140,6 +140,18 @@
+@@ -126,6 +126,9 @@
+     /// The server's message ID did not match our expectations.
+     BadMessageId { got: i64 },
+ 
++    /// The decrypted envelope belongs to a different session.
++    UnexpectedSession,
++
+     /// The server's message length was not strictly positive.
+     NegativeMessageLength { got: i32 },
+ 
+@@ -139,6 +142,18 @@
+ 
      /// The server responded with compressed data which we failed to decompress.
      DecompressionFailed,
- 
++
 +    /// Incoming encoded data, expansion or nesting exceeded its configured limit.
 +    LimitExceeded,
 +
@@ -616,11 +649,18 @@
 +
 +    /// The peer used an unsupported protocol control envelope.
 +    UnsupportedControl,
-+
+ 
      /// While deserializing the response types one of them had a constructor
      /// that did not match our expectations. The invalid ID is contained
-     /// within this variant.
-@@ -173,6 +185,10 @@
+@@ -161,6 +176,7 @@
+                 write!(f, "bad server auth key (got {got}, expected {expected})")
+             }
+             Self::BadMessageId { got } => write!(f, "bad server message id (got {got})"),
++            Self::UnexpectedSession => write!(f, "unexpected protocol session"),
+             Self::NegativeMessageLength { got } => {
+                 write!(f, "bad server message length (got {got})")
+             }
+@@ -173,6 +189,10 @@
                  "server responded with a payload that's too small to fit a valid message"
              ),
              Self::DecompressionFailed => write!(f, "failed to decompress server's data"),
@@ -631,7 +671,7 @@
              Self::UnexpectedConstructor { id } => write!(f, "unexpected constructor: {id:08x}"),
              Self::DecryptionError(ref error) => write!(f, "failed to decrypt message: {error}"),
              Self::Transport(ref error) => {
-@@ -187,6 +203,7 @@
+@@ -187,6 +207,7 @@
          use tl::deserialize::Error as Err;
  
          match error {

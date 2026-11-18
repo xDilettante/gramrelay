@@ -4,6 +4,27 @@ use super::*;
 fn receiver() -> Encrypted {
     Encrypted::build().finish([7; 256])
 }
+
+#[test]
+fn plaintext_session_must_match_before_decoding_the_body() {
+    let mut state = receiver();
+    let header = |id: i64| [0i64.to_le_bytes(), id.to_le_bytes()].concat();
+    let session = state.session_id;
+    state.expansion_used = 19;
+    assert_eq!(
+        state.process_plaintext(&header(session)),
+        Err(DeserializeError::MessageBufferTooSmall)
+    );
+    assert_eq!(state.expansion_used, 0);
+
+    state.expansion_used = 31;
+    let error = state.process_plaintext(&header(session ^ 1)).unwrap_err();
+    assert_eq!(error, DeserializeError::UnexpectedSession);
+    assert_eq!(error.to_string(), "unexpected protocol session");
+    assert_eq!(state.expansion_used, 31);
+    assert!(state.deserialization.is_empty());
+}
+
 fn message(body: Vec<u8>) -> manual_tl::Message {
     manual_tl::Message {
         msg_id: 1,

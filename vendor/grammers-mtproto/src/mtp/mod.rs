@@ -126,6 +126,9 @@ pub enum DeserializeError {
     /// The server's message ID did not match our expectations.
     BadMessageId { got: i64 },
 
+    /// The decrypted envelope belongs to a different session.
+    UnexpectedSession,
+
     /// The server's message length was not strictly positive.
     NegativeMessageLength { got: i32 },
 
@@ -173,6 +176,7 @@ impl fmt::Display for DeserializeError {
                 write!(f, "bad server auth key (got {got}, expected {expected})")
             }
             Self::BadMessageId { got } => write!(f, "bad server message id (got {got})"),
+            Self::UnexpectedSession => write!(f, "unexpected protocol session"),
             Self::NegativeMessageLength { got } => {
                 write!(f, "bad server message length (got {got})")
             }

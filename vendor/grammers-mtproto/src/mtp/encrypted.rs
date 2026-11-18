@@ -364,6 +364,20 @@ impl Encrypted {
         self.msg_count = 0;
     }
 
+    fn process_plaintext(&mut self, plaintext: &[u8]) -> Result<(), DeserializeError> {
+        let mut buffer = Cursor::from_slice(plaintext);
+        let _salt = i64::deserialize(&mut buffer)?;
+        let session_id = i64::deserialize(&mut buffer)?;
+        if session_id != self.session_id {
+            return Err(DeserializeError::UnexpectedSession);
+        }
+
+        self.expansion_used = 0;
+        self.nesting = 0;
+        self.deserialization.clear();
+        self.process_message(manual_tl::Message::deserialize(&mut buffer)?)
+    }
+
     fn process_message(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
         if self.nesting >= self.nesting_limit {
             return Err(DeserializeError::LimitExceeded);
@@ -1397,21 +1411,8 @@ impl Mtp for Encrypted {
     ) -> Result<Vec<Deserialization>, DeserializeError> {
         crate::utils::check_message_buffer(payload)?;
 
-        self.expansion_used = 0;
-        self.nesting = 0;
-        self.deserialization.clear();
-
         let plaintext = decrypt_data_v2(payload, &self.auth_key)?;
-
-        let mut buffer = Cursor::from_slice(plaintext);
-
-        let _salt = i64::deserialize(&mut buffer)?;
-        let session_id = i64::deserialize(&mut buffer)?;
-        if session_id != self.session_id {
-            panic!("wrong session id");
-        }
-
-        self.process_message(manual_tl::Message::deserialize(&mut buffer)?)?;
+        self.process_plaintext(plaintext)?;
 
         // For simplicity, and to avoid passing too much stuff around (RPC results, updates),
         // the processing result is stored in self. After processing is done, that temporary
