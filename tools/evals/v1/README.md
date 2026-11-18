@@ -22,9 +22,28 @@ and separate build and test logs under target/eval-coding-evidence.
 Use a clean commit so the receipt identifies the library and checks precisely.
 The target can be cleaned via Cargo after the process exits.
 
-For reviewed Rust submissions, use `run --submissions DIR --model NAME`.
-Store the first submitted bytes in T01.rs, T02.rs and so on. Record the actual
-model label and keep the original submission and receipt when testing a repair.
+For a first-check run, give each fresh agent exactly its task packet without
+access to the repository, the test, previous answers or a compiler. Record the
+model label the platform exposes. Save the first Rust module verbatim in T01.rs,
+T02.rs and so on before reading the test result. Treat an absent answer as a
+failed attempt. Keep the saved answers and the receipt when testing a repair.
+
+Create provenance.json with schema_version 1, model, source_commit, protocol
+`fresh-context-docs-only`, and an attempts object with keys T01 through T30.
+Each attempt records its distinct session identifier, packet_sha256, answer_sha256
+(null for missing answers) and contract_review (pass or fail for valid answers).
+The manual review checks requirements that have no externally observable signal.
+For example, the T09 implementation must build and discard a lazy request. A
+function that does nothing would also leave the transport untouched. It also
+checks that candidates stay within the task's authorized fixture interfaces.
+
+```powershell
+python tools/eval_coding.py run --submissions DIR --model NAME --provenance provenance.json --reference-receipt PATH_TO_REFERENCE_SUMMARY --toolchain 1.100.0
+```
+
+First-check requires a reference receipt with all 30 passes at the same archived
+source, resolved lock and compiler. The runner checks both packet and answer hashes
+before building. At least 24 passed cases satisfy the first-check target.
 Use `--attempt repair` for a follow-up and `--attempt pilot` to exercise a draft
 or a negative control without creating first-check evidence.
 The runner executes Rust code locally. Give it only code from trusted or

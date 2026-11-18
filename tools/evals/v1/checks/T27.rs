@@ -29,4 +29,21 @@ async fn opens_same_encrypted_store_with_explicit_consumed_keys() {
         .unwrap();
     assert_eq!(reopened.storage_fingerprint(), fingerprint);
     reopened.close().await.unwrap();
+
+    let other = dir.path().join("reopen-key-probe.sqlite");
+    let binding = SessionBinding::new("reopen-key-probe", 113).unwrap();
+    assert!(
+        solution::solve(
+            &other,
+            binding.clone(),
+            key(),
+            SessionKey::from_bytes([60; 32])
+        )
+        .await
+        .is_err()
+    );
+    let created = Session::open_existing(&other, binding, key(), SessionOptions::default())
+        .await
+        .unwrap();
+    created.close().await.unwrap();
 }

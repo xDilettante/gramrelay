@@ -6,7 +6,7 @@ use std::{
     },
     time::Duration,
 };
-use tg_mtproto::{ClientOptions, Outcome, test_kit, tl};
+use tg_mtproto::{ClientOptions, Outcome, Session, SessionKey, SessionOptions, test_kit, tl};
 use tokio::sync::Notify;
 
 struct Active(Arc<AtomicBool>);
@@ -18,7 +18,9 @@ impl Drop for Active {
 
 #[tokio::test]
 async fn closes_the_driver_and_releases_session_before_returning() {
-    let (_dir, session) = mt_session().await;
+    let (dir, session) = mt_session().await;
+    let binding = session.binding().clone();
+    let fingerprint = session.storage_fingerprint();
     let active = Arc::new(AtomicBool::new(false));
     let ready = Arc::new(Notify::new());
     let observed = active.clone();
@@ -54,7 +56,16 @@ async fn closes_the_driver_and_releases_session_before_returning() {
             .outcome(),
         Outcome::NotSent
     );
-    let replacement = test_kit::client(session, ClientOptions::default(), |_, wire| async move {
+    let reopened = Session::open_existing(
+        dir.path().join("mt.sqlite"),
+        binding,
+        SessionKey::from_bytes([31; 32]),
+        SessionOptions::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(reopened.storage_fingerprint(), fingerprint);
+    let replacement = test_kit::client(reopened, ClientOptions::default(), |_, wire| async move {
         Ok(pong(&wire, 99, 8))
     })
     .unwrap();

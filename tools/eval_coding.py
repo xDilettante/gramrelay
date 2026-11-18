@@ -19,10 +19,11 @@ import source_bundle
 
 ROOT = check_compat.ROOT
 EVALS = Path("tools/evals/v1")
-DOCS = ("docs/AGENT-INDEX.md", "docs/RECIPES.md", "docs/START.md")
+DOCS = ("docs/AGENT-INDEX.md", "tools/evals/v1/API-NOTES.md")
 AREA_DOCS = {
-    "agent": ("docs/AGENT-CLI.md", "docs/AGENT-MCP.md"),
-    "mtproto": ("docs/AGENT-MTPROTO.md",),
+    "runtime": ("docs/START.md", "examples/polling.rs", "examples/webhook_mock.rs"),
+    "agent": ("docs/AGENT-CLI.md", "tg-agent/examples/journal.rs", "tg-agent/examples/authorized_document.rs"),
+    "mtproto": ("tg-mtproto/README.md",),
 }
 MAX_ANSWER = 64 * 1024
 
@@ -73,6 +74,48 @@ def packet(root, suite, task, signature):
 def locked_packages(lock):
     return {(p["name"], p["version"], p["source"], p["checksum"])
             for p in tomllib.loads(lock.decode("utf-8"))["package"] if "source" in p}
+
+
+def check_paths(graph, source, crate):
+    check_external.check_graph(graph, source)
+    expected = {(source / relative / "Cargo.toml").resolve()
+                for relative in check_external.LIBRARIES.values()}
+    expected.update((source / "vendor" / name / "Cargo.toml").resolve()
+                    for name in check_external.SDK)
+    expected.add((crate / "Cargo.toml").resolve())
+    found = {Path(p["manifest_path"]).resolve() for p in graph["packages"] if p["source"] is None}
+    if found != expected:
+        raise ValueError("fixture graph contains unexpected local dependencies")
+
+
+def check_provenance(provenance, reference, summary, selected):
+    ids = set(selected)
+    if (provenance.get("schema_version") != 1 or provenance.get("model") != summary["model"]
+            or provenance.get("source_commit") != summary["source_commit"]
+            or provenance.get("protocol") != "fresh-context-docs-only"
+            or set(provenance.get("attempts", {})) != ids):
+        raise ValueError("first-check provenance must identify the model, source, protocol and 30 task attempts")
+    attempts = provenance["attempts"]
+    sessions = [attempts[task_id].get("session", "") for task_id in selected]
+    if any(not session.strip() for session in sessions) or len(set(sessions)) != len(selected):
+        raise ValueError("first attempts require distinct exposed session identifiers")
+    if (reference.get("mode") != "reference" or reference.get("status") != "finished"
+            or reference.get("passed") != 30 or len(reference.get("cases", ())) != 30
+            or reference.get("rustc") != summary["rustc"]
+            or reference.get("lock_sha256") != summary["lock_sha256"]
+            or reference.get("archive_sha256") != summary["archive_sha256"]):
+        raise ValueError("first-check requires a passing reference run on this snapshot and compiler")
+    checked = {case["id"]: case for case in reference["cases"] if case["status"] == "passed"}
+    if set(checked) != ids:
+        raise ValueError("reference receipt lacks a passing result for every task")
+    for case in summary["cases"]:
+        attempt = attempts[case["id"]]
+        if (attempt.get("packet_sha256") != case["packet_sha256"]
+                or attempt.get("answer_sha256") != case.get("answer_sha256")
+                or checked[case["id"]]["packet_sha256"] != case["packet_sha256"]):
+            raise ValueError(f"first-check packet or answer hash mismatch for {case['id']}")
+        if case.get("answer_sha256") and attempt.get("contract_review") not in ("pass", "fail"):
+            raise ValueError(f"record the manual contract review for {case['id']}")
 
 
 def record(path, value):
@@ -179,15 +222,13 @@ def run(args):
         if command(graph_cmd, "metadata", crate):
             raise ValueError("offline fixture dependencies unavailable")
         graph = json.loads(read(evidence / "metadata.stdout", 16 * 1024**2))
-        check_external.check_graph(graph, source)
+        check_paths(graph, source, crate)
         lock = read(crate / "Cargo.lock", 512 * 1024)
         if not locked_packages(lock) <= locked_packages(seed):
             raise ValueError("fixture resolved a dependency outside the source lock")
         (evidence / "Cargo.lock").write_bytes(lock)
         summary.update(status="running", lock_sha256=digest(lock), resolve_command=graph_cmd)
         for task_id in ids:
-            check_compat.guard(ROOT)
-            name = task_id.lower()
             context = packet(source, suite, tasks[task_id], signatures[task_id])
             (evidence / f"{task_id}.packet.md").write_bytes(context)
             item = {"id": task_id, "packet_sha256": digest(context), "packet_bytes": len(context)}
@@ -202,11 +243,28 @@ def run(args):
                 item.update(status="invalid-answer", error_type=type(error).__name__)
                 record(receipt, summary)
                 continue
+            item.update(status="pending", answer_sha256=digest(answer))
             (evidence / f"{task_id}.answer.rs").write_bytes(answer)
-            (crate / "tests" / name / "solution.rs").write_bytes(answer)
+        record(receipt, summary)
+        if summary["mode"] == "first":
+            provenance_bytes = read(args.provenance)
+            reference_bytes = read(args.reference_receipt, 256 * 1024)
+            check_provenance(json.loads(provenance_bytes), json.loads(reference_bytes), summary, ids)
+            attempts = json.loads(provenance_bytes)["attempts"]
+            for item in summary["cases"]:
+                item["contract_review"] = attempts[item["id"]].get("contract_review")
+            (evidence / "provenance.json").write_bytes(provenance_bytes)
+            (evidence / "reference-receipt.json").write_bytes(reference_bytes)
+        for item in summary["cases"]:
+            if item["status"] != "pending":
+                continue
+            check_compat.guard(ROOT)
+            task_id = item["id"]
+            name = task_id.lower()
+            shutil.copyfile(evidence / f"{task_id}.answer.rs", crate / "tests" / name / "solution.rs")
             build = [*cargo, "test", "--locked", "--offline", "--no-run",
                      "--message-format=json-render-diagnostics", "--test", name, "--target-dir", str(target)]
-            item.update(status="building", answer_sha256=digest(answer), build=build, build_exit=None)
+            item.update(status="building", build=build, build_exit=None)
             record(receipt, summary)
             print(task_id, flush=True)
             code = command(build, name + "-build", crate)
@@ -223,6 +281,8 @@ def run(args):
                     output = read(evidence / (name + "-test.stdout"), 1024 * 1024)
                     completed = re.search(rb"^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;", output, re.MULTILINE)
                     item.update(test_exit=result, status="passed" if result == 0 and completed else "test-failed")
+                    if item["status"] == "passed" and item.get("contract_review") == "fail":
+                        item["status"] = "contract-failed"
                 except subprocess.TimeoutExpired:
                     # Only reviewed answers are executed here. They may not spawn child processes.
                     item["status"] = "test-timeout"
@@ -231,6 +291,10 @@ def run(args):
         count = sum(item["status"] == "passed" for item in summary["cases"])
         summary.update(status="finished", passed=count)
         print(f"{summary['mode']}: {count}/{len(ids)} selected cases", flush=True)
+        if summary["mode"] == "first":
+            threshold = suite["target_first_check_passed"]
+            summary.update(target_passed=threshold, meets_target=count >= threshold)
+            return 0 if summary["meets_target"] else 1
         return 0 if count == len(ids) else 1
     except BaseException as error:
         retain = isinstance(error, (subprocess.TimeoutExpired, KeyboardInterrupt))
@@ -264,6 +328,8 @@ def main():
     source.add_argument("--reference", action="store_true")
     source.add_argument("--submissions", type=Path)
     evaluate.add_argument("--model")
+    evaluate.add_argument("--provenance", type=Path)
+    evaluate.add_argument("--reference-receipt", type=Path)
     evaluate.add_argument("--attempt", choices=("first", "repair", "pilot"), default="first")
     evaluate.add_argument("--toolchain", required=True)
     evaluate.add_argument("--task", action="append")
@@ -277,6 +343,8 @@ def main():
             raise ValueError("toolchain must be stable or a release version")
         if args.submissions is not None and not (args.model and args.model.strip()):
             raise ValueError("provide the exposed model identity for submissions")
+        if args.submissions is not None and args.attempt == "first" and not (args.provenance and args.reference_receipt):
+            raise ValueError("provide --provenance and --reference-receipt for a first-check run")
         return run(args)
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"coding evaluation failed: {error}", file=sys.stderr)
