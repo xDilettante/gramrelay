@@ -53,6 +53,7 @@ Measure an idle host with the installed native Rust 1.100.0 toolchain.
 cargo +1.100.0 fetch --locked --manifest-path tools/bench-http/Cargo.toml
 python tools/bench-http/run.py
 python tools/bench-http/run.py --pressure
+python tools/bench-http/run.py --profile
 ```
 
 A full run takes three rotations, 100 warm-ups per batch and 1,000 samples
@@ -68,6 +69,24 @@ process, including the loopback server and Tokio, while all eight admitted
 requests are held and after releasing them and confirming recovery. Pooled
 connections remain open in the settled workload. The runner bounds the
 whole pressure process and saves its counters and resident-byte observations.
+
+The resource profile runs two release builds against the same uninstrumented
+fixture executable in a separate process. Each batch starts a fresh client,
+warms it with 100 validated requests on one socket, then measures 4,000 requests
+with no additional connections. The runner rotates client order three times.
+The fixture consumes the entire bounded HTTP body before applying the same
+golden validator. It counts raw HTTP/1.1 octets at the server socket, including
+headers and chunk delimiters. TCP/IP headers are outside that count. A two-call
+control verifies exact wire totals for both Content-Length and chunked requests.
+
+The plain client samples user plus kernel CPU time before and after the measured
+batch (GetProcessTimes on Windows, getrusage on Unix). The separate allocator
+build counts successful Rust global allocations and reallocations. Byte
+totals count requested layout sizes and new sizes on reallocations, in separate
+fields. These are activity counts; native allocations and live heap size need
+other instrumentation. Retained JSONL records the raw batch totals; the summary
+gives median per-call values for each client and method. The resource results
+are independent of the latency threshold.
 
 ## Initial Windows comparison
 
@@ -148,3 +167,5 @@ lock and dependency selection are independent of the benchmark.
 
 - [teloxide 0.17.0 HTTP client](https://docs.rs/teloxide/0.17.0/teloxide/struct.Bot.html)
 - [frankenstein 0.53.0 asynchronous reqwest adapter](https://docs.rs/frankenstein/0.53.0/frankenstein/client_reqwest/)
+- [Windows process timing](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes)
+- [Rust global allocator](https://doc.rust-lang.org/std/alloc/trait.GlobalAlloc.html)

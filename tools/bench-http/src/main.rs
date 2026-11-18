@@ -23,6 +23,10 @@ use frankenstein::{
 use serde_json::{Value, json};
 use teloxide::requests::Requester;
 
+#[cfg(feature = "allocation-counts")]
+mod allocations;
+mod profile;
+
 const TOKEN: &str = "0:BENCHMARK";
 const CHAT: i64 = -17001;
 const TEXT: &str = "Telegram Rust: Привет 🌍";
@@ -98,6 +102,20 @@ struct Mock {
     count: AtomicUsize,
     connections: AtomicUsize,
     replies: [String; 4],
+}
+
+fn mock_router() -> (Arc<Mock>, Router) {
+    let mock = Arc::new(Mock {
+        count: AtomicUsize::new(0),
+        connections: AtomicUsize::new(0),
+        replies: Scenario::ALL
+            .map(|scenario| json!({"ok": true, "result": scenario.response()}).to_string()),
+    });
+    let router = Router::new()
+        .route("/{credential}/{method}", post(receive))
+        .layer(DefaultBodyLimit::max(128 * 1024))
+        .with_state(Arc::clone(&mock));
+    (mock, router)
 }
 
 async fn receive(
@@ -276,13 +294,26 @@ impl Client {
 }
 
 fn clients(base: &str) -> Result<[Client; 3], Box<dyn Error>> {
-    let tg = tg::Bot::builder(TOKEN)
-        .api_url(base)
-        .allow_http_loopback(true)
-        .timeout(TIMEOUT)
-        .max_in_flight(POOL_CAP)
-        .build()?;
-    let teloxide_http = reqwest_012::Client::builder()
+    Ok([
+        tg_client(base)?,
+        teloxide_client(base)?,
+        frankenstein_client(base)?,
+    ])
+}
+
+fn tg_client(base: &str) -> Result<Client, Box<dyn Error>> {
+    Ok(Client::Tg(
+        tg::Bot::builder(TOKEN)
+            .api_url(base)
+            .allow_http_loopback(true)
+            .timeout(TIMEOUT)
+            .max_in_flight(POOL_CAP)
+            .build()?,
+    ))
+}
+
+fn teloxide_client(base: &str) -> Result<Client, Box<dyn Error>> {
+    let http = reqwest_012::Client::builder()
         .no_proxy()
         .redirect(reqwest_012::redirect::Policy::none())
         .retry(reqwest_012::retry::never())
@@ -290,7 +321,13 @@ fn clients(base: &str) -> Result<[Client; 3], Box<dyn Error>> {
         .timeout(TIMEOUT)
         .pool_max_idle_per_host(POOL_CAP)
         .build()?;
-    let frankenstein_http = frankenstein::reqwest::Client::builder()
+    Ok(Client::Teloxide(
+        teloxide::Bot::with_client(TOKEN, http).set_api_url(base.parse()?),
+    ))
+}
+
+fn frankenstein_client(base: &str) -> Result<Client, Box<dyn Error>> {
+    let http = frankenstein::reqwest::Client::builder()
         .no_proxy()
         .redirect(frankenstein::reqwest::redirect::Policy::none())
         .retry(frankenstein::reqwest::retry::never())
@@ -298,23 +335,28 @@ fn clients(base: &str) -> Result<[Client; 3], Box<dyn Error>> {
         .timeout(TIMEOUT)
         .pool_max_idle_per_host(POOL_CAP)
         .build()?;
-    Ok([
-        Client::Tg(tg),
-        Client::Teloxide(
-            teloxide::Bot::with_client(TOKEN, teloxide_http).set_api_url(base.parse()?),
-        ),
-        Client::Frankenstein(
-            frankenstein::client_reqwest::Bot::builder()
-                .api_url(format!("{base}/bot{TOKEN}"))
-                .client(frankenstein_http)
-                .build(),
-        ),
-    ])
+    Ok(Client::Frankenstein(
+        frankenstein::client_reqwest::Bot::builder()
+            .api_url(format!("{base}/bot{TOKEN}"))
+            .client(http)
+            .build(),
+    ))
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let (rounds, warmup, samples) = match std::env::args().skip(1).collect::<Vec<_>>().as_slice() {
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    match args.as_slice() {
+        [mode] if mode == "--profile-server" => return profile::server().await,
+        [mode, base, client, method] if mode == "--profile-client" => {
+            return profile::client(base, client, method).await;
+        }
+        _ if cfg!(feature = "allocation-counts") => {
+            return Err("the allocation build only supports profile mode".into());
+        }
+        _ => {}
+    }
+    let (rounds, warmup, samples) = match args.as_slice() {
         [] => (3, 100, 1000),
         [mode] if mode == "--smoke" => (1, 2, 6),
         _ => return Err("usage: telegram-http-benchmark [--smoke]".into()),
@@ -322,12 +364,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join(FILENAME);
     std::fs::write(&path, DOCUMENT.as_slice())?;
-    let mock = Arc::new(Mock {
-        count: AtomicUsize::new(0),
-        connections: AtomicUsize::new(0),
-        replies: Scenario::ALL
-            .map(|scenario| json!({"ok": true, "result": scenario.response()}).to_string()),
-    });
+    let (mock, router) = mock_router();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let base = format!("http://{}", listener.local_addr()?);
     let peer_counts = Arc::clone(&mock);
@@ -335,10 +372,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         stream.set_nodelay(true).expect("configure loopback socket");
         peer_counts.connections.fetch_add(1, Ordering::Relaxed);
     });
-    let router = Router::new()
-        .route("/{credential}/{method}", post(receive))
-        .layer(DefaultBodyLimit::max(128 * 1024))
-        .with_state(Arc::clone(&mock));
     let server = tokio::spawn(async move { axum::serve(listener, router).await });
     let clients = clients(&base)?;
     let mut batches = Vec::new();
