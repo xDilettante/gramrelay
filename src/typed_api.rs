@@ -134,7 +134,8 @@ impl<'a, M: Method> IntoFuture for Call<'a, M> {
                         let mut remaining = self.bot.upload_limit();
                         let mut readers = crate::files::UploadReaders::default();
                         for (name, file) in self.attachments {
-                            let (part, length) = file.into_part(remaining, &mut readers).await?;
+                            let (part, length) =
+                                file.into_part(remaining, &mut readers, None).await?;
                             remaining -= length;
                             form = form.part(name, part);
                         }

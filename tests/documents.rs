@@ -68,7 +68,9 @@ async fn uploads_a_file_from_disk() {
         .await;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("disk.bin");
-    let content = vec![0xab; 128 * 1024];
+    let content: Vec<u8> = (0..128 * 1024 + 19)
+        .map(|index| (index % 251) as u8)
+        .collect();
     tokio::fs::write(&path, &content).await.unwrap();
     bot(&server)
         .send_document(ChatId::from(1), InputFile::path(&path))

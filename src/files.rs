@@ -11,6 +11,8 @@ mod reader;
 use reader::ReaderUpload;
 pub(crate) use reader::UploadReaders;
 
+const DOCUMENT_PATH_CHUNK_BYTES: u64 = 16 * 1024;
+
 /// A new upload or a previously returned Telegram file ID.
 /// Paths are opened lazily, when the request is awaited.
 pub struct InputFile(Source);
@@ -85,7 +87,9 @@ impl InputFile {
             }
             return Ok(form.text("document", id));
         }
-        let (part, _) = self.into_part(max_bytes, readers).await?;
+        let (part, _) = self
+            .into_part(max_bytes, readers, Some(DOCUMENT_PATH_CHUNK_BYTES))
+            .await?;
         Ok(form.part("document", part))
     }
 
@@ -93,6 +97,7 @@ impl InputFile {
         self,
         max_bytes: u64,
         readers: &mut UploadReaders,
+        path_read_capacity: Option<u64>,
     ) -> Result<(Part, u64)> {
         let (part, length) = match self.0 {
             Source::FileId(_) => {
@@ -142,9 +147,15 @@ impl InputFile {
                 }
                 let length = metadata.len();
                 check_size(length, max_bytes)?;
-                // take(length) also bounds a file that grows after metadata was read.
-                // https://docs.rs/tokio/latest/tokio/io/trait.AsyncReadExt.html#method.take
-                let stream = ReaderStream::new(file.take(length));
+                // take(length) caps a file that grows after metadata is read.
+                let reader = file.take(length);
+                let stream = match path_read_capacity {
+                    Some(capacity) => {
+                        ReaderStream::with_capacity(reader, length.clamp(1, capacity) as usize)
+                    }
+                    // Named parts allocate their read buffer when polled.
+                    None => ReaderStream::new(reader),
+                };
                 (
                     Part::stream_with_length(Body::wrap_stream(stream), length)
                         .file_name(name.to_owned()),
