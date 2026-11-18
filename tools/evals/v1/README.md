@@ -1,7 +1,7 @@
 # Rust API usability evaluation v1
 
-The corpus in tasks.json stays draft until every task has a passing reference
-and a behavioral fixture. The score gate is 24 of 30 first submissions. The
+The frozen corpus in tasks.json contains 30 prompts with behavioral fixtures
+and reference solutions. The score gate is 24 of 30 first submissions. The
 ten MCP retrieval questions remain a separate evaluation.
 
 Each implemented case has a public function signature in signatures.json,

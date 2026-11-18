@@ -174,15 +174,14 @@ def oracle_name(check):
     return names[0]
 
 
-def oracle_passed(log, name):
+def oracle_passed(log):
     with log.open("rb") as stream:
         # The harness footer is last. Candidate stdout cannot suppress later tests.
         stream.seek(max(0, log.stat().st_size - 32768))
         tail = stream.read(32768)
-    return (
-        re.search(rb"^test " + name.encode() + rb" \.\.\. ok\r?$", tail, re.MULTILINE)
-        and re.search(rb"^test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured;", tail, re.MULTILINE)
-    )
+    # The command selects the single named oracle with --exact. Its footer
+    # must report exactly one pass, even if the tested code writes to stdout.
+    return bool(re.search(rb"^test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured;", tail, re.MULTILINE))
 
 
 def run(args):
@@ -311,12 +310,12 @@ def run(args):
                 item.update(status="build-failed")
             else:
                 test = [str(executable(evidence / (name + "-build.stdout"), target, name)),
-                        oracle, "--exact", "--test-threads=1"]
+                        oracle, "--exact", "--format=terse", "--test-threads=1"]
                 item.update(status="testing", test=test, test_exit=None)
                 record(receipt, summary)
                 try:
                     result = command(test, name + "-test", crate, timeout=30, runtime=True)
-                    passed = result == 0 and oracle_passed(evidence / (name + "-test.stdout"), oracle)
+                    passed = result == 0 and oracle_passed(evidence / (name + "-test.stdout"))
                     item.update(test_exit=result, status="passed" if passed else "test-failed")
                 except subprocess.TimeoutExpired:
                     # Only reviewed answers are executed here. They may not spawn child processes.

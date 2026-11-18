@@ -52,16 +52,16 @@ class CodingEvaluation(unittest.TestCase):
         data["attempts"]["T01"]["disposition"] = "invalid-answer"
         evaluation.check_provenance(data, reference, summary, ids)
 
-    def test_test_footer_requires_the_actual_named_oracle(self):
+    def test_test_footer_requires_one_completed_check(self):
         with tempfile.TemporaryDirectory() as temporary:
             log = Path(temporary) / "output"
             footer = b"test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished\n"
-            log.write_bytes(b"test unrelated ... ok\n" + footer)
-            self.assertFalse(evaluation.oracle_passed(log, "checked"))
+            log.write_bytes(footer.replace(b"1 passed", b"0 passed"))
+            self.assertFalse(evaluation.oracle_passed(log))
             log.write_bytes(b"running 1 test\n")
-            self.assertFalse(evaluation.oracle_passed(log, "checked"))
-            log.write_bytes(b"x" * 1024 * 1024 + b"\ntest checked ... ok\n" + footer)
-            self.assertTrue(evaluation.oracle_passed(log, "checked"))
+            self.assertFalse(evaluation.oracle_passed(log))
+            log.write_bytes(b"x" * 1024 * 1024 + b".\n" + footer)
+            self.assertTrue(evaluation.oracle_passed(log))
 
     def test_executable_must_match_the_task_inside_owned_target(self):
         with tempfile.TemporaryDirectory() as temporary:

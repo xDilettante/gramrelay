@@ -100,3 +100,25 @@ After all processes terminated, Cargo cleaned both alternate dev targets:
 1.9 GiB current-stable and 701.3 MiB MSRV; logs are retained outside them.
 Total target is 2.53 GiB, free C: 426.63 GiB. Previously policy-blocked old
 directories were not touched. Q1 and the full goal remain active.
+
+## Frozen coding corpus
+
+The 30 tasks now have public signatures, executable behavioral checks and
+passing reference modules. The T15 API prerequisite was completed separately
+in 3ed62d1. Its evaluation check sends from a duplex reader while the producer
+stays open and checks short input, limits and a single partial upload attempt.
+T30 exercises driver cleanup and reopens the encrypted store before creating
+a replacement client. The first T30 test incorrectly attempted to reuse the
+closed Session directly. The corrected fixture tests the public lifecycle.
+
+Commit 2c07b2b passed 30 of 30 reference cases on Windows MSVC Rust 1.100.0.
+The later runner reads the completion footer of the single exact-name test,
+so a candidate's stdout or extra tests do not change which oracle is scored.
+The first-check command requires a new reference receipt at that same
+archived snapshot and compiler. The runner records packets, submitted code,
+hashes, source and lock identity and separate build and test results.
+
+See tools/evals/v1/README.md for reproduction and provenance fields. A
+first-check run must use fresh agents and reach 24 passes across 30 cases.
+The model score, separate ten-question MCP evaluation and human onboarding
+timing are still unmeasured.
