@@ -52,6 +52,7 @@ Measure an idle host with the installed native Rust 1.100.0 toolchain.
 ```powershell
 cargo +1.100.0 fetch --locked --manifest-path tools/bench-http/Cargo.toml
 python tools/bench-http/run.py
+python tools/bench-http/run.py --pressure
 ```
 
 A full run takes three rotations, 100 warm-ups per batch and 1,000 samples
@@ -60,6 +61,45 @@ raw nanosecond samples and Cargo evidence remain under
 `target/bench-http-evidence`. A measured p95 above 120% of either competitor's
 p95 marks that scenario as outside the target. The binary's `--smoke` mode
 checks all requests and responses with six samples per client and method.
+
+The pressure mode warms the client, then runs five bursts of 128 requests
+with eight HTTP permits. It samples resident memory from the whole fixture
+process, including the loopback server and Tokio, while all eight admitted
+requests are held and after releasing them and confirming recovery. Pooled
+connections remain open in the settled workload. The runner bounds the
+whole pressure process and saves its counters and resident-byte observations.
+
+## Initial Windows comparison
+
+Windows 11 x86-64 MSVC, Rust 1.100.0, source af311bc. Runs ccdqnbqv,
+ram007g5 and zj519jhs retained 108,000 positive samples. The table gives
+the median of the three per-run median p95 values in microseconds.
+
+| Method | tg | teloxide | frankenstein |
+| --- | ---: | ---: | ---: |
+| getMe | 66.6 | 66.3 | 61.1 |
+| sendMessage | 76.1 | 76.2 | 70.9 |
+| answerCallbackQuery | 64.1 | 65.5 | 66.0 |
+| sendDocument | 598.5 | 438.8 | 599.5 |
+
+All three upload comparisons exceeded the 20% target against teloxide.
+Two JSON comparisons also exceeded it in the second run. Keep each raw
+run and its own verdict alongside the aggregate. Compare a single
+implementation change using the same lock, fixtures and sample protocol.
+
+The initial path-upload case used the 4 KiB ReaderStream default.
+Teloxide's FramedRead starts at 8 KiB. The candidate direct sendDocument
+path uses a 16 KiB cap to reduce disk-read handoffs. Path validation and
+the metadata-derived stream limit still apply. It allocates at most one
+such buffer per admitted request, capped by the file length with a one-byte
+minimum. At the default limit of 32 in-flight requests the initial buffers
+hold at most 512 KiB before transport buffering and allocator overhead.
+Named multipart parts still allocate their read buffers on demand.
+
+The benchmark-only lock has three unmaintained-package warnings from
+upstream dependencies (chrono, paste and proc-macro-error2) and zero
+reported vulnerabilities on the recorded audit. The library's workspace
+lock and dependency selection are independent of the benchmark.
 
 ## Upstream API references
 
