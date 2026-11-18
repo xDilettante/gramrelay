@@ -118,7 +118,28 @@ The first-check command requires a new reference receipt at that same
 archived snapshot and compiler. The runner records packets, submitted code,
 hashes, source and lock identity and separate build and test results.
 
-See tools/evals/v1/README.md for reproduction and provenance fields. A
-first-check run must use fresh agents and reach 24 passes across 30 cases.
-The model score, separate ten-question MCP evaluation and human onboarding
-timing are still unmeasured.
+See tools/evals/v1/README.md for reproduction and provenance fields.
+
+## First-check result
+
+On Windows MSVC with Rust 1.100.0, gpt-6.2-sol passed 27 of 30 first
+submissions against the 24-pass target. Snapshot 007673156579bb81a297fbc1fd3c9a832d1bb83e
+and archive SHA256 9d9d19c7d9022d0184b46df3f6bf5712e95b14b2197149e6a347b672425c84d0
+identify the exact library, fixtures and packets. All 30 references passed
+at the same snapshot. Packet sizes ranged from 10,541 to 34,874 UTF-8 bytes
+within the 49,152-byte limit. The 30 distinct fresh contexts received written
+restrictions to read only their selected packets.
+
+T03 selected the generated wire types for inline keyboard builders. T10
+called an incorrect error accessor. T17 used an incorrect command-argument
+accessor. Each failed at compilation. The next documentation snapshot now
+names the top-level keyboard types and the exact `Error::outcome` and
+`MessageContext::command_args` methods. The recorded attempts remain exact.
+
+Evidence is in target/eval-coding-evidence/run-i76kcic4. This receipt includes
+the passing reference receipt, all submitted modules, packet hashes, compiler
+and fixture lock identity, and build and test logs. Negative control run
+run-wju553ov distinguished compile failure, early exit without an oracle
+result, a missing answer and an oversized answer from two real passes.
+Cargo released 10.5 GiB after the evaluator processes finished. The separate
+ten-question MCP evaluation and human onboarding timing are pending.

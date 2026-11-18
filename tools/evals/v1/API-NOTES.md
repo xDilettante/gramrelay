@@ -8,8 +8,9 @@
 `disable_notification(bool)`, `reply_parameters(ReplyParameters)` и
 `reply_markup(InlineKeyboardMarkup)`. Для обычного ответа в текущем чате
 задайте `tg::api::types::ReplyParameters::new().message_id(parent)`.
-`InlineKeyboardMarkup::new().row([...])` принимает кнопки, включая
-`InlineKeyboardButton::callback(label, data)`.
+`tg::InlineKeyboardMarkup::new().row([...])` принимает кнопки, включая
+`tg::InlineKeyboardButton::callback(label, data)`. Эти два builder-типа
+импортируются непосредственно из `tg`.
 
 `answer_callback_query(id).text(notification)` при await возвращает bool.
 `CallbackQuery.message` может отсутствовать. Для содержимого доступного
@@ -24,6 +25,8 @@ EntityKind::Bold)` принимает диапазон байтов UTF-8 и п�
 `Message` и `True`. `bot.api().get_me().retry_policy(policy)` принимает
 `RetryPolicy::default().max_attempts(n).max_elapsed(duration)`. Параметры
 `initial_delay` и `jitter` пригодятся для повторяемых проверок.
+У `tg::Error` метод `outcome()` возвращает `tg::EffectOutcome`. Для тайм-аута
+отправки после dispatch сохраняйте `Unknown` и исходный ключ операции.
 
 Для `send_document(chat, file)` выберите `InputFile::bytes(name, bytes)`,
 `InputFile::file_id(file.as_str())` или `InputFile::reader(name, reader, length)`.
@@ -38,6 +41,8 @@ EntityKind::Bold)` принимает диапазон байтов UTF-8 и п�
 `bot.run_polling_until(router, options, stop)` управляет завершением.
 `bot.webhook(router, secret)` принимает `options(WebhookOptions::default()
 .max_body_bytes(limit))` и `serve_until(listener, stop)`.
+`MessageContext::command_args()` возвращает `Option<&str>`. Ответ через
+`MessageContext::reply(text)` переносит контекст исходного сообщения.
 
 ## Журнал и инструменты
 
