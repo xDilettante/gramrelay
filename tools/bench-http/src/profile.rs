@@ -206,7 +206,7 @@ pub(super) async fn client(
     emit(json!({"phase": "ready", "warmup": WARMUP}))?;
     let mut start = [0];
     tokio::io::stdin().read_exact(&mut start).await?;
-    if start != [b'g'] {
+    if start[0] != b'g' {
         return Err("unexpected client start marker".into());
     }
 

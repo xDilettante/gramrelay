@@ -156,7 +156,35 @@ the workspace audit of 337 dependencies passed. Another 36 executor,
 journal, feed and durable webhook tests passed on 3d44253 and its
 documentation follow-up. They cover budget concurrency, overload,
 durable capacity, cancellation and ownership/recovery paths.
-Separate CPU, allocation and wire-volume measurements remain open.
+
+## Client resource results
+
+Windows 11 x86-64 MSVC, Rust 1.100.0, source 093db57. The isolated run
+recorded 36 CPU/wire batches and 36 allocator batches, each with 4,000
+validated calls after warm-up. All 72 batches reused their warm socket.
+The exact wire control matched 109 request octets for Content-Length,
+128 for chunked framing and 352 response octets in each case.
+
+| Method | Client | CPU µs/call | Allocations/call | Requested alloc bytes/call | Request/response octets |
+| --- | --- | ---: | ---: | ---: | ---: |
+| getMe | tg | 54.69 | 46 | 21,232 | 128 / 352 |
+| getMe | teloxide | 50.78 | 51 | 18,435 | 128 / 352 |
+| getMe | frankenstein | 50.78 | 48 | 17,954 | 107 / 352 |
+| sendMessage | tg | 54.69 | 48 | 17,943 | 193 / 268 |
+| sendMessage | teloxide | 54.69 | 85 | 21,154 | 193 / 268 |
+| sendMessage | frankenstein | 54.69 | 54 | 18,275 | 193 / 268 |
+| answerCallbackQuery | tg | 54.69 | 45 | 17,697 | 184 / 133 |
+| answerCallbackQuery | teloxide | 46.88 | 48 | 17,758 | 184 / 133 |
+| answerCallbackQuery | frankenstein | 42.97 | 51 | 18,015 | 184 / 133 |
+| sendDocument | tg | 265.63 | 104 | 125,725 | 66,146 / 340 |
+| sendDocument | teloxide | 320.31 | 138 | 110,447 | 66,437 / 340 |
+| sendDocument | frankenstein | 453.13 | 146 | 101,670 | 66,289 / 340 |
+
+The table gives rounded medians of the three batch rates. These measurements
+place the direct tg upload lower in CPU time and allocation count, with more
+requested allocation bytes. Separate realloc counts and new requested sizes,
+the exact build identities and all raw totals are in
+`target/bench-http-evidence/run-a1pq1a_5`.
 
 The benchmark-only lock has three unmaintained-package warnings from
 upstream dependencies (chrono, paste and proc-macro-error2) and zero

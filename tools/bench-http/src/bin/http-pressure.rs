@@ -8,7 +8,14 @@ use std::{
     time::Duration,
 };
 
-use axum::{Router, extract::State, http::header::CONTENT_TYPE, routing::post};
+use axum::{
+    Router,
+    extract::{Request, State},
+    http::header::CONTENT_TYPE,
+    middleware::{Next, from_fn_with_state},
+    response::Response,
+    routing::post,
+};
 use serde_json::json;
 use tg::{Bot, EffectOutcome, ErrorKind};
 use tokio::{
@@ -16,6 +23,9 @@ use tokio::{
     task::JoinSet,
     time::timeout,
 };
+
+#[path = "http-pressure/transfers.rs"]
+mod transfers;
 
 const CAP: usize = 8;
 const BURST: usize = 128;
@@ -26,25 +36,46 @@ const REPLY: &str = r#"{"ok":true,"result":{"id":7,"is_bot":true,"first_name":"P
 struct Mock {
     permits: Semaphore,
     arrival: Notify,
+    ingress: AtomicUsize,
     received: AtomicUsize,
     active: AtomicUsize,
     peak_active: AtomicUsize,
 }
 
+impl Mock {
+    async fn hold(&self) {
+        let active = self.active.fetch_add(1, Relaxed) + 1;
+        self.peak_active.fetch_max(active, Relaxed);
+        self.received.fetch_add(1, Relaxed);
+        self.arrival.notify_one();
+        let _permit = self.permits.acquire().await.expect("open fixture gate");
+        self.active.fetch_sub(1, Relaxed);
+    }
+
+    async fn wait_for_full(&self, prior: usize) -> Result<(), Box<dyn Error>> {
+        timeout(Duration::from_secs(10), async {
+            while self.received.load(Relaxed) < prior + CAP {
+                self.arrival.notified().await;
+            }
+        })
+        .await?;
+        if self.received.load(Relaxed) != prior + CAP || self.active.load(Relaxed) != CAP {
+            return Err("server request count violated the configured capacity".into());
+        }
+        Ok(())
+    }
+}
+
 async fn hold(
     State(mock): State<Arc<Mock>>,
 ) -> ([(axum::http::HeaderName, &'static str); 1], &'static str) {
-    let active = mock.active.fetch_add(1, Relaxed) + 1;
-    mock.peak_active.fetch_max(active, Relaxed);
-    mock.received.fetch_add(1, Relaxed);
-    mock.arrival.notify_one();
-    let _permit = mock
-        .permits
-        .acquire()
-        .await
-        .expect("fixture semaphore is never closed");
-    mock.active.fetch_sub(1, Relaxed);
+    mock.hold().await;
     ([(CONTENT_TYPE, "application/json")], REPLY)
+}
+
+async fn count_ingress(State(mock): State<Arc<Mock>>, request: Request, next: Next) -> Response {
+    mock.ingress.fetch_add(1, Relaxed);
+    next.run(request).await
 }
 
 fn resident_bytes() -> Result<u64, Box<dyn Error>> {
@@ -80,6 +111,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mock = Arc::new(Mock {
         permits: Semaphore::new(CAP),
         arrival: Notify::new(),
+        ingress: AtomicUsize::new(0),
         received: AtomicUsize::new(0),
         active: AtomicUsize::new(0),
         peak_active: AtomicUsize::new(0),
@@ -88,12 +120,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let base = format!("http://{}", listener.local_addr()?);
     let router = Router::new()
         .route(&format!("/bot{TOKEN}/getMe"), post(hold))
+        .merge(transfers::routes())
+        .layer(from_fn_with_state(mock.clone(), count_ingress))
         .with_state(Arc::clone(&mock));
     let server = tokio::spawn(async move { axum::serve(listener, router).await });
     let bot = Bot::builder(TOKEN)
         .api_url(base)
         .allow_http_loopback(true)
         .max_in_flight(CAP)
+        .max_response_bytes(transfers::RESPONSE_LIMIT)
+        .max_upload_bytes(transfers::TRANSFER_LIMIT as u64)
+        .max_download_bytes(transfers::TRANSFER_LIMIT as u64)
         .timeout(Duration::from_secs(30))
         .build()?;
     bot.api().get_me().await?;
@@ -119,15 +156,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 _ => return Err("expected local capacity rejection before release".into()),
             }
         }
-        timeout(deadline, async {
-            while mock.received.load(Relaxed) < prior + CAP {
-                mock.arrival.notified().await;
-            }
-        })
-        .await?;
-        if mock.received.load(Relaxed) != prior + CAP || mock.active.load(Relaxed) != CAP {
-            return Err("HTTP calls exceeded the configured capacity".into());
-        }
+        mock.wait_for_full(prior).await?;
         let saturated_bytes = resident_bytes()?;
         mock.permits.add_permits(CAP);
         for _ in 0..CAP {
@@ -148,13 +177,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
             "settled_resident_bytes": resident_bytes()?
         }));
     }
+    let mixed_transfers = transfers::run(&bot, &mock).await?;
     server.abort();
     let _ = server.await;
     println!(
         "{}",
         json!({
             "http_limit": CAP, "caller_burst": BURST, "peak_server_requests": mock.peak_active.load(Relaxed),
-            "baseline_resident_bytes": baseline_bytes, "trials": trials
+            "baseline_resident_bytes": baseline_bytes, "trials": trials, "mixed_transfers": mixed_transfers
         })
     );
     Ok(())
