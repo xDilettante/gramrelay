@@ -25,7 +25,7 @@ class CodingEvaluation(unittest.TestCase):
 
     def test_vetted_toolchain_and_prompt_and_answer_identity_match(self):
         ids = [f"T{n:02}" for n in range(1, 31)]
-        cases = [{"id": task, "packet_sha256": "packet-" + task, "answer_sha256": "answer-" + task}
+        cases = [{"id": task, "status": "pending", "packet_sha256": "packet-" + task, "answer_sha256": "answer-" + task}
                  for task in ids]
         summary = dict(model="reported-model", source_commit="commit", archive_sha256="archive",
                        rustc="compiler", lock_sha256="lock", cases=cases)
@@ -46,6 +46,22 @@ class CodingEvaluation(unittest.TestCase):
         for field in ("passed", "archive_sha256", "rustc", "lock_sha256"):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 evaluation.check_provenance(data, reference | {field: None}, summary, ids)
+        missing = cases[0]
+        missing.pop("answer_sha256")
+        missing["status"] = "invalid-answer"
+        data["attempts"]["T01"]["disposition"] = "invalid-answer"
+        evaluation.check_provenance(data, reference, summary, ids)
+
+    def test_test_footer_requires_the_actual_named_oracle(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / "output"
+            footer = b"test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished\n"
+            log.write_bytes(b"test unrelated ... ok\n" + footer)
+            self.assertFalse(evaluation.oracle_passed(log, "checked"))
+            log.write_bytes(b"running 1 test\n")
+            self.assertFalse(evaluation.oracle_passed(log, "checked"))
+            log.write_bytes(b"x" * 1024 * 1024 + b"\ntest checked ... ok\n" + footer)
+            self.assertTrue(evaluation.oracle_passed(log, "checked"))
 
     def test_executable_must_match_the_task_inside_owned_target(self):
         with tempfile.TemporaryDirectory() as temporary:

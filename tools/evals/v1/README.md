@@ -31,7 +31,10 @@ failed attempt. Keep the saved answers and the receipt when testing a repair.
 Create provenance.json with schema_version 1, model, source_commit, protocol
 `fresh-context-docs-only`, and an attempts object with keys T01 through T30.
 Each attempt records its distinct session identifier, packet_sha256, answer_sha256
-(null for missing answers) and contract_review (pass or fail for valid answers).
+(null if unavailable) and contract_review (pass or fail for valid answers).
+For unavailable bytes, record disposition as missing or invalid-answer. Keep
+invalid originals separately if available. A failed manual review disqualifies
+the answer before compilation or execution.
 The manual review checks requirements that have no externally observable signal.
 For example, the T09 implementation must build and discard a lazy request. A
 function that does nothing would also leave the transport untouched. It also
@@ -44,6 +47,8 @@ python tools/eval_coding.py run --submissions DIR --model NAME --provenance prov
 First-check requires a reference receipt with all 30 passes at the same archived
 source, resolved lock and compiler. The runner checks both packet and answer hashes
 before building. At least 24 passed cases satisfy the first-check target.
+The runner invokes only the named evaluator test. Candidate tests remain
+outside the score.
 Use `--attempt repair` for a follow-up and `--attempt pilot` to exercise a draft
 or a negative control without creating first-check evidence.
 The runner executes Rust code locally. Give it only code from trusted or

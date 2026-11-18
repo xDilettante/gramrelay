@@ -43,6 +43,8 @@ def inventory(root):
             or list(tasks) != [f"T{i:02d}" for i in range(1, 31)]):
         raise ValueError("expected the ordered 30-task v1 corpus")
     signatures = json.loads(read(root / EVALS / "signatures.json"))
+    if suite["target_first_check_passed"] != 24 or suite["controlled_context_max_utf8_bytes"] != 49152:
+        raise ValueError("unexpected v1 acceptance criteria")
     if not signatures.keys() <= tasks.keys():
         raise ValueError("signature for unknown task")
     paths = [root / EVALS / folder for folder in ("checks", "reference")]
@@ -90,29 +92,39 @@ def check_paths(graph, source, crate):
 
 def check_provenance(provenance, reference, summary, selected):
     ids = set(selected)
+    if not isinstance(provenance, dict) or not isinstance(reference, dict):
+        raise ValueError("expected JSON objects for provenance and reference receipt")
+    attempts = provenance.get("attempts")
     if (provenance.get("schema_version") != 1 or provenance.get("model") != summary["model"]
             or provenance.get("source_commit") != summary["source_commit"]
             or provenance.get("protocol") != "fresh-context-docs-only"
-            or set(provenance.get("attempts", {})) != ids):
+            or not isinstance(attempts, dict) or set(attempts) != ids
+            or any(not isinstance(attempt, dict) for attempt in attempts.values())):
         raise ValueError("first-check provenance must identify the model, source, protocol and 30 task attempts")
-    attempts = provenance["attempts"]
     sessions = [attempts[task_id].get("session", "") for task_id in selected]
-    if any(not session.strip() for session in sessions) or len(set(sessions)) != len(selected):
+    if (any(not isinstance(session, str) or not session.strip() for session in sessions)
+            or len({session.strip() for session in sessions}) != len(selected)):
         raise ValueError("first attempts require distinct exposed session identifiers")
+    reference_cases = reference.get("cases")
     if (reference.get("mode") != "reference" or reference.get("status") != "finished"
-            or reference.get("passed") != 30 or len(reference.get("cases", ())) != 30
+            or reference.get("passed") != 30 or not isinstance(reference_cases, list)
+            or len(reference_cases) != 30 or any(not isinstance(case, dict) for case in reference_cases)
             or reference.get("rustc") != summary["rustc"]
             or reference.get("lock_sha256") != summary["lock_sha256"]
             or reference.get("archive_sha256") != summary["archive_sha256"]):
         raise ValueError("first-check requires a passing reference run on this snapshot and compiler")
-    checked = {case["id"]: case for case in reference["cases"] if case["status"] == "passed"}
+    checked = {case["id"]: case for case in reference_cases if case.get("status") == "passed"}
     if set(checked) != ids:
         raise ValueError("reference receipt lacks a passing result for every task")
     for case in summary["cases"]:
         attempt = attempts[case["id"]]
-        if (attempt.get("packet_sha256") != case["packet_sha256"]
-                or attempt.get("answer_sha256") != case.get("answer_sha256")
-                or checked[case["id"]]["packet_sha256"] != case["packet_sha256"]):
+        if attempt.get("packet_sha256") != case["packet_sha256"] or checked[case["id"]]["packet_sha256"] != case["packet_sha256"]:
+            raise ValueError(f"first-check packet hash mismatch for {case['id']}")
+        if case["status"] in ("missing", "invalid-answer"):
+            if attempt.get("disposition") != case["status"]:
+                raise ValueError(f"record the unavailable answer disposition for {case['id']}")
+            continue
+        if attempt.get("answer_sha256") != case.get("answer_sha256"):
             raise ValueError(f"first-check packet or answer hash mismatch for {case['id']}")
         if case.get("answer_sha256") and attempt.get("contract_review") not in ("pass", "fail"):
             raise ValueError(f"record the manual contract review for {case['id']}")
@@ -152,6 +164,25 @@ def stage(root, crate, ids):
             "#![forbid(unsafe_code)]\nmod fixture;\nmod solution;\ninclude!(\"check.rs\");\n", encoding="utf-8")
         shutil.copyfile(root / EVALS / "fixture.rs", case / "fixture.rs")
         shutil.copyfile(root / EVALS / "checks" / (task_id + ".rs"), case / "check.rs")
+
+
+def oracle_name(check):
+    names = re.findall(r"(?m)^#\[(?:tokio::)?test\]\s*\n(?:async )?fn ([A-Za-z0-9_]+)\(",
+                       read(check).decode("utf-8"))
+    if len(names) != 1:
+        raise ValueError("each case needs exactly one named evaluator test")
+    return names[0]
+
+
+def oracle_passed(log, name):
+    with log.open("rb") as stream:
+        # The harness footer is last. Candidate stdout cannot suppress later tests.
+        stream.seek(max(0, log.stat().st_size - 32768))
+        tail = stream.read(32768)
+    return (
+        re.search(rb"^test " + name.encode() + rb" \.\.\. ok\r?$", tail, re.MULTILINE)
+        and re.search(rb"^test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured;", tail, re.MULTILINE)
+    )
 
 
 def run(args):
@@ -253,6 +284,8 @@ def run(args):
             attempts = json.loads(provenance_bytes)["attempts"]
             for item in summary["cases"]:
                 item["contract_review"] = attempts[item["id"]].get("contract_review")
+                if item["status"] == "pending" and item["contract_review"] == "fail":
+                    item["status"] = "contract-failed"
             (evidence / "provenance.json").write_bytes(provenance_bytes)
             (evidence / "reference-receipt.json").write_bytes(reference_bytes)
         for item in summary["cases"]:
@@ -261,7 +294,9 @@ def run(args):
             check_compat.guard(ROOT)
             task_id = item["id"]
             name = task_id.lower()
-            shutil.copyfile(evidence / f"{task_id}.answer.rs", crate / "tests" / name / "solution.rs")
+            case_dir = crate / "tests" / name
+            oracle = oracle_name(case_dir / "check.rs")
+            shutil.copyfile(evidence / f"{task_id}.answer.rs", case_dir / "solution.rs")
             build = [*cargo, "test", "--locked", "--offline", "--no-run",
                      "--message-format=json-render-diagnostics", "--test", name, "--target-dir", str(target)]
             item.update(status="building", build=build, build_exit=None)
@@ -269,20 +304,20 @@ def run(args):
             print(task_id, flush=True)
             code = command(build, name + "-build", crate)
             item["build_exit"] = code
+            if code < 0 or code >= 2**31:
+                retain = True
+                raise ValueError("compiler terminated abnormally")
             if code:
                 item.update(status="build-failed")
             else:
                 test = [str(executable(evidence / (name + "-build.stdout"), target, name)),
-                        "--test-threads=1"]
+                        oracle, "--exact", "--test-threads=1"]
                 item.update(status="testing", test=test, test_exit=None)
                 record(receipt, summary)
                 try:
                     result = command(test, name + "-test", crate, timeout=30, runtime=True)
-                    output = read(evidence / (name + "-test.stdout"), 1024 * 1024)
-                    completed = re.search(rb"^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;", output, re.MULTILINE)
-                    item.update(test_exit=result, status="passed" if result == 0 and completed else "test-failed")
-                    if item["status"] == "passed" and item.get("contract_review") == "fail":
-                        item["status"] = "contract-failed"
+                    passed = result == 0 and oracle_passed(evidence / (name + "-test.stdout"), oracle)
+                    item.update(test_exit=result, status="passed" if passed else "test-failed")
                 except subprocess.TimeoutExpired:
                     # Only reviewed answers are executed here. They may not spawn child processes.
                     item["status"] = "test-timeout"
@@ -297,7 +332,7 @@ def run(args):
             return 0 if summary["meets_target"] else 1
         return 0 if count == len(ids) else 1
     except BaseException as error:
-        retain = isinstance(error, (subprocess.TimeoutExpired, KeyboardInterrupt))
+        retain = retain or isinstance(error, (subprocess.TimeoutExpired, KeyboardInterrupt))
         summary.update(status="failed", error_type=type(error).__name__)
         if retain:
             summary["retained_scratch"] = str(scratch)
