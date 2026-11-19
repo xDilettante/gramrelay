@@ -18,6 +18,8 @@ pub enum ReadError {
     Io(io::Error),
     /// Error propagated from attempting to deserialize an invalid [`tl::Deserializable`].
     Deserialize(mtp::DeserializeError),
+    /// Local arithmetic made the session unable to encode another packet.
+    Serialize(mtp::SerializeError),
 }
 
 impl std::error::Error for ReadError {}
@@ -31,6 +33,7 @@ impl Clone for ReadError {
                     .unwrap_or_else(|| io::Error::new(e.kind(), e.to_string())),
             ),
             Self::Deserialize(e) => Self::Deserialize(e.clone()),
+            Self::Serialize(e) => Self::Serialize(*e),
         }
     }
 }
@@ -40,6 +43,7 @@ impl fmt::Display for ReadError {
         match self {
             Self::Io(err) => write!(f, "read error, IO failed: {err}"),
             Self::Deserialize(err) => write!(f, "read error, bad response: {err}"),
+            Self::Serialize(err) => write!(f, "session serialization error: {err}"),
         }
     }
 }
@@ -209,6 +213,12 @@ pub enum InvocationError {
     /// Otherwise it might happen on bleeding-edge layers that have not had time to settle yet.
     Deserialize(mtp::DeserializeError),
 
+    /// A terminal serialization failure for a request known to be unsent.
+    UnsentSerialization(mtp::SerializeError),
+
+    /// The session could not serialize another packet while effects were uncertain.
+    SerializationInterrupted(mtp::SerializeError),
+
     /// Error propagated from the underlying [`transport`].
     ///
     /// The most common variant is [`transport::Error::BadStatus`], which can occur when
@@ -242,6 +252,8 @@ impl fmt::Display for InvocationError {
             Self::Rpc(err) => write!(f, "request error: {err}"),
             Self::Io(err) => write!(f, "request error: {err}"),
             Self::Deserialize(err) => write!(f, "request error: {err}"),
+            Self::UnsentSerialization(err) => write!(f, "request was not sent: {err}"),
+            Self::SerializationInterrupted(err) => write!(f, "request outcome is unknown: {err}"),
             Self::Transport(err) => write!(f, "request error: {err}"),
             Self::Dropped(err) => write!(f, "request error: dropped: {err}"),
             Self::InvalidDc => write!(f, "request error: invalid dc"),
@@ -261,6 +273,7 @@ impl From<ReadError> for InvocationError {
         match error {
             ReadError::Io(error) => Self::from(error),
             ReadError::Deserialize(error) => Self::from(error),
+            ReadError::Serialize(error) => Self::SerializationInterrupted(error),
         }
     }
 }

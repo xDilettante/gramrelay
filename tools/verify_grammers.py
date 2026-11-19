@@ -14,7 +14,7 @@ VERSION = "0.12.0"
 PREFIX = f"grammers-mtsender-{VERSION}"
 SHA256 = "9a6339a64b7b70ae4447ae4ae7b1b5a1e2e15649882bf26550df356e7a8bb1a4"
 LIMIT = 4 * 1024 * 1024
-PATCHED = {"Cargo.toml", "src/sender_pool.rs", "src/sender.rs", "src/configuration.rs"}
+PATCHED = {"Cargo.toml", "src/sender_pool.rs", "src/sender.rs", "src/configuration.rs", "src/errors.rs"}
 LOCAL = {"Cargo.lock", "src/tg_safety_tests.rs", "src/tg_rpc_fixture.rs", "src/tg_sender_receive_tests.rs", "PATCH.md", "tg-safety.patch", "LICENSE-APACHE"}
 PACKAGES = {
     "grammers-session": (
@@ -26,7 +26,7 @@ PACKAGES = {
     "grammers-mtsender": (SHA256, PATCHED, LOCAL, "tg-safety.patch"),
     "grammers-mtproto": (
         "fc95dd02ac37101d8121e5098706a9c9b342e855ca7d7b8b5daa91ec7b119649",
-        {"Cargo.toml", "src/manual_tl.rs", "src/mtp/encrypted.rs", "src/mtp/mod.rs"},
+        {"Cargo.toml", "src/authentication.rs", "src/manual_tl.rs", "src/mtp/encrypted.rs", "src/mtp/mod.rs"},
         {"Cargo.lock", "PATCH.md", "tg-receive.patch", "LICENSE-APACHE", "src/mtp/tg_receive_tests.rs"},
         "tg-receive.patch",
     ),

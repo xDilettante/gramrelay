@@ -8,6 +8,47 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 use tokio::time::timeout;
 
+#[tokio::test]
+async fn serialization_failure_drains_the_connection_queue_as_unsent() {
+    let (queue, mut receiver) = mpsc::unbounded_channel();
+    let (tx, result) = oneshot::channel();
+    assert!(
+        queue
+            .send(Rpc {
+                body: Vec::new(),
+                tx
+            })
+            .is_ok()
+    );
+    fail_unsent_rpcs(&mut receiver, mtp::SerializeError::SequenceExhausted).await;
+    assert!(queue.is_closed());
+    assert!(matches!(
+        result.await.unwrap(),
+        Err(InvocationError::UnsentSerialization(
+            mtp::SerializeError::SequenceExhausted
+        ))
+    ));
+}
+
+#[test]
+fn default_retry_policy_does_not_replay_after_serialization_ends() {
+    for error in [
+        InvocationError::UnsentSerialization(mtp::SerializeError::SequenceExhausted),
+        InvocationError::SerializationInterrupted(mtp::SerializeError::SequenceExhausted),
+    ] {
+        assert!(
+            ConnectionParams::default()
+                .retry_policy
+                .should_retry(&RetryContext {
+                    fail_count: NonZeroU32::MIN,
+                    slept_so_far: Duration::ZERO,
+                    error,
+                })
+                .is_break()
+        );
+    }
+}
+
 #[cfg(feature = "tg-test-kit")]
 #[tokio::test]
 async fn fixture_uses_real_tl_bytes_and_owned_concurrent_children_without_network() {

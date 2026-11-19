@@ -31,6 +31,91 @@
  features = ["tl-mtproto"]
  
  [dependencies.num-bigint]
+--- upstream/src/authentication.rs
++++ patched/src/authentication.rs
+@@ -96,6 +96,9 @@
+     /// The server failed to send the Diffie-Hellman parameters.
+     DhParamsFail,
+ 
++    /// The authorization exchange cannot establish a valid clock offset.
++    InvalidTime,
++
+     /// The server's nonce has changed during the key exchange.
+     InvalidServerNonce {
+         /// The unexpected nonce that we got.
+@@ -168,6 +171,7 @@
+                 write!(f, "all server fingerprints are unknown: {fingerprints:?}")
+             }
+             Self::DhParamsFail => write!(f, "the generation of DH parameters by the server failed"),
++            Self::InvalidTime => write!(f, "invalid authorization clock offset"),
+             Self::InvalidServerNonce { got, expected } => write!(
+                 f,
+                 "invalid server nonce: got {got:?}, expected {expected:?}"
+@@ -394,21 +398,29 @@
+ 
+     let now = SystemTime::now()
+         .duration_since(UNIX_EPOCH)
+-        .expect("system time is before epoch")
+-        .as_secs() as i32;
++        .map_err(|_| Error::InvalidTime)?
++        .as_secs();
+ 
+     let res = do_step3(data, response, &random_bytes, now);
+     if TRACE_AUTH_GEN && let Ok((x, _)) = &res {
+         println!("> {}", hex::to_hex(&x.to_bytes()));
+     }
+     res
++}
++
++fn checked_auth_offset(server_time: i32, now: u64) -> Result<i32, Error> {
++    if server_time < 0 {
++        return Err(Error::InvalidTime);
++    }
++    let local = i64::try_from(now).map_err(|_| Error::InvalidTime)?;
++    i32::try_from(i64::from(server_time) - local).map_err(|_| Error::InvalidTime)
+ }
+ 
+ fn do_step3(
+     data: Step2,
+     response: tl::enums::ServerDhParams,
+     random_bytes: &[u8; 256 + 16],
+-    now: i32,
++    now: u64,
+ ) -> Result<(tl::functions::SetClientDhParams, Step3), Error> {
+     let Step2 {
+         nonce,
+@@ -487,6 +499,7 @@
+ 
+     check_nonce(&server_dh_inner.nonce, &nonce)?;
+     check_server_nonce(&server_dh_inner.server_nonce, &server_nonce)?;
++    let time_offset = checked_auth_offset(server_dh_inner.server_time, now)?;
+ 
+     let dh_prime = BigUint::from_bytes_be(&server_dh_inner.dh_prime);
+     if server_dh_inner.dh_prime != CURRENT_DH_PRIME || server_dh_inner.g != CURRENT_G {
+@@ -502,8 +515,6 @@
+     // Safe to unwrap because the numbers are valid
+     let g = BigUint::from(server_dh_inner.g as u32);
+     let g_a = BigUint::from_bytes_be(&server_dh_inner.g_a);
+-
+-    let time_offset = server_dh_inner.server_time - now;
+ 
+     let b = BigUint::from_bytes_be(&random_bytes[..256]);
+     let g_b = g.modpow(&b, &dh_prime);
+@@ -739,6 +750,14 @@
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++
++    #[test]
++    fn authorization_clock_offsets_are_checked() {
++        assert_eq!(checked_auth_offset(100, 110), Ok(-10));
++        assert_eq!(checked_auth_offset(i32::MAX, i32::MAX as u64 + 1), Ok(-1));
++        assert_eq!(checked_auth_offset(-1, 100), Err(Error::InvalidTime));
++        assert_eq!(checked_auth_offset(1, u64::MAX), Err(Error::InvalidTime));
++    }
+ 
+     #[test]
+     fn emulate_successful_auth_key_gen_flow() -> Result<(), Error> {
 --- upstream/src/manual_tl.rs
 +++ patched/src/manual_tl.rs
 @@ -8,10 +8,11 @@
@@ -136,7 +221,20 @@
 +}
 --- upstream/src/mtp/encrypted.rs
 +++ patched/src/mtp/encrypted.rs
-@@ -18,6 +18,15 @@
+@@ -7,7 +7,7 @@
+ // except according to those terms.
+ 
+ use std::mem;
+-use std::time::{Instant, SystemTime, UNIX_EPOCH};
++use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+ 
+ use grammers_crypto::{AuthKey, decrypt_data_v2, encrypt_data_v2, get_padding_data_v2};
+ use grammers_tl_types::{self as tl, Cursor, Deserializable, Identifiable, Serializable};
+@@ -15,9 +15,19 @@
+ 
+ use super::{
+     Deserialization, DeserializationFailure, DeserializeError, Mtp, RpcResult, RpcResultError,
++    SerializeError,
  };
  use crate::utils::StackBuffer;
  use crate::{DequeBuffer, MsgId, manual_tl};
@@ -152,7 +250,80 @@
  
  /// How many future salts to fetch or have stored at a given time.
  ///
-@@ -102,6 +111,11 @@
+@@ -29,6 +39,50 @@
+ ///
+ /// Used to prevent small fluctuations in the system clock.
+ const SALT_USE_DELAY: i32 = 60;
++const MAX_MESSAGE_AHEAD: u64 = 30 << 32;
++
++fn clock_correction(
++    message_id: i64,
++    now: Duration,
++    previous: i64,
++) -> Result<i32, DeserializeError> {
++    let remote_seconds = ((message_id as u64) >> 32) as i64;
++    let local_seconds =
++        i64::try_from(now.as_secs()).map_err(|_| DeserializeError::InvalidEncoding)?;
++    let offset = i32::try_from(remote_seconds - local_seconds)
++        .map_err(|_| DeserializeError::InvalidEncoding)?;
++    let next = next_msg_id(now, offset, previous).map_err(|_| DeserializeError::InvalidEncoding)?;
++    if next as u64 > (message_id as u64).saturating_add(MAX_MESSAGE_AHEAD) {
++        // A clock adjustment cannot make a same-session ID go backwards.
++        return Err(DeserializeError::InvalidEncoding);
++    }
++    Ok(offset)
++}
++
++fn next_msg_id(now: Duration, offset: i32, previous: i64) -> Result<i64, SerializeError> {
++    let seconds = i64::try_from(now.as_secs())
++        .ok()
++        .and_then(|seconds| seconds.checked_add(i64::from(offset)))
++        .and_then(|seconds| u32::try_from(seconds).ok())
++        .ok_or(SerializeError::InvalidClock)?;
++    let fraction = (u64::from(now.subsec_nanos()) << 2).max(4);
++    let clock = (u64::from(seconds) << 32) | fraction;
++    let last = previous as u64;
++    let id = if clock > last {
++        clock
++    } else {
++        let next = last
++            .checked_add(4)
++            .ok_or(SerializeError::MessageIdsExhausted)?;
++        // The fractional part cannot be zero, including after a second boundary.
++        if next as u32 == 0 { next + 4 } else { next }
++    };
++    Ok(id as i64)
++}
++
++fn salt_time(start_secs: i32, elapsed: Duration) -> i128 {
++    i128::from(start_secs) + i128::from(elapsed.as_secs())
++}
+ 
+ static UPDATE_IDS: [u32; 9] = [
+     tl::types::UpdateShortMessage::CONSTRUCTOR_ID,
+@@ -62,8 +116,10 @@
+     /// The time offset from the server's time, in seconds.
+     time_offset: i32,
+ 
+-    /// Salts that may be used when encrypting payload, sorted by valid date descending (so the last one is the one
+-    /// that can be used now).
++    /// The last usable salt, retained when the schedule has no active interval.
++    current_salt: i64,
++
++    /// Current and future salt intervals. Active overlaps are kept until expiration.
+     salts: Vec<tl::types::FutureSalt>,
+ 
+     /// The `now` received from future salts along with the instant when it occured.
+@@ -82,6 +138,8 @@
+ 
+     /// The ID of the last message.
+     last_msg_id: i64,
++
++    serialize_error: Option<SerializeError>,
+ 
+     /// Identifiers that need to be acknowledged to the server.
+     ///
+@@ -102,6 +160,11 @@
  
      /// How many messages are there in the buffer.
      msg_count: usize,
@@ -164,7 +335,26 @@
  }
  
  impl Builder {
-@@ -146,11 +160,57 @@
+@@ -128,11 +191,8 @@
+         Encrypted {
+             auth_key: AuthKey::from_bytes(auth_key),
+             time_offset: self.time_offset,
+-            salts: vec![tl::types::FutureSalt {
+-                valid_since: 0,
+-                valid_until: i32::MAX,
+-                salt: self.first_salt,
+-            }],
++            current_salt: self.first_salt,
++            salts: Vec::new(),
+             start_salt_time: None,
+             salt_request_msg_id: None,
+             session_id: {
+@@ -142,15 +202,62 @@
+             },
+             sequence: 0,
+             last_msg_id: 0,
++            serialize_error: None,
+             pending_ack: vec![],
              compression_threshold: self.compression_threshold,
              deserialization: Vec::new(),
              msg_count: 0,
@@ -222,10 +412,189 @@
      /// Start building a new encrypted MTP.
      pub fn build() -> Builder {
          Builder {
-@@ -304,7 +364,71 @@
-         self.msg_count = 0;
+@@ -166,43 +273,49 @@
      }
  
+     /// Correct our time offset based on a known valid message ID.
+-    fn correct_time_offset(&mut self, msg_id: i64) {
++    fn correct_time_offset(&mut self, msg_id: i64) -> Result<(), DeserializeError> {
+         let now = SystemTime::now()
+             .duration_since(UNIX_EPOCH)
+-            .expect("system time is before epoch")
+-            .as_secs() as i32;
+-
+-        let correct = (msg_id >> 32) as i32;
+-        self.time_offset = correct - now;
+-    }
+-
+-    /// Generates a new unique message ID based on the current
+-    /// time (in ms) since epoch, applying a known time offset.
+-    fn get_new_msg_id(&mut self) -> i64 {
++            .map_err(|_| DeserializeError::InvalidEncoding)?;
++        self.time_offset = clock_correction(msg_id, now, self.last_msg_id)?;
++        Ok(())
++    }
++
++    fn correct_sequence(&mut self, adjustment: i32) -> Result<(), DeserializeError> {
++        self.sequence = self
++            .sequence
++            .checked_add(adjustment)
++            .filter(|seq| (0..=i32::MAX - 2).contains(seq) && seq & 1 == 0)
++            .ok_or(DeserializeError::InvalidEncoding)?;
++        Ok(())
++    }
++
++    fn checked_header(&mut self, content_related: bool) -> Result<(i64, i32), SerializeError> {
+         let now = SystemTime::now()
+             .duration_since(UNIX_EPOCH)
+-            .expect("system time is before epoch");
+-
+-        let seconds = (now.as_secs() as i32 + self.time_offset) as u64;
+-        let nanoseconds = now.subsec_nanos() as u64;
+-        let mut new_msg_id = ((seconds << 32) | (nanoseconds << 2)) as i64;
+-
+-        if self.last_msg_id >= new_msg_id {
+-            new_msg_id = self.last_msg_id + 4;
+-        }
+-
+-        self.last_msg_id = new_msg_id;
+-        new_msg_id
+-    }
+-
+-    /// Generates the next sequence number depending on whether
+-    /// it should be for a content-related query or not.
+-    fn get_seq_no(&mut self, content_related: bool) -> i32 {
+-        if content_related {
+-            self.sequence += 2;
+-            self.sequence - 1
++            .map_err(|_| SerializeError::InvalidClock)?;
++        let id = next_msg_id(now, self.time_offset, self.last_msg_id)?;
++        let sequence = if content_related {
++            let next = self
++                .sequence
++                .checked_add(2)
++                .ok_or(SerializeError::SequenceExhausted)?;
++            self.sequence = next;
++            next - 1
+         } else {
+             self.sequence
++        };
++        self.last_msg_id = id;
++        Ok((id, sequence))
++    }
++
++    fn outgoing_header(&mut self, content_related: bool) -> Option<(i64, i32)> {
++        match self.checked_header(content_related) {
++            Ok(header) => Some(header),
++            Err(error) => {
++                self.serialize_error = Some(error);
++                None
++            }
+         }
+     }
+ 
+@@ -228,11 +341,11 @@
+         }
+ 
+         // Within bounds; add it.
+-        let msg_id = self.get_new_msg_id();
++        let (msg_id, sequence) = self.outgoing_header(content_related)?;
+ 
+         let sink = &mut |bytes: &[u8]| buffer.extend_back(bytes);
+         msg_id.serialize(sink);
+-        self.get_seq_no(content_related).serialize(sink);
++        sequence.serialize(sink);
+         (body.len() as i32).serialize(sink);
+         buffer.extend_back(body);
+ 
+@@ -241,21 +354,42 @@
+     }
+ 
+     fn get_current_salt(&self) -> i64 {
+-        self.salts.last().map(|s| s.salt).unwrap_or(0)
++        self.current_salt
++    }
++
++    fn advance_salts(&mut self, now: i128) {
++        self.salts.retain(|salt| now < i128::from(salt.valid_until));
++        let active = self
++            .salts
++            .iter()
++            .filter(|salt| now >= i128::from(salt.valid_since));
++        let current = active
++            .clone()
++            .filter(|salt| salt.salt == self.current_salt)
++            .max_by_key(|salt| salt.valid_since);
++        if let Some(next) = active
++            .filter(|salt| {
++                current.is_none_or(|current| {
++                    salt.valid_since > current.valid_since
++                        && now >= i128::from(salt.valid_since) + i128::from(SALT_USE_DELAY)
++                })
++            })
++            .max_by_key(|salt| salt.valid_since)
++        {
++            self.current_salt = next.salt;
++        }
+     }
+ 
+     fn try_request_salts(&mut self, buffer: &mut DequeBuffer<u8>) {
+-        if self.salts.len() == 1
++        if self.msg_count == 0
++            && self.salts.len() <= 1
+             && self.salt_request_msg_id.is_none()
+             && self.get_current_salt() != 0
++            && self.start_salt_time.is_none_or(|(_, since)| {
++                since.elapsed() >= Duration::from_secs(SALT_USE_DELAY as u64)
++            })
+         {
+-            // If salts are requested in a container leading to bad_msg,
+-            // the bad_msg_id will refer to the container, not the salts request.
+-            //
+-            // We don't keep track of containers and content-related messages they contain for simplicity.
+-            // This would break, because we couldn't identify the response.
+-            //
+-            // So salts are only requested once we have a valid salt to reduce the chances of this happening.
++            // Keep this request alone so even a protocol refusal refers to its exact ID.
+             info!("only one future salt remaining; asking for more salts");
+             let body = tl::functions::GetFutureSalts {
+                 num: NUM_FUTURE_SALTS,
+@@ -268,9 +402,12 @@
+     /// `finalize`, but without encryption.
+     ///
+     /// The buffer is *not* cleared, but is instead returned.
+-    fn finalize_plain(&mut self, buffer: &mut DequeBuffer<u8>) {
++    fn finalize_plain(&mut self, buffer: &mut DequeBuffer<u8>) -> bool {
++        if self.serialize_error.is_some() {
++            return false;
++        }
+         if self.msg_count == 0 {
+-            return;
++            return true;
+         }
+ 
+         if self.msg_count != 1 {
+@@ -281,8 +418,11 @@
+ 
+             // Manually `serialize_msg` because the container body was already written.
+             let sink = &mut |bytes: &[u8]| header.extend_from_slice(bytes);
+-            self.get_new_msg_id().serialize(sink);
+-            self.get_seq_no(false).serialize(sink);
++            let Some((id, sequence)) = self.outgoing_header(false) else {
++                return false;
++            };
++            id.serialize(sink);
++            sequence.serialize(sink);
+ 
+             len.serialize(sink);
+ 
+@@ -302,9 +442,76 @@
+         }
+ 
+         self.msg_count = 0;
++        true
++    }
++
 +    fn process_plaintext(&mut self, plaintext: &[u8]) -> Result<(), DeserializeError> {
 +        let mut buffer = Cursor::from_slice(plaintext);
 +        let _salt = i64::deserialize(&mut buffer)?;
@@ -238,8 +607,8 @@
 +        self.nesting = 0;
 +        self.deserialization.clear();
 +        self.process_message(manual_tl::Message::deserialize(&mut buffer)?)
-+    }
-+
+     }
+ 
      fn process_message(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
 +        if self.nesting >= self.nesting_limit {
 +            return Err(DeserializeError::LimitExceeded);
@@ -261,6 +630,7 @@
 +        let rollback = (self.nesting == 0).then(|| {
 +            (
 +                self.time_offset,
++                self.current_salt,
 +                self.salts.clone(),
 +                self.start_salt_time,
 +                self.salt_request_msg_id,
@@ -273,10 +643,11 @@
 +        let result = self.process_message_inner(message);
 +        self.nesting -= 1;
 +        if result.is_err()
-+            && let Some((offset, salts, salt_time, salt_request, sequence, acks, results)) =
++            && let Some((offset, current, salts, salt_time, salt_request, sequence, acks, results)) =
 +                rollback
 +        {
 +            self.time_offset = offset;
++            self.current_salt = current;
 +            self.salts = salts;
 +            self.start_salt_time = salt_time;
 +            self.salt_request_msg_id = salt_request;
@@ -294,7 +665,7 @@
          if message.requires_ack() {
              self.pending_ack.push(message.msg_id);
          }
-@@ -446,90 +570,58 @@
+@@ -446,90 +653,58 @@
      /// [RPC Error]: https://core.telegram.org/mtproto/service_messages#rpc-error
      /// [Cancellation of an RPC Query]: https://core.telegram.org/mtproto/service_messages#cancellation-of-an-rpc-query
      fn handle_rpc_result(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
@@ -314,16 +685,6 @@
 -                        error: e.into(),
 -                    }));
 -                return Ok(());
--            }
--        };
--
--        match inner_constructor {
--            // RPC Error
--            tl::types::RpcError::CONSTRUCTOR_ID => match tl::enums::RpcError::from_bytes(&result) {
--                Ok(tl::enums::RpcError::Error(error)) => self
--                    .deserialization
--                    .push(Deserialization::RpcError(RpcResultError { msg_id, error })),
--                Err(e) => {
 +        let rpc_result = decode_exact::<manual_tl::RpcResult>(&message.body)?;
 +        let msg_id = MsgId(rpc_result.req_msg_id);
 +        if let Err(error) = self.process_rpc_body(msg_id, rpc_result.result) {
@@ -345,7 +706,16 @@
 +        loop {
 +            if depth >= self.nesting_limit {
 +                return Err(DeserializeError::LimitExceeded);
-+            }
+             }
+-        };
+-
+-        match inner_constructor {
+-            // RPC Error
+-            tl::types::RpcError::CONSTRUCTOR_ID => match tl::enums::RpcError::from_bytes(&result) {
+-                Ok(tl::enums::RpcError::Error(error)) => self
+-                    .deserialization
+-                    .push(Deserialization::RpcError(RpcResultError { msg_id, error })),
+-                Err(e) => {
 +            let constructor = u32::from_bytes(&body)?;
 +            if constructor == manual_tl::GzipPacked::CONSTRUCTOR_ID {
 +                let packed = decode_exact::<manual_tl::GzipPacked>(&body)?;
@@ -410,8 +780,13 @@
 +                | tl::types::RpcAnswerDroppedRunning::CONSTRUCTOR_ID
 +                | tl::types::RpcAnswerDropped::CONSTRUCTOR_ID => {
 +                    let _ = decode_exact::<tl::enums::RpcDropAnswer>(&body)?;
++                }
++                _ => {
++                    self.store_own_updates(msg_id, &body);
++                    self.deserialization
++                        .push(Deserialization::RpcResult(RpcResult { msg_id, body }));
                  }
--            }
+             }
 -            _ => {
 -                self.store_own_updates(msg_id, &result);
 -                self.deserialization
@@ -423,18 +798,12 @@
 -        }
 -
 -        Ok(())
-+                _ => {
-+                    self.store_own_updates(msg_id, &body);
-+                    self.deserialization
-+                        .push(Deserialization::RpcResult(RpcResult { msg_id, body }));
-+                }
-+            }
 +            return Ok(());
 +        }
      }
  
      /// Updates produced by `rpc_result` must be considered as any other updates, since they can
-@@ -588,7 +680,7 @@
+@@ -588,7 +763,7 @@
      /// [Acknowledgment of Receipt]: https://core.telegram.org/mtproto/service_messages_about_messages#acknowledgment-of-receipt
      fn handle_ack(&self, message: manual_tl::Message) -> Result<(), DeserializeError> {
          // TODO notify about this somehow
@@ -443,7 +812,7 @@
          Ok(())
      }
  
-@@ -662,7 +754,7 @@
+@@ -662,7 +837,7 @@
          &mut self,
          message: manual_tl::Message,
      ) -> Result<(), DeserializeError> {
@@ -452,7 +821,52 @@
  
          if self
              .salt_request_msg_id
-@@ -732,7 +824,8 @@
+@@ -681,13 +856,10 @@
+         let bad_msg = match bad_msg {
+             tl::enums::BadMsgNotification::Notification(x) => x,
+             tl::enums::BadMsgNotification::BadServerSalt(x) => {
++                self.current_salt = x.new_server_salt;
+                 self.salts.clear();
+-                self.salts.push(tl::types::FutureSalt {
+-                    valid_since: 0,
+-                    valid_until: i32::MAX,
+-                    salt: x.new_server_salt,
+-                });
+                 self.salt_request_msg_id = None;
++                self.start_salt_time = None;
+ 
+                 info!("got bad salt; salts have been reset down to a single one");
+                 return Ok(());
+@@ -695,24 +867,10 @@
+         };
+ 
+         match bad_msg.error_code {
+-            16 => {
+-                // Sent `msg_id` was too low (our `time_offset` is wrong).
+-                self.correct_time_offset(message.msg_id);
+-            }
+-            17 => {
+-                // Sent `msg_id` was too high (our `time_offset` is wrong).
+-                self.correct_time_offset(message.msg_id);
+-            }
+-            32 => {
+-                // Sent `seq_no` was too low. Bump it by some large-ish value.
+-                // TODO start with a fresh session rather than guessing
+-                self.sequence += 64;
+-            }
+-            33 => {
+-                // Sent `seq_no` was too high (this error doesn't seem to occur).
+-                // TODO start with a fresh session rather than guessing
+-                self.sequence -= 16;
+-            }
++            16 | 17 => self.correct_time_offset(message.msg_id)?,
++            // These adjustments retain the backend's correction policy.
++            32 => self.correct_sequence(64)?,
++            33 => self.correct_sequence(-16)?,
+             _ => {
+                 // Just notify about it.
+             }
+@@ -732,7 +890,8 @@
      /// ```
      ///
      /// [Request for Message Status Information]: https://core.telegram.org/mtproto/service_messages_about_messages#request-for-message-status-information
@@ -462,7 +876,7 @@
          // TODO implement
          Ok(())
      }
-@@ -773,7 +866,8 @@
+@@ -773,7 +932,8 @@
      /// valid, the message is to be wrapped in `msg_copy`).
      ///
      /// [Informational Message regarding Status of Messages]: https://core.telegram.org/mtproto/service_messages_about_messages#informational-message-regarding-status-of-messages
@@ -472,7 +886,7 @@
          // TODO implement
          Ok(())
      }
-@@ -795,7 +889,8 @@
+@@ -795,7 +955,8 @@
      /// This message does not require an acknowledgment.
      ///
      /// [Voluntary Communication of Status of Messages]: https://core.telegram.org/mtproto/service_messages_about_messages#voluntary-communication-of-status-of-messages
@@ -482,7 +896,7 @@
          // TODO implement
          Ok(())
      }
-@@ -829,7 +924,7 @@
+@@ -829,7 +990,7 @@
      ) -> Result<(), DeserializeError> {
          // TODO https://github.com/telegramdesktop/tdesktop/blob/8f82880b938e06b7a2a27685ef9301edb12b4648/Telegram/SourceFiles/mtproto/connection.cpp#L1790-L1820
          // TODO https://github.com/telegramdesktop/tdesktop/blob/8f82880b938e06b7a2a27685ef9301edb12b4648/Telegram/SourceFiles/mtproto/connection.cpp#L1822-L1845
@@ -491,7 +905,7 @@
          match msg_detailed {
              tl::enums::MsgDetailedInfo::Info(x) => {
                  self.pending_ack.push(x.answer_msg_id);
-@@ -869,7 +964,8 @@
+@@ -869,7 +1030,8 @@
      ///
      /// [Explicit Request to Re-Send Answers]: https://core.telegram.org/mtproto/service_messages_about_messages#explicit-request-to-re-send-answers
      /// [Explicit Request to Re-Send Messages]: https://core.telegram.org/mtproto/service_messages_about_messages#explicit-request-to-re-send-messages
@@ -501,7 +915,7 @@
          // TODO implement
          // `msg_resend_ans_req` seems to never occur (it was even missing from `mtproto.tl`)
          Ok(())
-@@ -899,7 +995,7 @@
+@@ -899,14 +1061,40 @@
      /// [Request for several future salts]: https://core.telegram.org/mtproto/service_messages#request-for-several-future-salts
      fn handle_future_salts(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
          let tl::enums::FutureSalts::Salts(salts) =
@@ -510,7 +924,49 @@
  
          if self
              .salt_request_msg_id
-@@ -924,7 +1020,7 @@
+             .is_some_and(|msg_id| msg_id == MsgId(salts.req_msg_id))
+         {
+             // Response to internal request, do not propagate.
++            if salts.now < 0
++                || salts.salts.0.len() > NUM_FUTURE_SALTS as usize
++                || salts
++                    .salts
++                    .0
++                    .iter()
++                    .any(|salt| salt.valid_since < 0 || salt.valid_until <= salt.valid_since)
++            {
++                return Err(DeserializeError::InvalidEncoding);
++            }
++            let previous = self
++                .salts
++                .iter()
++                .filter(|salt| salt.salt == self.current_salt && salt.valid_until > salts.now)
++                .max_by_key(|salt| salt.valid_since)
++                .cloned();
+             self.salt_request_msg_id = None;
++            self.start_salt_time = Some((salts.now, Instant::now()));
++            self.salts = salts.salts.0;
++            if let Some(previous) = previous
++                && !self.salts.contains(&previous)
++            {
++                // A refresh can return fewer intervals without invalidating this one.
++                self.salts.push(previous);
++            }
++            self.advance_salts(i128::from(salts.now));
++            info!("got {} usable salts", self.salts.len());
+         } else {
+             self.deserialization
+                 .push(Deserialization::RpcResult(RpcResult {
+@@ -915,16 +1103,11 @@
+                 }));
+         }
+ 
+-        self.start_salt_time = Some((salts.now, Instant::now()));
+-        self.salts = salts.salts.0;
+-        self.salts.sort_by_key(|salt| -salt.valid_since);
+-        info!("got {} future salts", self.salts.len());
+-
+         Ok(())
      }
  
      fn handle_future_salt(&mut self, _message: manual_tl::Message) -> Result<(), DeserializeError> {
@@ -519,7 +975,7 @@
      }
  
      /// **[Ping Messages (PING/PONG)]**
-@@ -959,7 +1055,7 @@
+@@ -959,7 +1142,7 @@
      /// [Ping Messages (PING/PONG)]: https://core.telegram.org/mtproto/service_messages#ping-messages-ping-pong
      /// [Deferred Connection Closure + PING]: https://core.telegram.org/mtproto/service_messages#deferred-connection-closure-ping
      fn handle_pong(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
@@ -528,7 +984,7 @@
  
          self.deserialization
              .push(Deserialization::RpcResult(RpcResult {
-@@ -983,7 +1079,8 @@
+@@ -983,7 +1166,8 @@
      /// ```
      ///
      /// [Request to Destroy Session]: https://core.telegram.org/mtproto/service_messages#request-to-destroy-session
@@ -538,7 +994,7 @@
          // TODO implement
          Ok(())
      }
-@@ -1025,7 +1122,7 @@
+@@ -1025,15 +1209,12 @@
          message: manual_tl::Message,
      ) -> Result<(), DeserializeError> {
          // TODO notify upper layers about the need to use getDifference
@@ -546,8 +1002,18 @@
 +        let new_session = decode_exact::<tl::enums::NewSession>(&message.body)?;
          match new_session {
              tl::enums::NewSession::Created(x) => {
++                self.current_salt = x.server_salt;
                  self.salts.clear();
-@@ -1077,7 +1174,7 @@
+-                self.salts.push(tl::types::FutureSalt {
+-                    valid_since: 0,
+-                    valid_until: i32::MAX,
+-                    salt: x.server_salt,
+-                });
++                self.start_salt_time = None;
+             }
+         }
+         Ok(())
+@@ -1077,7 +1258,7 @@
      /// [Containers]: https://core.telegram.org/mtproto/service_messages#containers
      /// [Simple Container]: https://core.telegram.org/mtproto/service_messages#simple-container
      fn handle_container(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
@@ -556,7 +1022,7 @@
          for inner_message in container.messages {
              self.process_message(inner_message)?;
          }
-@@ -1106,7 +1203,7 @@
+@@ -1106,7 +1287,7 @@
      ///
      /// [Message Copies]: https://core.telegram.org/mtproto/service_messages#message-copies
      fn handle_msg_copy(&self, _message: manual_tl::Message) -> Result<(), DeserializeError> {
@@ -565,7 +1031,7 @@
      }
  
      /// **[Packed Object]**
-@@ -1126,12 +1223,10 @@
+@@ -1126,12 +1307,10 @@
      ///
      /// [Packed Object]: https://core.telegram.org/mtproto/service_messages#packed-object
      fn handle_gzip_packed(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
@@ -582,7 +1048,7 @@
      }
  
      /// **[HTTP Wait/Long Poll]**
-@@ -1180,7 +1275,8 @@
+@@ -1180,7 +1359,8 @@
      /// to ping time.
      ///
      /// [HTTP Wait/Long Poll]: https://core.telegram.org/mtproto/service_messages#http-wait-long-poll
@@ -592,7 +1058,57 @@
          // TODO implement
          Ok(())
      }
-@@ -1316,16 +1412,7 @@
+@@ -1224,6 +1404,10 @@
+ pub const MESSAGE_CONTAINER_HEADER_LEN: usize = (8 + 4 + 4) + (4 + 4);
+ 
+ impl Mtp for Encrypted {
++    fn serialize_error(&self) -> Option<SerializeError> {
++        self.serialize_error
++    }
++
+     /// Pushes a request into the internal buffer.
+     ///
+     /// Multiple requests will be buffered and sent as a single container to reduce roundtrips.
+@@ -1231,22 +1415,19 @@
+     ///
+     /// [MTProto 2.0 guidelines]: https://core.telegram.org/mtproto/description.
+     fn push(&mut self, buffer: &mut DequeBuffer<u8>, request: &[u8]) -> Option<MsgId> {
++        if self.serialize_error.is_some() {
++            return None;
++        }
+         // TODO rather than taking in bytes, take requests, serialize them in place, and if too large drop the last part of the buffer
+ 
+         // Check to see if the next salt can be used already. If it can, drop the current one and,
+         // if the next salt is the last one, fetch more.
+-        if let Some((start_secs, start_instant)) = self.start_salt_time
+-            && self.salts.len() > 1
+-        {
+-            let salt = &self.salts[self.salts.len() - 2];
+-            let now = start_secs + start_instant.elapsed().as_secs() as i32;
+-            if now >= salt.valid_since + SALT_USE_DELAY {
+-                self.salts.pop();
+-            }
++        if let Some((start_secs, start_instant)) = self.start_salt_time {
++            self.advance_salts(salt_time(start_secs, start_instant.elapsed()));
+         }
+ 
+         self.try_request_salts(buffer);
+-        if self.salt_request_msg_id.is_some() {
++        if self.salt_request_msg_id.is_some() || self.serialize_error.is_some() {
+             // Don't add anything else to the container while we still need new salts.
+             return None;
+         }
+@@ -1292,8 +1473,7 @@
+     }
+ 
+     fn finalize(&mut self, buffer: &mut DequeBuffer<u8>) -> Option<MsgId> {
+-        self.finalize_plain(buffer);
+-        if buffer.is_empty() {
++        if !self.finalize_plain(buffer) || buffer.is_empty() {
+             None
+         } else {
+             let (padding, padding_len) = get_padding_data_v2(buffer.len());
+@@ -1316,16 +1496,7 @@
          crate::utils::check_message_buffer(payload)?;
  
          let plaintext = decrypt_data_v2(payload, &self.auth_key)?;
@@ -610,7 +1126,7 @@
  
          // For simplicity, and to avoid passing too much stuff around (RPC results, updates),
          // the processing result is stored in self. After processing is done, that temporary
-@@ -1333,6 +1420,10 @@
+@@ -1333,6 +1504,10 @@
          Ok(mem::take(&mut self.deserialization))
      }
  }
@@ -623,7 +1139,34 @@
  mod tests {
 --- upstream/src/mtp/mod.rs
 +++ patched/src/mtp/mod.rs
-@@ -126,6 +126,9 @@
+@@ -117,6 +117,26 @@
+     }
+ }
+ 
++/// A local arithmetic limit that prevents encoding further messages in this session.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum SerializeError {
++    InvalidClock,
++    MessageIdsExhausted,
++    SequenceExhausted,
++}
++
++impl fmt::Display for SerializeError {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.write_str(match self {
++            Self::InvalidClock => "MTProto message clock is outside its supported range",
++            Self::MessageIdsExhausted => "MTProto message identifiers exhausted",
++            Self::SequenceExhausted => "MTProto sequence numbers exhausted",
++        })
++    }
++}
++
++impl std::error::Error for SerializeError {}
++
+ /// The error type for the deserialization of server messages.
+ #[derive(Clone, Debug, PartialEq)]
+ pub enum DeserializeError {
+@@ -126,6 +146,9 @@
      /// The server's message ID did not match our expectations.
      BadMessageId { got: i64 },
  
@@ -633,7 +1176,7 @@
      /// The server's message length was not strictly positive.
      NegativeMessageLength { got: i32 },
  
-@@ -139,6 +142,18 @@
+@@ -139,6 +162,18 @@
  
      /// The server responded with compressed data which we failed to decompress.
      DecompressionFailed,
@@ -652,7 +1195,7 @@
  
      /// While deserializing the response types one of them had a constructor
      /// that did not match our expectations. The invalid ID is contained
-@@ -161,6 +176,7 @@
+@@ -161,6 +196,7 @@
                  write!(f, "bad server auth key (got {got}, expected {expected})")
              }
              Self::BadMessageId { got } => write!(f, "bad server message id (got {got})"),
@@ -660,7 +1203,7 @@
              Self::NegativeMessageLength { got } => {
                  write!(f, "bad server message length (got {got})")
              }
-@@ -173,6 +189,10 @@
+@@ -173,6 +209,10 @@
                  "server responded with a payload that's too small to fit a valid message"
              ),
              Self::DecompressionFailed => write!(f, "failed to decompress server's data"),
@@ -671,7 +1214,7 @@
              Self::UnexpectedConstructor { id } => write!(f, "unexpected constructor: {id:08x}"),
              Self::DecryptionError(ref error) => write!(f, "failed to decrypt message: {error}"),
              Self::Transport(ref error) => {
-@@ -187,6 +207,7 @@
+@@ -187,6 +227,7 @@
          use tl::deserialize::Error as Err;
  
          match error {
@@ -679,3 +1222,16 @@
              Err::UnexpectedEof => DeserializeError::MessageBufferTooSmall,
              Err::UnexpectedConstructor { id } => DeserializeError::UnexpectedConstructor { id },
          }
+@@ -204,6 +245,12 @@
+ ///
+ /// [Mobile Transport Protocol]: https://core.telegram.org/mtproto/description
+ pub trait Mtp {
++    /// Whether the session must be replaced after an outgoing serialization failure.
++    /// A caller must stop using the buffered data when this reports an error.
++    fn serialize_error(&self) -> Option<SerializeError> {
++        None
++    }
++
+     /// Serializes one request to the input buffer.
+     /// The same buffer should be used until `finalize` is called.
+     ///

@@ -216,6 +216,9 @@ pub(super) fn invocation(failure: InvocationError) -> ClientError {
             error(ClientErrorKind::Capacity, Outcome::Unknown)
         }
         InvocationError::Deserialize(_) => error(ClientErrorKind::Decode, Outcome::Unknown),
+        InvocationError::UnsentSerialization(_) => {
+            error(ClientErrorKind::Backend, Outcome::NotSent)
+        }
         InvocationError::Session(_) => error(ClientErrorKind::Session, Outcome::Unknown),
         _ => error(ClientErrorKind::Backend, Outcome::Unknown),
     }

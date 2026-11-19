@@ -6,9 +6,8 @@ SHA-256 `fc95dd02ac37101d8121e5098706a9c9b342e855ca7d7b8b5daa91ec7b119649`.
 Published VCS commit `e61cf8585e1e9969ab81eda9fb4725a1500e2d86`.
 Original copyright headers retained; distributed under Apache-2.0.
 
-The local patch changes Cargo.toml and three incoming-parser files only:
-manual_tl.rs, mtp/encrypted.rs and mtp/mod.rs. Cryptographic primitives,
-authentication/key derivation, transport and outgoing encoding are unchanged.
+The local patch covers the manifest, authentication clock calculation,
+manual_tl.rs, mtp/encrypted.rs and mtp/mod.rs.
 
 The manifest directly binds the sibling hardened TL package, without a registry
 fallback or root override requirement. This private source package is not a
@@ -24,6 +23,25 @@ Typed control replies and envelopes require complete TL consumption.
 The encrypted input parser checks session identity after decryption and
 before resetting frame bookkeeping or decoding the body. A mismatch returns
 a typed decode error with no session identifiers in its diagnostics.
+
+Clock corrections and sequence adjustments use checked domain arithmetic.
+Message IDs retain a nonzero fraction and increase in wire order. A clock
+correction that cannot generate a valid next session ID fails decoding.
+Local clock or counter exhaustion leaves the output buffer unsendable.
+The sender observes a typed terminal failure and closes that session.
+The authorization exchange checks the signed server timestamp and the
+representability of the offset before computing Diffie-Hellman results.
+
+An internal salt refresh occupies its own packet. Only its matching reply
+can replace the schedule. The receiver validates intervals, stores at most
+64 received records and one still-valid carried interval, and checks the
+server clock and expiry before choosing an active salt. Expired entries
+are removed. An empty reply leaves the last usable salt available during
+the refresh cooldown. See the [message identifier rules][message-id] and
+[future salt request specification][future-salts].
+
+[message-id]: https://core.telegram.org/mtproto/description#message-identifier-msg-id
+[future-salts]: https://core.telegram.org/mtproto/service_messages#request-for-several-future-salts
 
 The sender integration installs limits before InitConnection and after 404
 reconnection. Plain authorization handshake responses are checked by Sender

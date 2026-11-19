@@ -6,8 +6,8 @@ SHA-256 `9a6339a64b7b70ae4447ae4ae7b1b5a1e2e15649882bf26550df356e7a8bb1a4`.
 Published VCS commit: `e61cf8585e1e9969ab81eda9fb4725a1500e2d86`.
 Upstream copyright headers are retained. Distributed under Apache-2.0.
 
-Existing source changes are limited to sender_pool.rs, sender.rs,
-configuration.rs and the normalized Cargo.toml:
+Existing source changes cover sender_pool.rs, sender.rs, configuration.rs,
+errors.rs and the normalized Cargo.toml.
 
 The manifest binds mtproto/session/TL siblings through path-only dependencies.
 External consumers inherit all safety patches without root overrides; packaging
@@ -35,6 +35,10 @@ private/unpublished; see SPEC-source-distribution.md for the release boundary.
   remote errors. The production Sender error-path regression captures verbose
   tracing over a synthetic local instance, including out-of-range numeric input;
   no RPC description, phone code or request secret is logged.
+- A terminal local serialization error stops the sender before any new write.
+  Unsent buffered requests and requests still in the connection queue get a
+  typed unsent result. Previously sent requests keep an unknown effect.
+  Neither terminal error enters the standard automatic retry policy.
 
 The recorded tg-safety.patch is checked against the hash-verified archive with
 `python tools/verify_grammers.py check` (cached archive), or add `--download` to

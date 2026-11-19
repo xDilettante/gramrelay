@@ -117,6 +117,26 @@ impl BadMessage {
     }
 }
 
+/// A local arithmetic limit that prevents encoding further messages in this session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SerializeError {
+    InvalidClock,
+    MessageIdsExhausted,
+    SequenceExhausted,
+}
+
+impl fmt::Display for SerializeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::InvalidClock => "MTProto message clock is outside its supported range",
+            Self::MessageIdsExhausted => "MTProto message identifiers exhausted",
+            Self::SequenceExhausted => "MTProto sequence numbers exhausted",
+        })
+    }
+}
+
+impl std::error::Error for SerializeError {}
+
 /// The error type for the deserialization of server messages.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DeserializeError {
@@ -225,6 +245,12 @@ impl From<crypto::Error> for DeserializeError {
 ///
 /// [Mobile Transport Protocol]: https://core.telegram.org/mtproto/description
 pub trait Mtp {
+    /// Whether the session must be replaced after an outgoing serialization failure.
+    /// A caller must stop using the buffered data when this reports an error.
+    fn serialize_error(&self) -> Option<SerializeError> {
+        None
+    }
+
     /// Serializes one request to the input buffer.
     /// The same buffer should be used until `finalize` is called.
     ///

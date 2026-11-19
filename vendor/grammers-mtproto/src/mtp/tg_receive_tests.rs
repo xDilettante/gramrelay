@@ -6,6 +6,100 @@ fn receiver() -> Encrypted {
 }
 
 #[test]
+fn clock_correction_handles_the_entire_wire_timestamp_without_wrapping() {
+    let far_timestamp = (u64::from(u32::MAX) << 32 | 1) as i64;
+    let correct_at = |msg, seconds| clock_correction(msg, Duration::from_secs(seconds), 0);
+    assert_eq!(correct_at(far_timestamp, u64::from(u32::MAX) - 8), Ok(8));
+    assert_eq!(correct_at(2i64 << 32, 12), Ok(-10));
+    assert_eq!(
+        correct_at(far_timestamp, 1),
+        Err(DeserializeError::InvalidEncoding)
+    );
+    assert_eq!(
+        correct_at(1, u64::MAX),
+        Err(DeserializeError::InvalidEncoding)
+    );
+}
+
+#[test]
+fn impossible_same_session_clock_correction_is_rejected() {
+    let server = (123i64 << 32) | 1;
+    let local = Duration::from_secs(124);
+    assert_eq!(clock_correction(server, local, 130i64 << 32), Ok(-1));
+    assert_eq!(
+        clock_correction(server, local, 153i64 << 32),
+        Err(DeserializeError::InvalidEncoding)
+    );
+}
+
+#[test]
+fn message_identifiers_are_aligned_monotonic_and_have_a_fraction() {
+    let whole_second = Duration::from_secs(123);
+    assert_eq!(next_msg_id(whole_second, 0, 0), Ok((123 << 32) | 4));
+    let signed_end = i64::MAX & !3;
+    assert_eq!(next_msg_id(whole_second, 0, signed_end), Ok(i64::MIN + 4));
+    assert_eq!(
+        next_msg_id(whole_second, 0, -4),
+        Err(SerializeError::MessageIdsExhausted)
+    );
+    assert_eq!(
+        next_msg_id(whole_second, -124, 0),
+        Err(SerializeError::InvalidClock)
+    );
+}
+
+#[test]
+fn sequence_corrections_preserve_the_even_nonnegative_counter() {
+    let mut state = receiver();
+    assert_eq!(
+        state.correct_sequence(-16),
+        Err(DeserializeError::InvalidEncoding)
+    );
+    assert_eq!(state.sequence, 0);
+    state.correct_sequence(64).unwrap();
+    state.correct_sequence(-16).unwrap();
+    assert_eq!(state.sequence, 48);
+    state.sequence = i32::MAX - 65;
+    assert_eq!(
+        state.correct_sequence(64),
+        Err(DeserializeError::InvalidEncoding)
+    );
+    assert_eq!(state.sequence, i32::MAX - 65);
+}
+
+#[test]
+fn header_exhaustion_leaves_buffer_unsendable_and_error_sticky() {
+    let mut state = receiver();
+    let mut buffer = DequeBuffer::with_capacity(512, 128);
+    let ping = tl::functions::Ping { ping_id: 1 }.to_bytes();
+    assert!(state.push(&mut buffer, &ping).is_some());
+    let length = buffer.len();
+    state.sequence = i32::MAX - 1;
+    let last = state.last_msg_id;
+    assert!(state.push(&mut buffer, &ping).is_none());
+    assert_eq!(buffer.len(), length);
+    assert_eq!(state.last_msg_id, last);
+    assert_eq!(
+        state.serialize_error(),
+        Some(SerializeError::SequenceExhausted)
+    );
+    assert!(state.finalize(&mut buffer).is_none());
+    assert!(state.push(&mut buffer, &ping).is_none());
+}
+
+#[test]
+fn salt_activation_uses_wide_time_arithmetic() {
+    assert_eq!(
+        salt_time(i32::MAX - 10, Duration::from_secs(60)),
+        i128::from(i32::MAX) + 50
+    );
+    assert_eq!(
+        salt_time(10, Duration::from_secs(u64::MAX)),
+        i128::from(u64::MAX) + 10
+    );
+}
+
+#[test]
 fn plaintext_session_must_match_before_decoding_the_body() {
     let mut state = receiver();
     let header = |id: i64| [0i64.to_le_bytes(), id.to_le_bytes()].concat();
@@ -121,6 +215,130 @@ fn malformed_future_salts_never_mutate_the_live_salt_state() {
     bytes.extend_from_slice(&[0; 4]);
     assert!(state.process_message(message(bytes)).is_err());
     assert_eq!(state.salts, original);
+}
+
+#[test]
+fn only_a_matching_internal_reply_replaces_the_salt_schedule() {
+    let mut state = receiver();
+    let original = state.salts.clone();
+    let reply = |req_msg_id, salts| {
+        message(
+            tl::enums::FutureSalts::Salts(tl::types::FutureSalts {
+                req_msg_id,
+                now: 100,
+                salts: tl::RawVec(salts),
+            })
+            .to_bytes(),
+        )
+    };
+    let salt = |valid_since, valid_until, salt| tl::types::FutureSalt {
+        valid_since,
+        valid_until,
+        salt,
+    };
+    state.salt_request_msg_id = Some(MsgId(42));
+    state
+        .process_message(reply(41, vec![salt(10, 110, 1)]))
+        .unwrap();
+    assert_eq!(state.salts, original);
+    assert_eq!(state.salt_request_msg_id, Some(MsgId(42)));
+    assert!(matches!(&state.deserialization[..],
+        [Deserialization::RpcResult(result)] if result.msg_id == MsgId(41)));
+    assert_eq!(
+        state.process_message(reply(42, vec![salt(100, 100, 2)])),
+        Err(DeserializeError::InvalidEncoding)
+    );
+    assert_eq!(state.salts, original);
+    assert_eq!(state.salt_request_msg_id, Some(MsgId(42)));
+    state
+        .process_message(reply(
+            42,
+            vec![
+                salt(122, 200, 5),
+                salt(20, 120, 3),
+                salt(10, 110, 4),
+                salt(1, 80, 9),
+            ],
+        ))
+        .unwrap();
+    assert_eq!(
+        state.salts,
+        vec![salt(122, 200, 5), salt(20, 120, 3), salt(10, 110, 4)]
+    );
+    assert!(state.salt_request_msg_id.is_none());
+    state.advance_salts(121);
+    assert_eq!(
+        state.get_current_salt(),
+        3,
+        "the future salt is not active yet"
+    );
+    state.advance_salts(122);
+    assert_eq!(state.get_current_salt(), 5);
+}
+
+#[test]
+fn internal_salt_refresh_never_bundles_with_existing_requests() {
+    let mut state = receiver();
+    let mut buffer = DequeBuffer::with_capacity(512, 128);
+    let ping = tl::functions::Ping { ping_id: 1 }.to_bytes();
+    assert!(state.push(&mut buffer, &ping).is_some());
+    state.current_salt = 123;
+    assert!(state.push(&mut buffer, &ping).is_some());
+    assert!(state.salt_request_msg_id.is_none());
+}
+
+#[test]
+fn an_older_active_interval_can_outlive_a_newer_salt() {
+    let mut state = receiver();
+    state.salts = vec![tl::types::FutureSalt {
+        valid_since: 10,
+        valid_until: 350,
+        salt: 1,
+    }];
+    state.current_salt = 1;
+    state.salt_request_msg_id = Some(MsgId(42));
+    state
+        .process_message(message(
+            tl::enums::FutureSalts::Salts(tl::types::FutureSalts {
+                req_msg_id: 42,
+                now: 175,
+                salts: tl::RawVec(vec![tl::types::FutureSalt {
+                    valid_since: 100,
+                    valid_until: 200,
+                    salt: 2,
+                }]),
+            })
+            .to_bytes(),
+        ))
+        .unwrap();
+    assert_eq!(state.get_current_salt(), 2);
+    state.advance_salts(200);
+    assert_eq!(state.get_current_salt(), 1);
+    assert_eq!(state.salts.len(), 1);
+}
+
+#[test]
+fn empty_internal_salt_reply_retains_current_salt_and_allows_requests() {
+    let mut state = Encrypted::build().first_salt(123).finish([7; 256]);
+    state.salt_request_msg_id = Some(MsgId(42));
+    state
+        .process_message(message(
+            tl::enums::FutureSalts::Salts(tl::types::FutureSalts {
+                req_msg_id: 42,
+                now: 100,
+                salts: tl::RawVec(Vec::new()),
+            })
+            .to_bytes(),
+        ))
+        .unwrap();
+    let mut buffer = DequeBuffer::with_capacity(512, 128);
+    assert!(
+        state
+            .push(&mut buffer, &tl::functions::Ping { ping_id: 1 }.to_bytes())
+            .is_some()
+    );
+    assert_eq!(state.get_current_salt(), 123);
+    assert!(state.salt_request_msg_id.is_none());
 }
 
 #[test]
@@ -347,6 +565,7 @@ fn rejected_controls_preserve_the_acknowledgements_of_prior_messages_only() {
 fn a_rejected_container_rolls_back_the_effects_of_a_valid_prefix() {
     let mut state = receiver();
     let salts = state.salts.clone();
+    let current = state.get_current_salt();
     state.pending_ack.push(99);
     let first = message(
         tl::enums::NewSession::Created(tl::types::NewSessionCreated {
@@ -370,5 +589,6 @@ fn a_rejected_container_rolls_back_the_effects_of_a_valid_prefix() {
     assert!(state.process_message(message(body)).is_err());
     assert_eq!(state.pending_ack, vec![99]);
     assert_eq!(state.salts, salts);
+    assert_eq!(state.get_current_salt(), current);
     assert!(state.deserialization.is_empty());
 }

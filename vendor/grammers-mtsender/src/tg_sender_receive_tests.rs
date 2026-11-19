@@ -50,6 +50,108 @@ fn setup_results_and_updates_reject_unconsumed_bytes() {
     assert!(decode_updates_exact(&update).is_err());
 }
 
+#[tokio::test]
+async fn local_serialization_failure_drains_requests_without_writing() {
+    struct Exhausted;
+    impl mtp::Mtp for Exhausted {
+        fn push(
+            &mut self,
+            _: &mut grammers_mtproto::DequeBuffer<u8>,
+            _: &[u8],
+        ) -> Option<grammers_mtproto::MsgId> {
+            None
+        }
+
+        fn finalize(
+            &mut self,
+            _: &mut grammers_mtproto::DequeBuffer<u8>,
+        ) -> Option<grammers_mtproto::MsgId> {
+            None
+        }
+
+        fn deserialize(
+            &mut self,
+            _: &mut [u8],
+        ) -> Result<Vec<mtp::Deserialization>, mtp::DeserializeError> {
+            unreachable!("the fixture has no incoming packets")
+        }
+
+        fn serialize_error(&self) -> Option<mtp::SerializeError> {
+            Some(mtp::SerializeError::MessageIdsExhausted)
+        }
+    }
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut sender = Sender::connect(
+        grammers_mtproto::transport::Full::new(),
+        Exhausted,
+        ServerAddr::Tcp {
+            address: listener.local_addr().unwrap(),
+        },
+    )
+    .await
+    .unwrap();
+    let (mut socket, _) = listener.accept().await.unwrap();
+    let (reply, waiting) = oneshot::channel();
+    sender.enqueue_body(tl::functions::Ping { ping_id: 1 }.to_bytes(), reply);
+    let id = mtp::Mtp::push(
+        &mut mtp::Plain::new(),
+        &mut grammers_mtproto::DequeBuffer::with_capacity(64, 64),
+        &tl::functions::Ping { ping_id: 2 }.to_bytes(),
+    )
+    .unwrap();
+    let (sent_reply, sent_waiting) = oneshot::channel();
+    sender.requests.push(Request {
+        body: tl::functions::Ping { ping_id: 2 }.to_bytes(),
+        state: RequestState::Sent(MsgIdPair::new(id)),
+        result: sent_reply,
+    });
+
+    let failure = tokio::time::timeout(std::time::Duration::from_secs(2), sender.step())
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert!(matches!(
+        failure,
+        ReadError::Serialize(mtp::SerializeError::MessageIdsExhausted)
+    ));
+    assert!(
+        failure
+            .to_string()
+            .contains("message identifiers exhausted")
+    );
+    assert!(sender.requests.is_empty());
+    assert!(matches!(
+        waiting.await.unwrap(),
+        Err(InvocationError::UnsentSerialization(
+            mtp::SerializeError::MessageIdsExhausted
+        ))
+    ));
+    assert!(matches!(
+        sent_waiting.await.unwrap(),
+        Err(InvocationError::SerializationInterrupted(
+            mtp::SerializeError::MessageIdsExhausted
+        ))
+    ));
+    assert!(matches!(
+        sender.invoke(&tl::functions::Ping { ping_id: 3 }).await,
+        Err(InvocationError::UnsentSerialization(
+            mtp::SerializeError::MessageIdsExhausted
+        ))
+    ));
+
+    sender.disconnect().await.unwrap();
+    let mut bytes = Vec::new();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        socket.read_to_end(&mut bytes),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(bytes.is_empty());
+}
+
 #[derive(Clone, Default)]
 struct Captured(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
 struct Fields(Vec<String>);

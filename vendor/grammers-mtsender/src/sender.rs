@@ -210,7 +210,14 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
         mut rx: oneshot::Receiver<Result<Vec<u8>, InvocationError>>,
     ) -> Result<Vec<u8>, InvocationError> {
         loop {
-            self.step().await?;
+            if let Err(error) = self.step().await {
+                if matches!(error, ReadError::Serialize(_))
+                    && let Ok(result) = rx.try_recv()
+                {
+                    return result;
+                }
+                return Err(error.into());
+            }
             match rx.try_recv() {
                 Ok(x) => break x,
                 Err(TryRecvError::Empty) => continue,
@@ -229,6 +236,11 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
     /// as dead and the sender instance recreated.
     pub async fn step(&mut self) -> Result<Vec<UpdatesLike>, ReadError> {
         self.try_fill_write();
+        if let Some(error) = self.state.mtp.serialize_error() {
+            let error = ReadError::Serialize(error);
+            self.on_error(&error);
+            return Err(error);
+        }
 
         let (mut reader, mut writer) = self.stream.split();
         let sleep = sleep_until(self.next_ping);
@@ -351,9 +363,20 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
             &error
         );
 
-        self.requests
-            .drain(..)
-            .for_each(|r| drop(r.result.send(Err(InvocationError::from(error.clone())))));
+        let no_packed_packet = self.state.can_buffer_requests();
+        for request in self.requests.drain(..) {
+            let error = match error {
+                ReadError::Serialize(cause)
+                    if matches!(request.state, RequestState::NotSerialized)
+                        || (no_packed_packet
+                            && matches!(request.state, RequestState::Serialized(_))) =>
+                {
+                    InvocationError::UnsentSerialization(*cause)
+                }
+                _ => InvocationError::from(error.clone()),
+            };
+            drop(request.result.send(Err(error)));
+        }
     }
 
     /// Process the result of deserializing an MTP buffer.

@@ -10,7 +10,7 @@ use futures_util::FutureExt;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use std::num::NonZeroU32;
 use std::ops::{ControlFlow, Deref};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use std::{fmt, panic};
 
@@ -66,6 +66,7 @@ struct Rpc {
 struct ConnectionInfo {
     dc_id: i32,
     rpc_tx: mpsc::UnboundedSender<Rpc>,
+    serialization_failure: Arc<OnceLock<mtp::SerializeError>>,
     abort_handle: AbortHandle,
 }
 
@@ -406,12 +407,24 @@ impl SenderPoolRunner {
                     None => match self.create_connection(dc_id).await {
                         Ok(x) => x,
                         Err(e) => {
-                            let _ = tx.send(Err(e));
+                            let error = match e {
+                                InvocationError::SerializationInterrupted(cause) => {
+                                    InvocationError::UnsentSerialization(cause)
+                                }
+                                error => error,
+                            };
+                            let _ = tx.send(Err(error));
                             return ControlFlow::Continue(());
                         }
                     },
                 };
-                let _ = connection.rpc_tx.send(Rpc { body, tx });
+                if let Err(error) = connection.rpc_tx.send(Rpc { body, tx }) {
+                    let cause = connection.serialization_failure.get().copied().map_or(
+                        InvocationError::Dropped("sender connection is closed"),
+                        InvocationError::UnsentSerialization,
+                    );
+                    let _ = error.0.tx.send(Err(cause));
+                }
                 ControlFlow::Continue(())
             }
             Request::CheckRetry {
@@ -462,9 +475,11 @@ impl SenderPoolRunner {
         self.session.set_dc_option(&dc_option).await?;
 
         let (rpc_tx, rpc_rx) = mpsc::unbounded_channel();
+        let serialization_failure = Arc::new(OnceLock::new());
         let abort_handle = self.connection_pool.spawn(run_sender(
             sender,
             rpc_rx,
+            serialization_failure.clone(),
             self.updates_tx.clone(),
             self.update_loss.clone(),
             dc_option.id == self.session.home_dc_id()?,
@@ -472,6 +487,7 @@ impl SenderPoolRunner {
         self.connections.push(ConnectionInfo {
             dc_id,
             rpc_tx,
+            serialization_failure,
             abort_handle,
         });
         Ok(self.connections.last().unwrap())
@@ -611,6 +627,7 @@ impl SenderPoolRunner {
 async fn run_sender(
     mut sender: Sender<Box<dyn transport::Transport + Send>, grammers_mtproto::mtp::Encrypted>,
     mut rpc_rx: mpsc::UnboundedReceiver<Rpc>,
+    serialization_failure: Arc<OnceLock<mtp::SerializeError>>,
     updates: mpsc::Sender<UpdatesLike>,
     update_loss: watch::Sender<bool>,
     home_sender: bool,
@@ -652,6 +669,10 @@ async fn run_sender(
                     }
                 },
                 Err(err) => {
+                    if let ReadError::Serialize(cause) = &err {
+                        let _ = serialization_failure.set(*cause);
+                        fail_unsent_rpcs(&mut rpc_rx, *cause).await;
+                    }
                     if home_sender {
                         let _ = forward_update(&updates, &update_loss, UpdatesLike::ConnectionClosed);
                     }
@@ -663,6 +684,15 @@ async fn run_sender(
                 None => break Ok(()),
             },
         }
+    }
+}
+
+async fn fail_unsent_rpcs(receiver: &mut mpsc::UnboundedReceiver<Rpc>, cause: mtp::SerializeError) {
+    receiver.close();
+    while let Some(rpc) = receiver.recv().await {
+        let _ = rpc
+            .tx
+            .send(Err(InvocationError::UnsentSerialization(cause)));
     }
 }
 

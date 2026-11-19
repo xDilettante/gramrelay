@@ -96,6 +96,9 @@ pub enum Error {
     /// The server failed to send the Diffie-Hellman parameters.
     DhParamsFail,
 
+    /// The authorization exchange cannot establish a valid clock offset.
+    InvalidTime,
+
     /// The server's nonce has changed during the key exchange.
     InvalidServerNonce {
         /// The unexpected nonce that we got.
@@ -168,6 +171,7 @@ impl fmt::Display for Error {
                 write!(f, "all server fingerprints are unknown: {fingerprints:?}")
             }
             Self::DhParamsFail => write!(f, "the generation of DH parameters by the server failed"),
+            Self::InvalidTime => write!(f, "invalid authorization clock offset"),
             Self::InvalidServerNonce { got, expected } => write!(
                 f,
                 "invalid server nonce: got {got:?}, expected {expected:?}"
@@ -394,8 +398,8 @@ pub fn step3(
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system time is before epoch")
-        .as_secs() as i32;
+        .map_err(|_| Error::InvalidTime)?
+        .as_secs();
 
     let res = do_step3(data, response, &random_bytes, now);
     if TRACE_AUTH_GEN && let Ok((x, _)) = &res {
@@ -404,11 +408,19 @@ pub fn step3(
     res
 }
 
+fn checked_auth_offset(server_time: i32, now: u64) -> Result<i32, Error> {
+    if server_time < 0 {
+        return Err(Error::InvalidTime);
+    }
+    let local = i64::try_from(now).map_err(|_| Error::InvalidTime)?;
+    i32::try_from(i64::from(server_time) - local).map_err(|_| Error::InvalidTime)
+}
+
 fn do_step3(
     data: Step2,
     response: tl::enums::ServerDhParams,
     random_bytes: &[u8; 256 + 16],
-    now: i32,
+    now: u64,
 ) -> Result<(tl::functions::SetClientDhParams, Step3), Error> {
     let Step2 {
         nonce,
@@ -487,6 +499,7 @@ fn do_step3(
 
     check_nonce(&server_dh_inner.nonce, &nonce)?;
     check_server_nonce(&server_dh_inner.server_nonce, &server_nonce)?;
+    let time_offset = checked_auth_offset(server_dh_inner.server_time, now)?;
 
     let dh_prime = BigUint::from_bytes_be(&server_dh_inner.dh_prime);
     if server_dh_inner.dh_prime != CURRENT_DH_PRIME || server_dh_inner.g != CURRENT_G {
@@ -502,8 +515,6 @@ fn do_step3(
     // Safe to unwrap because the numbers are valid
     let g = BigUint::from(server_dh_inner.g as u32);
     let g_a = BigUint::from_bytes_be(&server_dh_inner.g_a);
-
-    let time_offset = server_dh_inner.server_time - now;
 
     let b = BigUint::from_bytes_be(&random_bytes[..256]);
     let g_b = g.modpow(&b, &dh_prime);
@@ -739,6 +750,14 @@ fn key_for_fingerprint(fingerprint: i64) -> Option<rsa::Key> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn authorization_clock_offsets_are_checked() {
+        assert_eq!(checked_auth_offset(100, 110), Ok(-10));
+        assert_eq!(checked_auth_offset(i32::MAX, i32::MAX as u64 + 1), Ok(-1));
+        assert_eq!(checked_auth_offset(-1, 100), Err(Error::InvalidTime));
+        assert_eq!(checked_auth_offset(1, u64::MAX), Err(Error::InvalidTime));
+    }
 
     #[test]
     fn emulate_successful_auth_key_gen_flow() -> Result<(), Error> {
