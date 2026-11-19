@@ -48,6 +48,23 @@ real-TL/joined close. Все восемь защищённых узлов гра
 provenance-проверок от старого кэша; обычные registry-зависимости требуют
 предварительно заполненного Cargo cache, затем consumer работает offline.
 
+Кандидат `94269339316a` повторно проверен из одного и того же ZIP на Windows
+x86_64 MSVC и Linux x86_64 GNU в WSL2. Обе версии, 1.89.0 и 1.100.0, прошли
+по 28 стадий на Linux. На Windows 1.89.0 прошли все 28 стадий, а на 1.100.0
+отдельно повторены 25 production-конфигураций в дополнение к уже пройденным
+трём наборам тестов того же кандидата. Во всех прогонах workspace получились
+412 default-тестов, 698 all-feature тестов и 16 doctests.
+
+На Linux также прошли fmt, строгий Clippy, 56 Python-тестов, проверка схемы
+и исходников пяти SDK, запуск внешнего приложения из распакованного дерева и
+аудит его lockfile с 278 пакетами. После проверок байты 750 исходных файлов
+совпали с архивом на обеих системах. На Linux сверили и режимы файлов.
+Доказательства сохранены в `target/q3-win-9426933-evidence/source-after.json`
+и `target/q3-linux-9426933-evidence/run-ai6te4ib/summary.json`. В Windows-отчёте
+источник подтверждён сверкой с архивом. Старый скрипт брал Git-метаданные
+внешнего репозитория при вложенной распаковке. Исправление покрыто регрессией
+на Windows и Linux.
+
 Установленный псевдоним stable может отставать. `rustup check` на 17.11.2026
 показал 1.100.0; локальный default 1.98.0 сохранён. Для повторения:
 
@@ -105,9 +122,9 @@ Audit job проверяет основной lock и по одному неза
 
 Нужен Mac с Apple Silicon, Xcode Command Line Tools, Python 3.11+, Git и rustup.
 Сверьте SHA-256 закрытого ZIP с [записью кандидата](../tasks/todo.md) и распакуйте
-его в новый каталог на Mac вне рабочего дерева Git. Запустите команды из распакованного корня в нативной
-оболочке. Укажите абсолютный путь к исходному ZIP. Рядом с ним должен лежать
-входной манифест с тем же базовым именем.
+его в новый каталог на Mac вне рабочего дерева Git. Запустите команды из
+распакованного корня в нативной оболочке. Укажите абсолютный путь к исходному
+ZIP. Рядом с ним должен лежать входной манифест с тем же базовым именем.
 
 ```bash
 (
@@ -139,6 +156,7 @@ PY
     rustup toolchain install 1.100.0 --profile minimal --component rustfmt,clippy --no-self-update
     cargo +1.100.0 fetch --locked
     export CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=4
+    export CARGO_BUILD_TARGET=aarch64-apple-darwin
     python3 -m unittest discover -s tools/tests -v > "$evidence/python.log" 2>&1
     python3 tools/schema.py check > "$evidence/schema.log" 2>&1
     for version in 1.89.0 1.100.0; do
