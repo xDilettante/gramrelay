@@ -39,6 +39,11 @@ private/unpublished; see SPEC-source-distribution.md for the release boundary.
   Unsent buffered requests and requests still in the connection queue get a
   typed unsent result. Previously sent requests keep an unknown effect.
   Neither terminal error enters the standard automatic retry policy.
+- RPC replies and their attached updates resolve only pending requests whose
+  packet finished writing. Unmatched and already finished replies leave caller
+  and update state alone. A malformed reply to a matching sent request still
+  reports possible update loss. The sender skips bad-message notices for
+  buffered requests.
 
 The recorded tg-safety.patch is checked against the hash-verified archive with
 `python tools/verify_grammers.py check` (cached archive), or add `--download` to

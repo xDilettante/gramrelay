@@ -281,30 +281,62 @@
      }
  
      /// Process the result of deserializing an MTP buffer.
-@@ -322,7 +394,12 @@
+@@ -322,7 +394,9 @@
                  mtp::Deserialization::RpcResult(result) => self.process_result(result),
                  mtp::Deserialization::RpcError(error) => self.process_error(error),
                  mtp::Deserialization::BadMessage(bad_msg) => self.process_bad_message(bad_msg),
 -                mtp::Deserialization::Failure(failure) => self.process_deserialize_error(failure),
 +                mtp::Deserialization::Failure(failure) => {
-+                    // A rejected RPC payload may have contained an own update.
-+                    // Surface that uncertainty instead of silently acknowledging it.
-+                    updates.push(UpdatesLike::MalformedUpdates);
-+                    self.process_deserialize_error(failure);
++                    self.process_deserialize_error(failure, updates);
 +                }
              }
          }
      }
-@@ -334,7 +411,7 @@
+@@ -333,11 +407,15 @@
+         msg_id: MsgId,
          update: Vec<u8>,
      ) {
++        let Some(request) = self
++            .sent_request_index(msg_id)
++            .map(|index| &self.requests[index])
++        else {
++            return;
++        };
          match (
 -            UpdatesLike::from_bytes(&update),
+-            self.peek_request(msg_id).and_then(|request| {
+-                tl::functions::messages::SendMessage::from_boxed_bytes(&request.body).ok()
+-            }),
 +            decode_updates_exact(&update),
-             self.peek_request(msg_id).and_then(|request| {
-                 tl::functions::messages::SendMessage::from_boxed_bytes(&request.body).ok()
-             }),
-@@ -378,13 +455,14 @@
++            tl::functions::messages::SendMessage::from_boxed_bytes(&request.body).ok(),
+         ) {
+             (
+                 Ok(UpdatesLike::Updates(tl::enums::Updates::UpdateShortSentMessage(u))),
+@@ -350,16 +428,13 @@
+             (Ok(UpdatesLike::AffectedMessages(affected)), _) => {
+                 // Check if the original request targeted a channel (e.g. channels.deleteMessages).
+                 // If so, the pts belongs to that channel, not the common/user pts sequence.
+-                let channel_id = self
+-                    .peek_request(msg_id)
+-                    .and_then(|request| {
+-                        tl::functions::channels::DeleteMessages::from_boxed_bytes(&request.body)
+-                            .ok()
+-                    })
+-                    .and_then(|request| match request.channel {
+-                        tl::enums::InputChannel::Channel(c) => Some((c.channel_id, request.id)),
+-                        _ => None,
+-                    });
++                let channel_id =
++                    tl::functions::channels::DeleteMessages::from_boxed_bytes(&request.body)
++                        .ok()
++                        .and_then(|request| match request.channel {
++                            tl::enums::InputChannel::Channel(c) => Some((c.channel_id, request.id)),
++                            _ => None,
++                        });
+                 if let Some((channel_id, message_ids)) = channel_id {
+                     updates.push(UpdatesLike::AffectedChannelMessages {
+                         affected,
+@@ -378,13 +453,14 @@
              (Err(e), _) => {
                  // This shouldn't happen. We just made the request, so they shouldn't be stale.
                  // If the request failed with a failed-to-deserialize error, callers will handle it.
@@ -321,7 +353,7 @@
              Ok(u) => updates.push(u),
              Err(e) => {
                  // These are to be treated as a gap.
-@@ -418,7 +496,10 @@
+@@ -418,7 +494,10 @@
  
      fn process_error(&mut self, error: mtp::RpcResultError) {
          if let Some(req) = self.pop_request(error.msg_id) {
@@ -333,7 +365,71 @@
              let x = req.body.as_slice();
              drop(
                  req.result.send(Err(InvocationError::Rpc(
-@@ -522,6 +603,12 @@
+@@ -437,15 +516,6 @@
+     fn process_bad_message(&mut self, bad_msg: mtp::BadMessage) {
+         for i in (0..self.requests.len()).rev() {
+             match &self.requests[i].state {
+-                RequestState::Serialized(pair)
+-                    if pair.msg_id == bad_msg.msg_id || pair.container_msg_id == bad_msg.msg_id =>
+-                {
+-                    panic!(
+-                        "bad msg for unsent request {:?}: {}",
+-                        bad_msg.msg_id,
+-                        bad_msg.description()
+-                    );
+-                }
+                 RequestState::Sent(pair)
+                     if pair.msg_id == bad_msg.msg_id || pair.container_msg_id == bad_msg.msg_id =>
+                 {
+@@ -484,8 +554,14 @@
+         }
+     }
+ 
+-    fn process_deserialize_error(&mut self, failure: mtp::DeserializationFailure) {
++    fn process_deserialize_error(
++        &mut self,
++        failure: mtp::DeserializationFailure,
++        updates: &mut Vec<UpdatesLike>,
++    ) {
+         if let Some(req) = self.pop_request(failure.msg_id) {
++            // A failed response to a sent RPC may have contained an own update.
++            updates.push(UpdatesLike::MalformedUpdates);
+             debug!(error = ?failure.error, "got deserialization failure");
+             drop(req.result.send(Err(InvocationError::from(failure.error))));
+         } else {
+@@ -496,32 +572,25 @@
+         }
+     }
+ 
+-    fn peek_request(&mut self, msg_id: MsgId) -> Option<&Request> {
+-        self.requests.iter().find(|request| match request.state {
+-            RequestState::NotSerialized => false,
+-            RequestState::Serialized(MsgIdPair { msg_id: m, .. }) => m == msg_id,
+-            RequestState::Sent(MsgIdPair { msg_id: m, .. }) => m == msg_id,
+-        })
++    fn sent_request_index(&self, msg_id: MsgId) -> Option<usize> {
++        self.requests.iter().position(
++            |request| matches!(&request.state, RequestState::Sent(pair) if pair.msg_id == msg_id),
++        )
+     }
+ 
+     fn pop_request(&mut self, msg_id: MsgId) -> Option<Request> {
+-        for i in 0..self.requests.len() {
+-            match &self.requests[i].state {
+-                RequestState::Serialized(pair) if pair.msg_id == msg_id => {
+-                    panic!("got response {msg_id:?} for unsent request {pair:?}");
+-                }
+-                RequestState::Sent(pair) if pair.msg_id == msg_id => {
+-                    return Some(self.requests.swap_remove(i));
+-                }
+-                _ => {}
+-            }
+-        }
+-
+-        None
++        let index = self.sent_request_index(msg_id)?;
++        Some(self.requests.swap_remove(index))
+     }
  }
  
  impl<T: Transport> Sender<T, mtp::Encrypted> {
@@ -346,7 +442,7 @@
      pub fn auth_key(&self) -> [u8; 256] {
          self.state.mtp.auth_key()
      }
-@@ -563,6 +650,7 @@
+@@ -563,6 +632,7 @@
          state: sender.state.into_encrypted(auth),
          requests: sender.requests,
          next_ping: Instant::now() + PING_DELAY,
@@ -354,7 +450,7 @@
      })
  }
  
-@@ -574,3 +662,7 @@
+@@ -574,3 +644,7 @@
  ) -> Result<Sender<T, mtp::Encrypted>, io::Error> {
      Sender::connect(transport, mtp::Encrypted::build().finish(auth_key), addr).await
  }

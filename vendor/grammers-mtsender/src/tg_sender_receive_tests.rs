@@ -152,6 +152,141 @@ async fn local_serialization_failure_drains_requests_without_writing() {
     assert!(bytes.is_empty());
 }
 
+#[tokio::test]
+async fn rpc_responses_and_own_updates_require_a_sent_request() {
+    use mtp::Deserialization::{BadMessage, Failure, OwnUpdate, RpcResult};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut sender = Sender::connect(
+        grammers_mtproto::transport::Full::new(),
+        mtp::Encrypted::build().finish([7; 256]),
+        ServerAddr::Tcp {
+            address: listener.local_addr().unwrap(),
+        },
+    )
+    .await
+    .unwrap();
+    let (_socket, _) = listener.accept().await.unwrap();
+    let [mut waiting, mut waiting_for_failure] = [1, 2].map(|id| {
+        let (reply, waiting) = oneshot::channel();
+        let request = tl::functions::messages::DeleteMessages {
+            revoke: false,
+            id: vec![id],
+        };
+        sender.enqueue_body(request.to_bytes(), reply);
+        waiting
+    });
+    sender.try_fill_write();
+    let buffered_pair = |index: usize| {
+        let RequestState::Serialized(pair) = &sender.requests[index].state else {
+            panic!("expected a buffered request");
+        };
+        (pair.msg_id, pair.container_msg_id)
+    };
+    let (msg_id, container_msg_id) = buffered_pair(0);
+    let (other_msg_id, other_container_msg_id) = buffered_pair(1);
+    assert_ne!(msg_id, container_msg_id);
+    assert_ne!(msg_id, other_msg_id);
+    assert_eq!(container_msg_id, other_container_msg_id);
+    let body =
+        tl::enums::messages::AffectedMessages::Messages(tl::types::messages::AffectedMessages {
+            pts: 1,
+            pts_count: 1,
+        })
+        .to_bytes();
+    let matched_reply = || {
+        vec![
+            OwnUpdate {
+                msg_id,
+                update: body.clone(),
+            },
+            RpcResult(mtp::RpcResult {
+                msg_id,
+                body: body.clone(),
+            }),
+        ]
+    };
+    let failed_reply = |msg_id| {
+        Failure(mtp::DeserializationFailure {
+            msg_id,
+            error: mtp::DeserializeError::LimitExceeded,
+        })
+    };
+    let mut updates = Vec::new();
+    sender.process_mtp_buffer(matched_reply(), &mut updates);
+    sender.process_mtp_buffer(
+        vec![
+            failed_reply(msg_id),
+            BadMessage(mtp::BadMessage {
+                msg_id: container_msg_id,
+                code: 48,
+            }),
+        ],
+        &mut updates,
+    );
+    assert!(updates.is_empty());
+    assert!(matches!(waiting.try_recv(), Err(TryRecvError::Empty)));
+    assert!(matches!(
+        waiting_for_failure.try_recv(),
+        Err(TryRecvError::Empty)
+    ));
+    assert!(
+        sender
+            .requests
+            .iter()
+            .all(|request| matches!(request.state, RequestState::Serialized(_)))
+    );
+
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while sender
+            .requests
+            .iter()
+            .any(|request| matches!(request.state, RequestState::Serialized(_)))
+        {
+            sender.step().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        sender
+            .requests
+            .iter()
+            .all(|request| matches!(request.state, RequestState::Sent(_)))
+    );
+    sender.process_mtp_buffer(matched_reply(), &mut updates);
+    sender.process_mtp_buffer(matched_reply(), &mut updates);
+    sender.process_mtp_buffer(vec![failed_reply(msg_id)], &mut updates);
+    assert!(matches!(
+        updates.as_slice(),
+        [UpdatesLike::AffectedMessages(_)]
+    ));
+    assert_eq!(waiting.try_recv().unwrap().unwrap(), body);
+    assert!(matches!(
+        waiting_for_failure.try_recv(),
+        Err(TryRecvError::Empty)
+    ));
+
+    sender.process_mtp_buffer(
+        vec![failed_reply(other_msg_id), failed_reply(other_msg_id)],
+        &mut updates,
+    );
+    assert!(matches!(
+        updates.as_slice(),
+        [
+            UpdatesLike::AffectedMessages(_),
+            UpdatesLike::MalformedUpdates
+        ]
+    ));
+    assert!(matches!(
+        waiting_for_failure.try_recv().unwrap(),
+        Err(InvocationError::Deserialize(
+            mtp::DeserializeError::LimitExceeded
+        ))
+    ));
+    assert!(sender.requests.is_empty());
+}
+
 #[derive(Clone, Default)]
 struct Captured(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
 struct Fields(Vec<String>);

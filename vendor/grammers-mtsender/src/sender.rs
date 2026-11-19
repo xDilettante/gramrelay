@@ -395,10 +395,7 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
                 mtp::Deserialization::RpcError(error) => self.process_error(error),
                 mtp::Deserialization::BadMessage(bad_msg) => self.process_bad_message(bad_msg),
                 mtp::Deserialization::Failure(failure) => {
-                    // A rejected RPC payload may have contained an own update.
-                    // Surface that uncertainty instead of silently acknowledging it.
-                    updates.push(UpdatesLike::MalformedUpdates);
-                    self.process_deserialize_error(failure);
+                    self.process_deserialize_error(failure, updates);
                 }
             }
         }
@@ -410,11 +407,15 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
         msg_id: MsgId,
         update: Vec<u8>,
     ) {
+        let Some(request) = self
+            .sent_request_index(msg_id)
+            .map(|index| &self.requests[index])
+        else {
+            return;
+        };
         match (
             decode_updates_exact(&update),
-            self.peek_request(msg_id).and_then(|request| {
-                tl::functions::messages::SendMessage::from_boxed_bytes(&request.body).ok()
-            }),
+            tl::functions::messages::SendMessage::from_boxed_bytes(&request.body).ok(),
         ) {
             (
                 Ok(UpdatesLike::Updates(tl::enums::Updates::UpdateShortSentMessage(u))),
@@ -427,16 +428,13 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
             (Ok(UpdatesLike::AffectedMessages(affected)), _) => {
                 // Check if the original request targeted a channel (e.g. channels.deleteMessages).
                 // If so, the pts belongs to that channel, not the common/user pts sequence.
-                let channel_id = self
-                    .peek_request(msg_id)
-                    .and_then(|request| {
-                        tl::functions::channels::DeleteMessages::from_boxed_bytes(&request.body)
-                            .ok()
-                    })
-                    .and_then(|request| match request.channel {
-                        tl::enums::InputChannel::Channel(c) => Some((c.channel_id, request.id)),
-                        _ => None,
-                    });
+                let channel_id =
+                    tl::functions::channels::DeleteMessages::from_boxed_bytes(&request.body)
+                        .ok()
+                        .and_then(|request| match request.channel {
+                            tl::enums::InputChannel::Channel(c) => Some((c.channel_id, request.id)),
+                            _ => None,
+                        });
                 if let Some((channel_id, message_ids)) = channel_id {
                     updates.push(UpdatesLike::AffectedChannelMessages {
                         affected,
@@ -518,15 +516,6 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
     fn process_bad_message(&mut self, bad_msg: mtp::BadMessage) {
         for i in (0..self.requests.len()).rev() {
             match &self.requests[i].state {
-                RequestState::Serialized(pair)
-                    if pair.msg_id == bad_msg.msg_id || pair.container_msg_id == bad_msg.msg_id =>
-                {
-                    panic!(
-                        "bad msg for unsent request {:?}: {}",
-                        bad_msg.msg_id,
-                        bad_msg.description()
-                    );
-                }
                 RequestState::Sent(pair)
                     if pair.msg_id == bad_msg.msg_id || pair.container_msg_id == bad_msg.msg_id =>
                 {
@@ -565,8 +554,14 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
         }
     }
 
-    fn process_deserialize_error(&mut self, failure: mtp::DeserializationFailure) {
+    fn process_deserialize_error(
+        &mut self,
+        failure: mtp::DeserializationFailure,
+        updates: &mut Vec<UpdatesLike>,
+    ) {
         if let Some(req) = self.pop_request(failure.msg_id) {
+            // A failed response to a sent RPC may have contained an own update.
+            updates.push(UpdatesLike::MalformedUpdates);
             debug!(error = ?failure.error, "got deserialization failure");
             drop(req.result.send(Err(InvocationError::from(failure.error))));
         } else {
@@ -577,28 +572,15 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
         }
     }
 
-    fn peek_request(&mut self, msg_id: MsgId) -> Option<&Request> {
-        self.requests.iter().find(|request| match request.state {
-            RequestState::NotSerialized => false,
-            RequestState::Serialized(MsgIdPair { msg_id: m, .. }) => m == msg_id,
-            RequestState::Sent(MsgIdPair { msg_id: m, .. }) => m == msg_id,
-        })
+    fn sent_request_index(&self, msg_id: MsgId) -> Option<usize> {
+        self.requests.iter().position(
+            |request| matches!(&request.state, RequestState::Sent(pair) if pair.msg_id == msg_id),
+        )
     }
 
     fn pop_request(&mut self, msg_id: MsgId) -> Option<Request> {
-        for i in 0..self.requests.len() {
-            match &self.requests[i].state {
-                RequestState::Serialized(pair) if pair.msg_id == msg_id => {
-                    panic!("got response {msg_id:?} for unsent request {pair:?}");
-                }
-                RequestState::Sent(pair) if pair.msg_id == msg_id => {
-                    return Some(self.requests.swap_remove(i));
-                }
-                _ => {}
-            }
-        }
-
-        None
+        let index = self.sent_request_index(msg_id)?;
+        Some(self.requests.swap_remove(index))
     }
 }
 
