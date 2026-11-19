@@ -14,9 +14,10 @@ use grammers_crypto::{AuthKey, decrypt_data_v2, encrypt_data_v2, get_padding_dat
 use grammers_tl_types::{self as tl, Cursor, Deserializable, Identifiable, Serializable};
 use tracing::info;
 
+use super::recovery::{MissingResponse, Recoveries};
 use super::{
-    Deserialization, DeserializationFailure, DeserializeError, Mtp, RpcResult, RpcResultError,
-    SerializeError,
+    Deserialization, DeserializationFailure, DeserializeError, Mtp, RecoveryTarget, RpcResult,
+    RpcResultError, SerializeError,
 };
 use crate::utils::StackBuffer;
 use crate::{DequeBuffer, MsgId, manual_tl};
@@ -116,6 +117,8 @@ struct SentHeader {
     sequence: i32,
     sent_at: Instant,
     rejected: bool,
+    answered: bool,
+    is_salt_refresh: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -159,9 +162,14 @@ impl SentHistory {
         }
     }
 
-    fn record_packet(&mut self, headers: &mut Vec<(MsgId, i32)>, standalone_receipt: bool) {
-        // Idle receipt traffic may be much more frequent than application RPCs.
-        let (history, limit) = if standalone_receipt {
+    fn record_packet(
+        &mut self,
+        headers: &mut Vec<(MsgId, i32)>,
+        standalone_control: bool,
+        salt_refresh: Option<MsgId>,
+    ) {
+        // Idle control traffic may be much more frequent than application RPCs.
+        let (history, limit) = if standalone_control {
             (
                 &mut self.standalone_receipts,
                 STANDALONE_RECEIPT_HISTORY_LIMIT,
@@ -177,6 +185,8 @@ impl SentHistory {
             sequence,
             sent_at,
             rejected: false,
+            answered: false,
+            is_salt_refresh: salt_refresh == Some(id),
         }));
     }
 }
@@ -189,6 +199,7 @@ struct Acknowledgements {
     written_ids: HashSet<i64>,
     in_packet: usize,
     previous_packet_carried_ack: bool,
+    previous_packet_was_standalone_ack: bool,
 }
 
 impl Acknowledgements {
@@ -210,9 +221,10 @@ impl Acknowledgements {
         }
     }
 
-    fn packet_written(&mut self) {
+    fn packet_written(&mut self, standalone: bool) {
         let count = mem::take(&mut self.in_packet);
         self.previous_packet_carried_ack = count != 0;
+        self.previous_packet_was_standalone_ack = self.previous_packet_carried_ack && standalone;
         for id in self.pending.drain(..count) {
             self.pending_ids.remove(&id);
             if self.written_ids.contains(&id) {
@@ -286,6 +298,7 @@ pub struct Encrypted {
     ///
     /// [Content-related Message]: https://core.telegram.org/mtproto/description#content-related-message
     acknowledgements: Acknowledgements,
+    recoveries: Recoveries,
 
     /// If present, the threshold in bytes at which a message will be
     /// considered large enough to attempt compressing it. Otherwise,
@@ -349,6 +362,7 @@ impl Builder {
             last_new_session: None,
             session_established: false,
             acknowledgements: Acknowledgements::default(),
+            recoveries: Recoveries::default(),
             compression_threshold: self.compression_threshold,
             deserialization: Vec::new(),
             msg_count: 0,
@@ -514,6 +528,7 @@ impl Encrypted {
                 self.salt_request_msg_id = None;
             }
             self.acknowledgements.in_packet = 0;
+            self.recoveries.discard_packet();
             self.packet_headers.clear();
             self.packet_finalized = false;
             self.salt_query_in_packet = None;
@@ -530,6 +545,7 @@ impl Encrypted {
         if self.acknowledgements.in_packet != 0
             || self.acknowledgements.pending.is_empty()
             || self.salt_query_in_packet.is_some()
+            || self.recoveries.packet_is_staged()
         {
             return Some(());
         }
@@ -545,6 +561,19 @@ impl Encrypted {
         self.try_serialize_msg(buffer, &body, false)?;
         self.acknowledgements.in_packet = count;
         Some(())
+    }
+
+    fn buffer_recovery(&mut self, buffer: &mut DequeBuffer<u8>) {
+        let Some(answer) = self.recoveries.pending_answer() else {
+            return;
+        };
+        let body = tl::enums::MsgResendReq::Req(tl::types::MsgResendReq {
+            msg_ids: vec![answer],
+        })
+        .to_bytes();
+        if let Some(query) = self.try_serialize_msg(buffer, &body, false) {
+            self.recoveries.stage_packet(answer, query);
+        }
     }
 
     fn get_current_salt(&self) -> i64 {
@@ -715,23 +744,67 @@ impl Encrypted {
             {
                 self.install_salt_schedule(reply);
             }
-            if result.is_ok() && !self.session_established {
-                // A completed reply proves establishment even if initial creation
-                // was never reported. Wait for the frame to commit first.
-                self.session_established =
-                    self.deserialization[results_before..].iter().any(|result| {
-                        let id = match result {
-                            Deserialization::RpcResult(result) => result.msg_id,
-                            Deserialization::RpcError(result) => result.msg_id,
-                            _ => return false,
-                        };
-                        self.sent_history
-                            .find(id)
-                            .is_some_and(|index| self.sent_history.get(index).sequence % 2 == 1)
-                    });
+            if result.is_ok() {
+                self.commit_response_recovery(results_before);
+            } else {
+                self.recoveries.discard_frame();
             }
         }
         result
+    }
+
+    fn commit_response_recovery(&mut self, results_before: usize) {
+        let mut session_recreated = false;
+        for result in &self.deserialization[results_before..] {
+            let (id, valid_reply) = match result {
+                Deserialization::RpcResult(result) => (result.msg_id, true),
+                Deserialization::RpcError(result) => (result.msg_id, true),
+                Deserialization::Failure(result) => (result.msg_id, false),
+                Deserialization::SessionRecreated => {
+                    session_recreated = true;
+                    continue;
+                }
+                _ => continue,
+            };
+            if let Some(index) = self.sent_history.find(id) {
+                let header = self.sent_history.get_mut(index);
+                header.answered = true;
+                if self.salt_request_msg_id == Some(id) {
+                    // A direct, valid FutureSalts installs the schedule above.
+                    // An RPC result or per-RPC failure still ends this waiter.
+                    self.salt_request_msg_id = None;
+                }
+                self.session_established |= valid_reply && header.sequence % 2 == 1;
+            }
+        }
+        self.recoveries.commit_frame(
+            |answer| {
+                self.acknowledgements.pending_ids.contains(&answer)
+                    || self.acknowledgements.written_ids.contains(&answer)
+            },
+            |request| {
+                self.sent_history
+                    .find(request)
+                    .is_some_and(|index| self.sent_history.get(index).answered)
+            },
+            session_recreated,
+            &mut self.deserialization,
+        );
+        if Self::salt_recovery_failed(
+            self.salt_request_msg_id,
+            &self.deserialization[results_before..],
+        ) {
+            self.salt_request_msg_id = None;
+        }
+    }
+
+    fn salt_recovery_failed(salt: Option<MsgId>, results: &[Deserialization]) -> bool {
+        salt.is_some()
+            && results.iter().any(|result| {
+                matches!(result, Deserialization::ResponseUnavailable {
+                target: RecoveryTarget::SaltRefresh(id)
+            } if Some(*id) == salt)
+            })
     }
 
     fn process_message_inner(
@@ -1090,6 +1163,8 @@ impl Encrypted {
         if internal {
             // Response to internal request, do not propagate.
             self.salt_request_msg_id = None;
+        } else if self.recoveries.is_sent_query(msg_id) {
+            self.recoveries.refuse_query(msg_id);
         } else {
             self.deserialization
                 .push(Deserialization::BadMessage(super::BadMessage {
@@ -1179,8 +1254,19 @@ impl Encrypted {
     ///
     /// [Informational Message regarding Status of Messages]: https://core.telegram.org/mtproto/service_messages_about_messages#informational-message-regarding-status-of-messages
     fn handle_state_info(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
-        let _ = decode_exact::<tl::enums::MsgsStateInfo>(&message.body)?;
-        // TODO implement
+        let tl::enums::MsgsStateInfo::Info(state) =
+            decode_exact::<tl::enums::MsgsStateInfo>(&message.body)?;
+        let query = MsgId(state.req_msg_id);
+        if self.recoveries.is_sent_query(query) {
+            let [status] = state.info.as_slice() else {
+                return Err(DeserializeError::InvalidEncoding);
+            };
+            match status & 7 {
+                1..=3 => self.recoveries.refuse_query(query),
+                4 => {} // The peer still knows the body. Keep waiting for its delivery.
+                _ => return Err(DeserializeError::InvalidEncoding),
+            }
+        }
         Ok(())
     }
 
@@ -1234,19 +1320,69 @@ impl Encrypted {
         &mut self,
         message: manual_tl::Message,
     ) -> Result<(), DeserializeError> {
-        // TODO https://github.com/telegramdesktop/tdesktop/blob/8f82880b938e06b7a2a27685ef9301edb12b4648/Telegram/SourceFiles/mtproto/connection.cpp#L1790-L1820
-        // TODO https://github.com/telegramdesktop/tdesktop/blob/8f82880b938e06b7a2a27685ef9301edb12b4648/Telegram/SourceFiles/mtproto/connection.cpp#L1822-L1845
         let info = decode_exact::<tl::enums::MsgDetailedInfo>(&message.body)?;
-        let answer_id = match info {
-            tl::enums::MsgDetailedInfo::Info(value) => value.answer_msg_id,
-            tl::enums::MsgDetailedInfo::MsgNewDetailedInfo(value) => value.answer_msg_id,
+        let (answer, request, bytes, status) = match info {
+            tl::enums::MsgDetailedInfo::Info(value) => (
+                value.answer_msg_id,
+                Some(MsgId(value.msg_id)),
+                value.bytes,
+                value.status,
+            ),
+            tl::enums::MsgDetailedInfo::MsgNewDetailedInfo(value) => {
+                (value.answer_msg_id, None, value.bytes, value.status)
+            }
         };
         // A pending receipt is already scheduled. Repeat a written receipt only
         // for a body that this session has actually accepted.
-        if self.acknowledgements.written_ids.contains(&answer_id) {
-            self.acknowledgements.enqueue(answer_id)?;
+        if self.acknowledgements.written_ids.contains(&answer) {
+            self.acknowledgements.enqueue(answer)?;
         }
+        if (request.is_none() && self.acknowledgements.pending_ids.contains(&answer))
+            || status != 0
+            || bytes <= 0
+            || bytes % 4 != 0
+            || bytes as usize > manual_tl::MAX_ENCRYPTED_DATA_SIZE
+            || !self.recent_server_answer(answer, message.msg_id, request.is_some())
+        {
+            return Ok(());
+        }
+        let target = if let Some(request) = request {
+            let Some(index) = self.sent_history.find(request) else {
+                return Ok(());
+            };
+            let header = self.sent_history.get(index);
+            if header.sequence % 2 != 1
+                || header.rejected
+                || header.answered
+                || header.sent_at.elapsed() > SENT_HISTORY_AGE
+            {
+                return Ok(());
+            }
+            if header.is_salt_refresh {
+                RecoveryTarget::SaltRefresh(request)
+            } else {
+                RecoveryTarget::Request(request)
+            }
+        } else {
+            RecoveryTarget::Unsolicited
+        };
+        self.recoveries.notice(MissingResponse { answer, target });
         Ok(())
+    }
+
+    fn recent_server_answer(&self, answer: i64, advisory: i64, is_reply: bool) -> bool {
+        let answer = answer as u64;
+        let advisory = advisory as u64;
+        let parity = if is_reply { 1 } else { 3 };
+        if answer % 4 != parity || answer >= advisory {
+            return false;
+        }
+        let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
+            return false;
+        };
+        let server_time = i128::from(now.as_secs()) + i128::from(self.time_offset);
+        let answer_time = i128::from(answer >> 32);
+        (server_time - 300..=server_time + 30).contains(&answer_time)
     }
 
     /// **[Explicit Request to Re-Send Messages]**
@@ -1341,6 +1477,9 @@ impl Encrypted {
     }
 
     fn install_salt_schedule(&mut self, reply: tl::types::FutureSalts) {
+        if let Some(index) = self.sent_history.find(MsgId(reply.req_msg_id)) {
+            self.sent_history.get_mut(index).answered = true;
+        }
         let previous = self
             .salts
             .iter()
@@ -1678,6 +1817,19 @@ pub const PLAIN_PACKET_HEADER_LEN: usize = 8 + 8;
 pub const MESSAGE_CONTAINER_HEADER_LEN: usize = (8 + 4 + 4) + (4 + 4);
 
 impl Mtp for Encrypted {
+    fn poll_recovery(
+        &mut self,
+        now: Instant,
+        results: &mut Vec<Deserialization>,
+    ) -> Option<Instant> {
+        let start = results.len();
+        let deadline = self.recoveries.poll_timeouts(now, results);
+        if Self::salt_recovery_failed(self.salt_request_msg_id, &results[start..]) {
+            self.salt_request_msg_id = None;
+        }
+        deadline
+    }
+
     fn serialize_error(&self) -> Option<SerializeError> {
         self.serialize_error
     }
@@ -1698,6 +1850,14 @@ impl Mtp for Encrypted {
         if self.salt_request_msg_id.is_some() || self.serialize_error.is_some() {
             // Application requests wait for the refresh. Finalize can still
             // send a receipt packet after the salt request has been written.
+            return None;
+        }
+
+        if self.msg_count == 0
+            && !self.recoveries.previous_packet_was_recovery
+            && !self.acknowledgements.previous_packet_was_standalone_ack
+            && self.recoveries.pending_answer().is_some()
+        {
             return None;
         }
 
@@ -1739,6 +1899,12 @@ impl Mtp for Encrypted {
         if !self.acknowledgements.pending.is_empty() {
             self.try_request_salts(buffer);
         }
+        if self.msg_count == 0
+            && (!self.recoveries.previous_packet_was_recovery
+                || self.acknowledgements.pending.is_empty())
+        {
+            self.buffer_recovery(buffer);
+        }
         // If the current packet has no room, retain receipts for the next one.
         // A terminal serializer error still prevents the whole packet going out.
         let _ = self.buffer_acknowledgements(buffer);
@@ -1762,12 +1928,13 @@ impl Mtp for Encrypted {
         if !mem::take(&mut self.packet_finalized) {
             return;
         }
-        self.salt_query_in_packet = None;
-        let standalone_receipt =
-            self.acknowledgements.in_packet != 0 && self.packet_headers.len() == 1;
+        let salt_refresh = self.salt_query_in_packet.take();
+        let standalone_control = self.packet_headers.len() == 1
+            && (self.acknowledgements.in_packet != 0 || self.recoveries.packet_is_staged());
         self.sent_history
-            .record_packet(&mut self.packet_headers, standalone_receipt);
-        self.acknowledgements.packet_written();
+            .record_packet(&mut self.packet_headers, standalone_control, salt_refresh);
+        self.acknowledgements.packet_written(standalone_control);
+        self.recoveries.packet_written();
     }
 
     /// Processes an encrypted response from the server.

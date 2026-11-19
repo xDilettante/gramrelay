@@ -307,9 +307,20 @@
              match rx.try_recv() {
                  Ok(x) => break x,
                  Err(TryRecvError::Empty) => continue,
-@@ -180,6 +265,11 @@
+@@ -179,10 +264,28 @@
+     /// If an error is returned, the connection should be treated
      /// as dead and the sender instance recreated.
      pub async fn step(&mut self) -> Result<Vec<UpdatesLike>, ReadError> {
++        let mut recovery_results = Vec::new();
++        let recovery_deadline = self
++            .state
++            .mtp
++            .poll_recovery(Instant::now().into_std(), &mut recovery_results);
++        if !recovery_results.is_empty() {
++            let mut updates = Vec::new();
++            self.process_mtp_buffer(recovery_results, &mut updates);
++            return Ok(updates);
++        }
          self.try_fill_write();
 +        if let Some(error) = self.state.mtp.serialize_error() {
 +            let error = ReadError::Serialize(error);
@@ -318,8 +329,32 @@
 +        }
  
          let (mut reader, mut writer) = self.stream.split();
-         let sleep = sleep_until(self.next_ping);
-@@ -302,9 +392,20 @@
+-        let sleep = sleep_until(self.next_ping);
++        let wake_at = recovery_deadline
++            .map(Instant::from_std)
++            .map_or(self.next_ping, |due| self.next_ping.min(due));
++        let sleep = sleep_until(wake_at);
+         let (read, write) = self.state.io_buffers();
+ 
+         trace!(
+@@ -200,8 +303,14 @@
+                 })
+             }
+             _ = sleep => {
+-                self.on_ping_timeout();
+-                Ok(Vec::new())
++                let now = Instant::now();
++                if now >= self.next_ping {
++                    self.on_ping_timeout();
++                }
++                self.state.mtp.poll_recovery(now.into_std(), &mut recovery_results);
++                let mut updates = Vec::new();
++                self.process_mtp_buffer(recovery_results, &mut updates);
++                Ok(updates)
+             }
+         };
+ 
+@@ -302,9 +411,20 @@
              &error
          );
  
@@ -343,15 +378,16 @@
      }
  
      /// Process the result of deserializing an MTP buffer.
-@@ -313,6 +414,7 @@
+@@ -313,6 +433,8 @@
          results: Vec<mtp::Deserialization>,
          updates: &mut Vec<UpdatesLike>,
      ) {
 +        let mut rejections = Vec::new();
++        let mut unavailable = Vec::new();
          for result in results {
              match result {
                  mtp::Deserialization::OwnUpdate { msg_id, update } => {
-@@ -321,9 +423,19 @@
+@@ -321,9 +443,42 @@
                  mtp::Deserialization::Update(update) => self.process_update(updates, update),
                  mtp::Deserialization::RpcResult(result) => self.process_result(result),
                  mtp::Deserialization::RpcError(error) => self.process_error(error),
@@ -362,10 +398,33 @@
 +                mtp::Deserialization::SessionRecreated => {
 +                    updates.push(UpdatesLike::ConnectionClosed)
 +                }
++                mtp::Deserialization::ResponseUnavailable { target } => unavailable.push(target),
 +                mtp::Deserialization::Failure(failure) => {
 +                    self.process_deserialize_error(failure, updates);
 +                }
 +            }
++        }
++        let mut gap = false;
++        for target in unavailable {
++            match target {
++                mtp::RecoveryTarget::Request(request) => {
++                    if let Some(pending) = self.pop_request(request) {
++                        drop(pending.result.send(Err(InvocationError::Dropped(
++                            "response could not be recovered",
++                        ))));
++                    }
++                    gap = true;
++                }
++                mtp::RecoveryTarget::Unsolicited => gap = true,
++                mtp::RecoveryTarget::SaltRefresh(_) => {}
++            }
++        }
++        if gap
++            && !updates
++                .iter()
++                .any(|update| matches!(update, UpdatesLike::ConnectionClosed))
++        {
++            updates.push(UpdatesLike::ConnectionClosed);
 +        }
 +        // A matching reply in this frame resolves its request before a
 +        // notification referring to the whole outgoing container can interrupt it.
@@ -374,7 +433,7 @@
          }
      }
  
-@@ -333,11 +445,15 @@
+@@ -333,11 +488,15 @@
          msg_id: MsgId,
          update: Vec<u8>,
      ) {
@@ -394,7 +453,7 @@
          ) {
              (
                  Ok(UpdatesLike::Updates(tl::enums::Updates::UpdateShortSentMessage(u))),
-@@ -350,16 +466,13 @@
+@@ -350,16 +509,13 @@
              (Ok(UpdatesLike::AffectedMessages(affected)), _) => {
                  // Check if the original request targeted a channel (e.g. channels.deleteMessages).
                  // If so, the pts belongs to that channel, not the common/user pts sequence.
@@ -418,7 +477,7 @@
                  if let Some((channel_id, message_ids)) = channel_id {
                      updates.push(UpdatesLike::AffectedChannelMessages {
                          affected,
-@@ -378,13 +491,14 @@
+@@ -378,13 +534,14 @@
              (Err(e), _) => {
                  // This shouldn't happen. We just made the request, so they shouldn't be stale.
                  // If the request failed with a failed-to-deserialize error, callers will handle it.
@@ -435,7 +494,7 @@
              Ok(u) => updates.push(u),
              Err(e) => {
                  // These are to be treated as a gap.
-@@ -418,7 +532,10 @@
+@@ -418,7 +575,10 @@
  
      fn process_error(&mut self, error: mtp::RpcResultError) {
          if let Some(req) = self.pop_request(error.msg_id) {
@@ -447,7 +506,7 @@
              let x = req.body.as_slice();
              drop(
                  req.result.send(Err(InvocationError::Rpc(
-@@ -436,56 +553,33 @@
+@@ -436,56 +596,33 @@
  
      fn process_bad_message(&mut self, bad_msg: mtp::BadMessage) {
          for i in (0..self.requests.len()).rev() {
@@ -530,7 +589,7 @@
              debug!(error = ?failure.error, "got deserialization failure");
              drop(req.result.send(Err(InvocationError::from(failure.error))));
          } else {
-@@ -496,32 +590,25 @@
+@@ -496,32 +633,25 @@
          }
      }
  
@@ -575,7 +634,7 @@
      pub fn auth_key(&self) -> [u8; 256] {
          self.state.mtp.auth_key()
      }
-@@ -563,6 +650,7 @@
+@@ -563,6 +693,7 @@
          state: sender.state.into_encrypted(auth),
          requests: sender.requests,
          next_ping: Instant::now() + PING_DELAY,
@@ -583,7 +642,7 @@
      })
  }
  
-@@ -574,3 +662,7 @@
+@@ -574,3 +705,7 @@
  ) -> Result<Sender<T, mtp::Encrypted>, io::Error> {
      Sender::connect(transport, mtp::Encrypted::build().finish(auth_key), addr).await
  }

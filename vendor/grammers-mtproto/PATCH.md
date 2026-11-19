@@ -41,8 +41,9 @@ the refresh cooldown. See the [message identifier rules][message-id] and
 [future salt request specification][future-salts].
 
 Completed transport writes record up to 2048 recent child and container
-headers for the current session. Standalone receipt packets keep a separate
-64-header history so they preserve slots for outstanding regular requests.
+headers for the current session. Standalone receipt and recovery packets keep
+a separate 64-header history so they preserve slots for outstanding regular
+requests.
 A rejection can adjust state once for that
 header with the original sequence number and a write age of at most five
 minutes. A matching aged rejection releases a pending internal refresh
@@ -62,13 +63,31 @@ application request. It advances scheduled salts first and alternates priority
 when a full-size application request needs the packet. See the [receipt
 specification][receipts].
 
-A detailed-info advisory repeats a receipt only for a recently acknowledged
-body. Recovery of a body mentioned only in an advisory still relies on peer
-redelivery and the higher-level recovery policy.
+A detailed-info advisory repeats a receipt for a recently acknowledged body.
+An advisory for a missing recent server body can queue a standalone
+`msg_resend_req` containing that server body ID. A reply advisory must match a
+recent fully written, unresolved request. Recovery never replays the original
+RPC. It shares idle write opportunities with receipts and gives application
+traffic a turn between standalone recovery packets.
+
+At most 128 bodies can be pending per session. The client retains up to 1024
+pending and completed records, deduplicating a server body ID while its record
+is retained. Completed records expire after 331 seconds from admission.
+A backward clock correction can make an expired unsolicited body ID eligible
+again.
+Saturation preserves ordinary replies and reports unresolved bodies after the
+current frame commits. A malformed frame cannot schedule new recoveries.
+The deadline is 10 seconds from admission. The client accepts a negative status
+only for the exact fully written service request. An original reply committed
+in the same frame takes precedence. A transport packet already packed can
+finish writing after its recovery ends without reopening the deadline.
+Loss of an internal salt reply releases its waiter. See [server body
+retransmission][resend].
 
 [message-id]: https://core.telegram.org/mtproto/description#message-identifier-msg-id
 [future-salts]: https://core.telegram.org/mtproto/service_messages#request-for-several-future-salts
 [receipts]: https://core.telegram.org/mtproto/service_messages_about_messages#acknowledgment-of-receipt
+[resend]: https://core.telegram.org/mtproto/service_messages_about_messages#explicit-request-to-re-send-messages
 
 The sender integration installs limits before InitConnection and after 404
 reconnection. Plain authorization handshake responses are checked by Sender

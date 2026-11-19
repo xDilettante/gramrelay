@@ -2,6 +2,106 @@
 use super::*;
 use std::sync::atomic::AtomicUsize;
 
+#[tokio::test]
+async fn recovery_deadline_wakes_an_idle_sender_and_completes_only_the_sent_request() {
+    struct TimedRecovery {
+        plain: mtp::Plain,
+        request: Option<MsgId>,
+        deadline: Option<std::time::Instant>,
+    }
+    impl mtp::Mtp for TimedRecovery {
+        fn push(
+            &mut self,
+            buffer: &mut grammers_mtproto::DequeBuffer<u8>,
+            body: &[u8],
+        ) -> Option<MsgId> {
+            let id = self.plain.push(buffer, body)?;
+            self.request = Some(id);
+            Some(id)
+        }
+        fn finalize(&mut self, buffer: &mut grammers_mtproto::DequeBuffer<u8>) -> Option<MsgId> {
+            self.plain.finalize(buffer)
+        }
+        fn on_packet_sent(&mut self) {
+            self.deadline = Some(std::time::Instant::now() + std::time::Duration::from_millis(20));
+        }
+        fn deserialize(
+            &mut self,
+            body: &mut [u8],
+        ) -> Result<Vec<mtp::Deserialization>, mtp::DeserializeError> {
+            self.plain.deserialize(body)
+        }
+        fn poll_recovery(
+            &mut self,
+            now: std::time::Instant,
+            results: &mut Vec<mtp::Deserialization>,
+        ) -> Option<std::time::Instant> {
+            if self.deadline.is_some_and(|deadline| deadline <= now) {
+                self.deadline = None;
+                results.push(mtp::Deserialization::ResponseUnavailable {
+                    target: mtp::RecoveryTarget::Request(self.request.unwrap()),
+                });
+            }
+            self.deadline
+        }
+    }
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut sender = Sender::connect(
+        grammers_mtproto::transport::Full::new(),
+        TimedRecovery {
+            plain: mtp::Plain::new(),
+            request: None,
+            deadline: None,
+        },
+        ServerAddr::Tcp {
+            address: listener.local_addr().unwrap(),
+        },
+    )
+    .await
+    .unwrap();
+    let (_server, _) = listener.accept().await.unwrap();
+    let (reply, waiting) = oneshot::channel();
+    sender.enqueue_body(tl::functions::Ping { ping_id: 1 }.to_bytes(), reply);
+
+    let gap = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let updates = sender.step().await.unwrap();
+            if !updates.is_empty() {
+                break updates;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(matches!(gap.as_slice(), [UpdatesLike::ConnectionClosed]));
+    assert!(matches!(
+        waiting.await.unwrap(),
+        Err(InvocationError::Dropped("response could not be recovered"))
+    ));
+    assert!(sender.requests.is_empty());
+
+    let mut updates = Vec::new();
+    let request = sender.state.mtp.request.unwrap();
+    sender.process_mtp_buffer(
+        vec![mtp::Deserialization::ResponseUnavailable {
+            target: mtp::RecoveryTarget::SaltRefresh(request),
+        }],
+        &mut updates,
+    );
+    assert!(updates.is_empty());
+    sender.process_mtp_buffer(
+        vec![mtp::Deserialization::ResponseUnavailable {
+            target: mtp::RecoveryTarget::Request(request),
+        }],
+        &mut updates,
+    );
+    assert!(matches!(
+        updates.as_slice(),
+        [UpdatesLike::ConnectionClosed]
+    ));
+}
+
 static DECODES: AtomicUsize = AtomicUsize::new(0);
 struct Counted;
 impl Deserializable for Counted {

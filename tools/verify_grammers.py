@@ -27,7 +27,7 @@ PACKAGES = {
     "grammers-mtproto": (
         "fc95dd02ac37101d8121e5098706a9c9b342e855ca7d7b8b5daa91ec7b119649",
         {"Cargo.toml", "src/authentication.rs", "src/connection.rs", "src/manual_tl.rs", "src/mtp/encrypted.rs", "src/mtp/mod.rs", "src/mtp/plain.rs"},
-        {"Cargo.lock", "PATCH.md", "tg-receive.patch", "LICENSE-APACHE", "src/mtp/tg_receive_tests.rs"},
+        {"Cargo.lock", "PATCH.md", "tg-receive.patch", "LICENSE-APACHE", "src/mtp/recovery.rs", "src/mtp/tg_receive_tests.rs"},
         "tg-receive.patch",
     ),
     "grammers-tl-types": (

@@ -264,6 +264,16 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
     /// If an error is returned, the connection should be treated
     /// as dead and the sender instance recreated.
     pub async fn step(&mut self) -> Result<Vec<UpdatesLike>, ReadError> {
+        let mut recovery_results = Vec::new();
+        let recovery_deadline = self
+            .state
+            .mtp
+            .poll_recovery(Instant::now().into_std(), &mut recovery_results);
+        if !recovery_results.is_empty() {
+            let mut updates = Vec::new();
+            self.process_mtp_buffer(recovery_results, &mut updates);
+            return Ok(updates);
+        }
         self.try_fill_write();
         if let Some(error) = self.state.mtp.serialize_error() {
             let error = ReadError::Serialize(error);
@@ -272,7 +282,10 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
         }
 
         let (mut reader, mut writer) = self.stream.split();
-        let sleep = sleep_until(self.next_ping);
+        let wake_at = recovery_deadline
+            .map(Instant::from_std)
+            .map_or(self.next_ping, |due| self.next_ping.min(due));
+        let sleep = sleep_until(wake_at);
         let (read, write) = self.state.io_buffers();
 
         trace!(
@@ -290,8 +303,14 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
                 })
             }
             _ = sleep => {
-                self.on_ping_timeout();
-                Ok(Vec::new())
+                let now = Instant::now();
+                if now >= self.next_ping {
+                    self.on_ping_timeout();
+                }
+                self.state.mtp.poll_recovery(now.into_std(), &mut recovery_results);
+                let mut updates = Vec::new();
+                self.process_mtp_buffer(recovery_results, &mut updates);
+                Ok(updates)
             }
         };
 
@@ -415,6 +434,7 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
         updates: &mut Vec<UpdatesLike>,
     ) {
         let mut rejections = Vec::new();
+        let mut unavailable = Vec::new();
         for result in results {
             match result {
                 mtp::Deserialization::OwnUpdate { msg_id, update } => {
@@ -427,10 +447,33 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
                 mtp::Deserialization::SessionRecreated => {
                     updates.push(UpdatesLike::ConnectionClosed)
                 }
+                mtp::Deserialization::ResponseUnavailable { target } => unavailable.push(target),
                 mtp::Deserialization::Failure(failure) => {
                     self.process_deserialize_error(failure, updates);
                 }
             }
+        }
+        let mut gap = false;
+        for target in unavailable {
+            match target {
+                mtp::RecoveryTarget::Request(request) => {
+                    if let Some(pending) = self.pop_request(request) {
+                        drop(pending.result.send(Err(InvocationError::Dropped(
+                            "response could not be recovered",
+                        ))));
+                    }
+                    gap = true;
+                }
+                mtp::RecoveryTarget::Unsolicited => gap = true,
+                mtp::RecoveryTarget::SaltRefresh(_) => {}
+            }
+        }
+        if gap
+            && !updates
+                .iter()
+                .any(|update| matches!(update, UpdatesLike::ConnectionClosed))
+        {
+            updates.push(UpdatesLike::ConnectionClosed);
         }
         // A matching reply in this frame resolves its request before a
         // notification referring to the whole outgoing container can interrupt it.

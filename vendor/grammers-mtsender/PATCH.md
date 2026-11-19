@@ -49,6 +49,11 @@ private/unpublished; see SPEC-source-distribution.md for the release boundary.
   outcome and no sender replay. Only read-only GetConfig during connection setup
   can make up to two clock or salt repairs. Session recreation feeds the same
   catch-up path as connection loss on the home data center.
+- The sender wakes for server-body recovery deadlines even when idle. Loss of
+  an application response completes its still-pending, fully written caller
+  with an unknown outcome. Application and unsolicited body loss trigger home
+  catch-up even if the caller has already left the queue. Salt refresh loss
+  is handled by the protocol layer.
 
 The recorded tg-safety.patch is checked against the hash-verified archive with
 `python tools/verify_grammers.py check` (cached archive), or add `--download` to

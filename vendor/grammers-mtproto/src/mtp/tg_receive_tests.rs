@@ -11,6 +11,8 @@ fn record_sent_header(state: &mut Encrypted, id: i64, sequence: i32) {
         sequence,
         sent_at: Instant::now(),
         rejected: false,
+        answered: false,
+        is_salt_refresh: state.salt_request_msg_id == Some(MsgId(id)),
     });
 }
 
@@ -566,6 +568,323 @@ fn rpc_error() -> Vec<u8> {
         error_message: "X".into(),
     })
     .to_bytes()
+}
+
+fn recent_answer_id(parity: u64) -> i64 {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    (((now.as_secs() - 1) << 32) | parity) as i64
+}
+
+fn detailed_notice(answer: i64, request: Option<i64>) -> manual_tl::Message {
+    let info = match request {
+        Some(msg_id) => tl::enums::MsgDetailedInfo::Info(tl::types::MsgDetailedInfo {
+            msg_id,
+            answer_msg_id: answer,
+            bytes: 20,
+            status: 0,
+        }),
+        None => tl::enums::MsgDetailedInfo::MsgNewDetailedInfo(tl::types::MsgNewDetailedInfo {
+            answer_msg_id: answer,
+            bytes: 20,
+            status: 0,
+        }),
+    };
+    manual_tl::Message {
+        msg_id: answer + 4,
+        seq_no: 0,
+        body: info.to_bytes(),
+    }
+}
+
+fn recovery_status(query: MsgId, status: u8) -> manual_tl::Message {
+    let body = tl::enums::MsgsStateInfo::Info(tl::types::MsgsStateInfo {
+        req_msg_id: query.0,
+        info: vec![status],
+    })
+    .to_bytes();
+    manual_tl::Message {
+        msg_id: 1,
+        seq_no: 0,
+        body,
+    }
+}
+
+#[test]
+fn detailed_reply_recovery_queries_only_the_server_body_and_commits_after_write() {
+    let answer = recent_answer_id(1);
+    let mut state = receiver();
+    state
+        .process_message(detailed_notice(answer, Some(42)))
+        .unwrap();
+    assert!(state.recoveries.pending_answer().is_none());
+
+    record_sent_header(&mut state, 42, 1);
+    for _ in 0..2 {
+        state
+            .process_message(detailed_notice(answer, Some(42)))
+            .unwrap();
+    }
+    assert_eq!(state.recoveries.pending_answer(), Some(answer));
+    assert!(state.acknowledgements.pending.is_empty());
+
+    let mut buffer = DequeBuffer::with_capacity(512, 128);
+    state.buffer_recovery(&mut buffer);
+    let encoded =
+        manual_tl::Message::deserialize(&mut Cursor::from_slice(buffer.as_ref())).unwrap();
+    let query = state.finalize(&mut buffer).unwrap();
+    assert_eq!(query.0, encoded.msg_id);
+    assert_eq!(encoded.seq_no % 2, 0);
+    assert!(
+        matches!(decode_exact::<tl::enums::MsgResendReq>(&encoded.body),
+        Ok(tl::enums::MsgResendReq::Req(value)) if value.msg_ids == [answer])
+    );
+    state.process_message(recovery_status(query, 2)).unwrap();
+    assert!(state.deserialization.is_empty());
+    state.on_packet_sent();
+    state
+        .process_message(recovery_status(query, 4 | 8))
+        .unwrap();
+    assert!(state.deserialization.is_empty());
+
+    let mut reply = rpc(rpc_error());
+    reply.msg_id = answer;
+    state
+        .process_message(container(&[&recovery_status(query, 2), &reply]))
+        .unwrap();
+    assert!(
+        matches!(state.deserialization.as_slice(), [Deserialization::RpcError(error)] if error.msg_id == MsgId(42))
+    );
+    assert!(state.acknowledgements.pending_ids.contains(&answer));
+    let mut expired = Vec::new();
+    assert_eq!(
+        state.poll_recovery(Instant::now() + Duration::from_secs(15), &mut expired),
+        None
+    );
+    assert!(expired.is_empty());
+}
+
+#[test]
+fn a_correlated_unavailable_response_stays_terminal_and_is_not_requested_again() {
+    let answer = recent_answer_id(1);
+    let mut state = receiver();
+    record_sent_header(&mut state, 42, 1);
+    state
+        .process_message(detailed_notice(answer, Some(42)))
+        .unwrap();
+    let mut buffer = DequeBuffer::with_capacity(512, 128);
+    let query = state.finalize(&mut buffer).unwrap();
+    state.on_packet_sent();
+    state.process_message(recovery_status(query, 1)).unwrap();
+    state.process_message(recovery_status(query, 1)).unwrap();
+    state
+        .process_message(detailed_notice(answer, Some(42)))
+        .unwrap();
+    assert!(matches!(
+        state.deserialization.as_slice(),
+        [Deserialization::ResponseUnavailable {
+            target: RecoveryTarget::Request(MsgId(42))
+        }]
+    ));
+    assert!(state.recoveries.pending_answer().is_none());
+    assert!(state.acknowledgements.pending.is_empty());
+}
+
+#[test]
+fn rejected_frames_do_not_schedule_recovery_and_unsolicited_loss_has_a_deadline() {
+    let answer = recent_answer_id(3);
+    let mut state = receiver();
+    let notice = detailed_notice(answer, None);
+    let unsupported = message(
+        tl::types::DestroySessionOk::CONSTRUCTOR_ID
+            .to_le_bytes()
+            .to_vec(),
+    );
+    assert!(
+        state
+            .process_message(container(&[&notice, &unsupported]))
+            .is_err()
+    );
+    assert!(state.recoveries.pending_answer().is_none());
+    state.process_message(notice).unwrap();
+    let mut events = Vec::new();
+    let deadline = state.poll_recovery(Instant::now(), &mut events).unwrap();
+    assert!(events.is_empty());
+    assert_eq!(state.poll_recovery(deadline, &mut events), None);
+    assert!(matches!(
+        events.as_slice(),
+        [Deserialization::ResponseUnavailable {
+            target: RecoveryTarget::Unsolicited
+        }]
+    ));
+    assert!(state.recoveries.pending_answer().is_none());
+}
+
+#[test]
+fn a_missing_internal_salt_response_releases_the_refresh_waiter() {
+    let answer = recent_answer_id(1);
+    let mut state = receiver();
+    state.salt_request_msg_id = Some(MsgId(42));
+    record_sent_header(&mut state, 42, 1);
+    state
+        .process_message(detailed_notice(answer, Some(42)))
+        .unwrap();
+    let mut events = Vec::new();
+    let deadline = state.poll_recovery(Instant::now(), &mut events).unwrap();
+    state.poll_recovery(deadline, &mut events);
+    assert!(state.salt_request_msg_id.is_none());
+    assert!(matches!(
+        events.as_slice(),
+        [Deserialization::ResponseUnavailable {
+            target: RecoveryTarget::SaltRefresh(MsgId(42))
+        }]
+    ));
+}
+
+#[test]
+fn a_salt_refresh_rpc_error_releases_the_waiter_on_frame_commit() {
+    let mut state = receiver();
+    state.salt_request_msg_id = Some(MsgId(42));
+    record_sent_header(&mut state, 42, 1);
+    let answer = recent_answer_id(1);
+    state
+        .process_message(detailed_notice(answer, Some(42)))
+        .unwrap();
+    let failure = rpc(rpc_error());
+    let unsupported = message(
+        tl::types::DestroySessionOk::CONSTRUCTOR_ID
+            .to_le_bytes()
+            .to_vec(),
+    );
+    assert!(
+        state
+            .process_message(container(&[&failure, &unsupported]))
+            .is_err()
+    );
+    assert_eq!(state.salt_request_msg_id, Some(MsgId(42)));
+    state.process_message(failure).unwrap();
+    assert!(state.salt_request_msg_id.is_none());
+    assert!(state.recoveries.pending_answer().is_none());
+}
+
+#[test]
+fn an_ack_attached_to_an_rpc_does_not_delay_a_pending_recovery() {
+    let mut state = receiver();
+    let mut buffer = DequeBuffer::with_capacity(512, 128);
+    let ping = tl::functions::Ping { ping_id: 1 }.to_bytes();
+    state.acknowledgements.enqueue(5).unwrap();
+    let original = state.push(&mut buffer, &ping).unwrap();
+    state.finalize(&mut buffer).unwrap();
+    state.on_packet_sent();
+    assert!(state.acknowledgements.previous_packet_carried_ack);
+    assert!(!state.acknowledgements.previous_packet_was_standalone_ack);
+    let answer = recent_answer_id(1);
+    state
+        .process_message(detailed_notice(answer, Some(original.0)))
+        .unwrap();
+    state.acknowledgements.enqueue(9).unwrap();
+
+    buffer.clear();
+    assert!(state.push(&mut buffer, &ping).is_none());
+    let query = state.finalize(&mut buffer).unwrap();
+    state.on_packet_sent();
+    assert!(state.recoveries.is_sent_query(query));
+    assert!(state.acknowledgements.pending_ids.contains(&9));
+    buffer.clear();
+    assert!(state.push(&mut buffer, &ping).is_some());
+}
+
+#[test]
+fn recovery_saturation_leaves_other_replies_in_the_frame_deliverable() {
+    let mut state = receiver();
+    let first = recent_answer_id(3);
+    for ordinal in 0..super::super::recovery::RECOVERY_LIMIT as i64 {
+        state
+            .process_message(detailed_notice(first + 4 * ordinal, None))
+            .unwrap();
+    }
+    assert_eq!(state.recoveries.pending_answer(), Some(first));
+    record_sent_header(&mut state, 42, 1);
+    record_sent_header(&mut state, 44, 1);
+    let unavailable = detailed_notice(first + 2, Some(44));
+    state
+        .process_message(container(&[&unavailable, &unavailable, &rpc(rpc_error())]))
+        .unwrap();
+    assert!(matches!(
+        state.deserialization.as_slice(),
+        [
+            Deserialization::RpcError(error),
+            Deserialization::ResponseUnavailable {
+                target: RecoveryTarget::Request(MsgId(44))
+            }
+        ] if error.msg_id == MsgId(42)
+    ));
+
+    let received_answer = first + 4 * (super::super::recovery::RECOVERY_LIMIT as i64 + 1);
+    let unsolicited = detailed_notice(received_answer, None);
+    let mut update = message(
+        tl::enums::Updates::Updates(tl::types::Updates {
+            updates: Vec::new(),
+            users: Vec::new(),
+            chats: Vec::new(),
+            date: 100,
+            seq: 1,
+        })
+        .to_bytes(),
+    );
+    update.msg_id = received_answer;
+    state.deserialization.clear();
+    state
+        .process_message(container(&[&unsolicited, &update]))
+        .unwrap();
+    assert!(matches!(
+        state.deserialization.as_slice(),
+        [Deserialization::Update(_)]
+    ));
+}
+
+#[test]
+fn session_recreation_reports_fresh_missing_responses_from_the_same_frame() {
+    let mut state = receiver();
+    record_sent_header(&mut state, 40, 1);
+    record_sent_header(&mut state, 42, 1);
+    state.process_message(new_session(40, 5, 1)).unwrap();
+    let notice = detailed_notice(recent_answer_id(1), Some(42));
+    state
+        .process_message(container(&[&notice, &new_session(40, 9, 2)]))
+        .unwrap();
+    assert!(matches!(
+        state.deserialization.as_slice(),
+        [
+            Deserialization::SessionRecreated,
+            Deserialization::ResponseUnavailable {
+                target: RecoveryTarget::Request(MsgId(42))
+            }
+        ]
+    ));
+    assert!(state.recoveries.pending_answer().is_none());
+}
+
+#[test]
+fn an_accepted_body_for_a_different_rpc_does_not_resolve_the_original() {
+    let answer = recent_answer_id(1);
+    let notice = detailed_notice(answer, Some(40));
+    let mut reply = rpc(rpc_error());
+    reply.msg_id = answer;
+    for children in [[&notice, &reply], [&reply, &notice]] {
+        let mut state = receiver();
+        record_sent_header(&mut state, 40, 1);
+        record_sent_header(&mut state, 42, 1);
+        state.process_message(container(&children)).unwrap();
+        assert!(matches!(
+            state.deserialization.as_slice(),
+            [
+                Deserialization::RpcError(error),
+                Deserialization::ResponseUnavailable {
+                    target: RecoveryTarget::Request(MsgId(40))
+                }
+            ] if error.msg_id == MsgId(42)
+        ));
+    }
 }
 
 #[test]

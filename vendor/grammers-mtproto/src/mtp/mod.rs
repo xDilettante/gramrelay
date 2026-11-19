@@ -18,8 +18,10 @@
 
 mod encrypted;
 mod plain;
+mod recovery;
 
 use std::fmt;
+use std::time::Instant;
 
 pub use encrypted::{
     ENCRYPTED_PACKET_HEADER_LEN, Encrypted, MAX_TRANSPORT_HEADER_LEN, MESSAGE_CONTAINER_HEADER_LEN,
@@ -67,6 +69,17 @@ pub struct DeserializationFailure {
     pub error: DeserializeError,
 }
 
+/// The message whose loss requires recovery.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum RecoveryTarget {
+    /// A passive server body with no corresponding client request.
+    Unsolicited,
+    /// The original application request.
+    Request(MsgId),
+    /// An internal request to refresh the server salt schedule.
+    SaltRefresh(MsgId),
+}
+
 /// Results from the deserialization of a response.
 #[derive(Debug)]
 pub enum Deserialization {
@@ -82,6 +95,11 @@ pub enum Deserialization {
     BadMessage(BadMessage),
     /// The server recreated an established protocol session. Updates may be missing.
     SessionRecreated,
+    /// Recovery of a server body expired or the peer reported that it could not deliver it.
+    ResponseUnavailable {
+        /// The original request or unsolicited message.
+        target: RecoveryTarget,
+    },
     /// Generic deserialization failure of a received message.
     Failure(DeserializationFailure),
 }
@@ -248,6 +266,11 @@ impl From<crypto::Error> for DeserializeError {
 ///
 /// [Mobile Transport Protocol]: https://core.telegram.org/mtproto/description
 pub trait Mtp {
+    /// Dispatches expired recovery notices and returns the next recovery deadline.
+    fn poll_recovery(&mut self, _: Instant, _: &mut Vec<Deserialization>) -> Option<Instant> {
+        None
+    }
+
     /// Whether the session must be replaced after an outgoing serialization failure.
     /// A caller must stop using the buffered data when this reports an error.
     fn serialize_error(&self) -> Option<SerializeError> {
