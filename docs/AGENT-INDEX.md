@@ -17,7 +17,7 @@ rustdoc; ARCHITECTURE.md хранит проектные решения, вкл�
 | Устойчивый приём и журнал | [durable_bot](../tg-agent/examples/durable_bot.rs), [durable_webhook](../tg-agent/examples/durable_webhook.rs), [journal](../tg-agent/examples/journal.rs) |
 | Выполнить разрешённое действие | [authorized_send](../tg-agent/examples/authorized_send.rs), [файл](../tg-agent/examples/authorized_document.rs); tg-agent feature executor |
 | CLI JSON / MCP | [CLI](AGENT-CLI.md), [MCP](AGENT-MCP.md); tg-agent features cli / mcp |
-| MTProto Session / raw / операции | [MT API](../tg-mtproto/README.md), [MT-агент](AGENT-MTPROTO.md); отдельный tg-mtproto, tg-agent feature mtproto |
+| MTProto Session / raw / операции | [Руководство MTProto](MTPROTO.md), [MT API](../tg-mtproto/README.md), [MT-агент](AGENT-MTPROTO.md). Отдельный tg-mtproto, tg-agent feature mtproto |
 | Обновить старый код/журнал | [MIGRATION](MIGRATION.md); сохраняйте прежние ключи и квитанции |
 | Платформы, сборки, поставка | [совместимость](COMPATIBILITY.md), [закрытые пакеты](PRIVATE-DISTRIBUTION.md) |
 

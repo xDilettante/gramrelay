@@ -37,5 +37,9 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 grammers-mtsender = { path = "../vendor/grammers-mtsender", default-features = false, features = ["tg-test-kit"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 
+[[example]]
+name = "offline_ping"
+required-features = ["test-kit"]
+
 [lints.rust]
 unsafe_code = "forbid"

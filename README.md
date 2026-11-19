@@ -1,20 +1,21 @@
 # GramRelay
 
-GramRelay — SDK для Telegram на Rust. В него входят типизированный клиент
-Bot API, отдельный MTProto-клиент и инструменты CLI/MCP для агентов. Текущая
-версия пакетов — `0.1.0-alpha.1`. [Архитектура](docs/ARCHITECTURE.md) ·
-[Критерии завершения](tasks/goal.md)
+GramRelay — SDK для Telegram на Rust. Чтобы написать бота, начните с
+типизированного клиента Bot API в крейте `tg`.
 
-Минимальный поддержанный Rust — 1.89. Windows MSVC проверена на 1.89.0 и
-1.100.0; [матрица и команды](docs/COMPATIBILITY.md) отдельно отмечают ещё не
-проверенные платформы. Собственный код пока [закрыт](LICENSE);
-[статус поставки](docs/PRIVATE-DISTRIBUTION.md) сохраняет отдельные лицензии SDK.
+## Первый бот на Bot API
 
-[Первый бот: команда и кнопка](docs/START.md) → [рецепты](docs/RECIPES.md) →
-[указатель для агента](docs/AGENT-INDEX.md). Общие обработчики из примера
-проверяются offline; live-запуск выбирается явно.
+[Пошаговое руководство](docs/START.md) показывает `/start`, кнопку и ответ на
+callback. Эту команду можно запустить из корня checkout с подготовленным
+кэшем Cargo. Она проверяет обработчики в памяти с синтетическими данными.
 
-Реализованы awaitable builders для send_message, answer_callback_query и send_document; inline-кнопки, разбор callback Update, типизированные ID, ограничения нагрузки и локальные HTTP mock-тесты.
+```powershell
+cargo run --locked --offline -p tg --example command_callback --features test-kit
+```
+
+[Рецепты Bot API](docs/RECIPES.md) помогают перейти к файлам, обработке ошибок
+и работе с обновлениями. Для отдельных задач доступны
+[руководство MTProto](docs/MTPROTO.md) и [указатель CLI/MCP](docs/AGENT-INDEX.md).
 
 ## Подключение
 
@@ -326,33 +327,38 @@ Webhook POST-pipeline создаёт span tg.webhook с attempt_id и событ
 
 Метрики tg.request.attempts, tg.request.duration_seconds и tg.request.active позволяют считать ошибки/отмены, строить перцентили и наблюдать активные попытки. Метки ограничены именами методов и фиксированными категориями; attempt_id не используется как метка. Каждая повторная попытка учитывается отдельно. Отмена после отправки имеет outcome=unknown; перегрузка — not_sent. Локальная валидация до общего пути исполнения не создаёт попытку. Exporter и histogram buckets выбирает приложение.
 
-## Примеры и проверка
+## Примеры и проверка Bot API
 
-Из корня проекта:
-
-```powershell
-cargo run --locked --offline --example mock_send
-cargo test --locked --all-targets
-cargo test --locked --doc
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo doc --locked --no-deps
-cargo audit
-```
-
-Первый пример запускает только локальный mock и не требует токена. Параметр --offline предполагает, что зависимости уже загружены. Остальные примеры выполняют реальные запросы при явном запуске в подготовленном окружении:
+Из корня проекта с загруженными зависимостями можно запустить локальный HTTP mock
+и тесты крейта `tg`.
 
 ```powershell
-cargo run --example send_message -- 123456789 "Привет!"
-cargo run --example upload_document -- 123456789 "C:/path/report.pdf"
-cargo run --example answer_callback -- "C:/path/update.json"
-cargo run --example polling
+cargo run --locked --offline -p tg --example mock_send
+cargo test --locked --offline -p tg --all-targets --all-features
+cargo test --locked --offline -p tg --doc
 ```
 
-Проверки выполнялись на Windows x86_64, Rust 1.98.0: 395 unit/integration-тестов workspace по умолчанию, 681 со всеми опциями (включая 200 проверок tg-mtproto), 16 doctests и 28 тестов инструментов. MCP SDK отдельно проходит 361 модульный и 29 интеграционных тестов с явной проверкой request-state. Патчи backend отдельно проходят 59 тестов протокольного ядра, 3 теста TL-примитивов, 24 TL doctest, 12 тестов sender (16 с тестовым RPC-слоем) и 20 исходных тестов MessageBoxes. Clippy и сборки без default features проходят. Офлайн-примеры test_kit, journal, update_store, durable_bot, authorized_send, authorized_read, authorized_callback, authorized_document и agent_json запускаются без сокетов; webhook_mock и durable_webhook используют только localhost и синтетическую личность; отдельная матрица tg проверена ранее на 106/119/89 тестах для стандартной, полной и клиентской конфигураций. Структурные fixtures охватывают все 425 типов и 193 метода, включая обязательные поля, запрет неизвестных параметров запроса и chat scope каждого известного события. MSRV 1.89.0 и stable 1.100.0 подтверждены на Windows и Linux x86_64 GNU отдельными матрицами из 28 стадий; обе macOS-ячейки ещё не проверены ([совместимость](docs/COMPATIBILITY.md)). Последние 52 Python-проверки инструментов прошли на Windows. Проверяются JSON/multipart, callback, файлы, локальные отказы, 429, 5xx, неизвестные ответы, тайм-ауты, ограничения нагрузки, redirects, секреты в диагностике, маршрутизация, polling, порядок событий и остановка. MCP дополнительно проверен через официальный SDK и настоящий stdio-процесс; офлайн-архив доступен для десяти заданий оценки, успешность LLM пока не измерена. SDK не обращался к живому Telegram в этих проверках.
+Примеры ниже обращаются к Telegram при запуске с подготовленным окружением.
 
-Для отдельного MTProto-клиента выбран grammers 0.12.0 после офлайн-прототипов grammers и TDLib. [Решение и границы проверки](docs/decisions/0016-mtproto-backend.md) фиксируют обязательные доработки. Реализованы зашифрованная Session и сетевой Client с типизированным raw TL, ограничениями, тайм-аутами и согласованной остановкой. Строгий входной разбор закреплён отдельными проверяемыми патчами SDK. Доступны вход бота/пользователя по коду и 2FA, проверка self-личности, ограниченная миграция DC и выход с постоянным карантином. [Прикладной API MTProto](tg-mtproto/README.md) поддерживает поиск собеседников, непрозрачные ссылки из зашифрованного кеша, отправку/редактирование текста, страницы истории и диалогов Main/Archive, отправку и скачивание документов с проверкой аккаунта и содержимого. Скачивание проверяет авторизацию датацентра и сохраняет полный проверенный файл без перезаписи существующего. Приёмник обновлений сохраняет целые партии до явного ACK, переживает перезапуск и сообщает о разрывах с отдельным восстановлением аккаунта или канала. Клиент M2 и интеграция агента M3 реализованы локально. [Подключение alpha из полного checkout](docs/INSTALL-SOURCE.md) сохраняет исправленные SDK во внешнем проекте без ручных patch-таблиц; воспроизводимый source ZIP и [локальная подготовка восьми закрытых Cargo-пакетов](docs/PRIVATE-DISTRIBUTION.md) прошли отдельную приёмку. Текущий статус приёмки записан в плане выпуска.
+```powershell
+cargo run -p tg --example send_message -- 123456789 "Привет!"
+cargo run -p tg --example upload_document -- 123456789 "C:/path/report.pdf"
+cargo run -p tg --example answer_callback -- "C:/path/update.json"
+cargo run -p tg --example polling
+```
 
-Хранилище сессий сохраняет аренду владельца, fencing и отдельный подтверждённый checkpoint. [Патч grammers-mtsender](vendor/grammers-mtsender/PATCH.md) обеспечивает согласованную остановку и сигнал потери updates вне заполненной очереди; [патч MessageBoxes](vendor/grammers-session/PATCH.md) добавляет наблюдение за буфером и безопасные промежуточные сравнения счётчиков. Эти этапы проверены на синтетических данных и localhost; совместимость с живым сервером этим не подтверждена.
+Тесты Bot API охватывают JSON и multipart, callback, файлы, тайм-ауты, лимиты,
+секреты в диагностике, маршрутизацию, polling и webhook.
+[Матрица совместимости](docs/COMPATIBILITY.md) · [Результаты проверок](tasks/todo.md)
 
-Для агентов реализован отдельный MTProto Executor со всеми восемью действиями, долговечными квотами/ключами и безопасными квитанциями. Callback использует непрозрачную ссылку с исходным TTL; документы — неизменяемые host-only handles, точные права и полную проверку байтов. Офлайн-примеры mtproto_authorized_text, mtproto_authorized_callback и mtproto_authorized_document проверяют повтор с прежним ключом без новой отправки. Журнал v9 сохраняет старые файлы и расширяет их привязку на MTProto-профили. Общий ToolSession и встроенные CLI/MCP адаптеры поддерживают MT при явном подключении хостом; расширенный каталог выбирается через tools/schema --mtproto, прежний Bot v1 сохранён. Самостоятельный CLI/MCP загружает подготовленные MTProto-профили через защищённую конфигурацию Host v2 без RPC при запуске; Session открывается без создания/инициализации, а закрытие ждёт исполнителя, клиентов и журнал. chrono удалён из всего workspace-графа зависимостей: rmcp обновлён до 3.11.0 с проверяемым патчем Jiff, а единственный hex-адаптер serde_with заменён без изменения формата сессий. Свежий cargo audit проверяет 337 пакетов без уязвимостей и предупреждений. [Решение и границы SDK-патча](docs/decisions/0019-maintained-mcp-clock.md) описывают совместимость MCP и оставшуюся upstream OAuth2-опцию, которую проект не включает. Полная цель остаётся активной. Источники контрактов: [docs/SOURCES.md](docs/SOURCES.md). План: [tasks/todo.md](tasks/todo.md).
+## Другие крейты GramRelay
+
+- [MTProto в крейте tg-mtproto](docs/MTPROTO.md) предоставляет собственные сессии,
+  авторизацию и работу с Telegram API. В руководстве есть офлайн-примеры и
+  команды проверки.
+- [CLI/MCP в крейте tg-agent](docs/AGENT-INDEX.md) добавляет разрешения, журнал и
+  инструменты для агентов. Поддержка MTProto включается опцией `mtproto`.
+
+Текущая версия пакетов — `0.1.0-alpha.1`. Минимальная версия Rust — 1.89.
+[Подключение из исходников](docs/INSTALL-SOURCE.md) · [Архитектура](docs/ARCHITECTURE.md) ·
+[Условия закрытой поставки](docs/PRIVATE-DISTRIBUTION.md) · [Лицензия](LICENSE)

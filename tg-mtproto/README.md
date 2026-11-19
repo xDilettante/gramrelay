@@ -1,5 +1,7 @@
 # tg-mtproto
 
+[Руководство MTProto с примерами](../docs/MTPROTO.md)
+
 `Session::open_existing` открывает только существующее инициализированное
 зашифрованное хранилище: отсутствующий или пустой файл не создаётся/не
 инициализируется. Применяется при загрузке готовых профилей CLI/MCP;
@@ -96,6 +98,39 @@ transitions exclude raw/identity jobs until their final outcome is classified.
 An unknown transition fences the generation before waking waiting jobs. The
 interactive flow uses opaque RAM-only challenges; see SPEC-mtproto-auth.md.
 Agent tools cannot initiate login.
+
+## Verify an existing session
+
+This probe connects to Telegram and checks the identity of a previously
+authorized session. The host supplies the expected account and the session key.
+
+```rust,no_run
+use std::path::Path;
+use tg_mtproto::{
+    AccountIdentity, Client, ClientOptions, Session, SessionBinding, SessionKey, SessionOptions,
+};
+
+async fn verify_existing(
+    protected_absolute_path: &Path,
+    binding: SessionBinding,
+    host_key: SessionKey,
+    expected: AccountIdentity,
+) -> Result<AccountIdentity, Box<dyn std::error::Error>> {
+    let session = Session::open_existing(
+        protected_absolute_path,
+        binding,
+        host_key,
+        SessionOptions::default(),
+    )
+    .await?;
+    let client = Client::new(session, ClientOptions::default())?;
+    let identity = client.verify_account(expected).await;
+    client.close().await?;
+    Ok(identity?)
+}
+```
+
+## Use an account facade
 
 Use a host account facade and an opaque peer reference for common actions:
 
