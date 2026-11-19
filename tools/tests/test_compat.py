@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -12,6 +13,26 @@ import check_compat as compat
 
 
 class Compatibility(unittest.TestCase):
+    def test_relocated_source_never_inherits_git_identity_from_its_parent(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+        }):
+            root = Path(temporary) / "репозиторий"
+            root.mkdir()
+            subprocess.run(["git", "init", "--quiet", "--template="], cwd=root, check=True)
+            subprocess.run([
+                "git", "-c", "user.name=Compatibility fixture", "-c", "user.email=fixture@example.invalid",
+                "commit", "--quiet", "--allow-empty", "-m", "Fixture",
+            ], cwd=root, check=True)
+            expected = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+            self.assertEqual(compat.git_context(root), (expected, False))
+            extracted = root / "relocated source"
+            extracted.mkdir()
+            (extracted / "Cargo.toml").write_text("", encoding="utf-8")
+            self.assertEqual(compat.git_context(extracted), (None, None))
+            self.assertEqual(compat.git_context(root), (expected, True))
+
     def test_isolated_feature_coverage_tracks_manifest_additions(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

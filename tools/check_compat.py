@@ -107,6 +107,25 @@ def execute(commands, evidence, context, source):
         raise
 
 
+def git_context(source):
+    root = subprocess.run(
+        ["git", "--no-replace-objects", "rev-parse", "--show-toplevel"],
+        cwd=source, capture_output=True, encoding="utf-8", check=False,
+    )
+    if root.returncode or Path(root.stdout.rstrip("\r\n")).resolve() != source.resolve():
+        return None, None
+    revision = subprocess.run(
+        ["git", "--no-replace-objects", "rev-parse", "HEAD"],
+        cwd=source, capture_output=True, text=True, check=False,
+    )
+    status = subprocess.run(
+        ["git", "--no-replace-objects", "-c", "core.fsmonitor=false", "status", "--porcelain", "--ignore-submodules=all"],
+        cwd=source, capture_output=True, check=False,
+    )
+    return (revision.stdout.strip() if revision.returncode == 0 else None,
+            bool(status.stdout) if status.returncode == 0 else None)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--toolchain", required=True, help="stable or an installed exact version, e.g. 1.89.0")
@@ -127,10 +146,8 @@ def main():
         if len(versions) != 1 or None in versions:
             raise ValueError("all three libraries must declare one verified rust-version")
         context["rustc"] = subprocess.check_output(["rustup", "run", args.toolchain, "rustc", "-Vv"], text=True)
-        revision = subprocess.run(["git", "--no-replace-objects", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=False)
-        status = subprocess.run(["git", "--no-replace-objects", "-c", "core.fsmonitor=false", "status", "--porcelain", "--ignore-submodules=all"], cwd=ROOT, capture_output=True, text=True, check=False)
-        context.update(commit=revision.stdout.strip() if revision.returncode == 0 else None,
-                       dirty=bool(status.stdout) if status.returncode == 0 else None,
+        commit, dirty = git_context(ROOT)
+        context.update(commit=commit, dirty=dirty,
                        declared_msrv=next(iter(versions)),
                        lock_sha256=hashlib.sha256((ROOT / "Cargo.lock").read_bytes()).hexdigest())
         commands = cases(ROOT, args.toolchain, target, args.suite)
