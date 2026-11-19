@@ -35,7 +35,7 @@ md-5 = { version = "=0.11.0", default-features = false, features = ["zeroize"] }
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "registry", "std"] }
 grammers-mtsender = { path = "../vendor/grammers-mtsender", default-features = false, features = ["tg-test-kit"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util", "time"] }
 
 [[example]]
 name = "offline_ping"
