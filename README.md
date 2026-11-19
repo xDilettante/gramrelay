@@ -1,6 +1,9 @@
-# Telegram Rust — alpha библиотеки
+# GramRelay
 
-Библиотека развивается до полного объёма [проекта архитектуры](docs/ARCHITECTURE.md). Crate находится в C:/dev/Rust/TelegramRust, версия 0.1.0-alpha.1. Имя tg рабочее; публикация отключена. Критерии завершения: [tasks/goal.md](tasks/goal.md).
+GramRelay — SDK для Telegram на Rust. В него входят типизированный клиент
+Bot API, отдельный MTProto-клиент и инструменты CLI/MCP для агентов. Текущая
+версия пакетов — `0.1.0-alpha.1`. [Архитектура](docs/ARCHITECTURE.md) ·
+[Критерии завершения](tasks/goal.md)
 
 Минимальный поддержанный Rust — 1.89. Windows MSVC проверена на 1.89.0 и
 1.100.0; [матрица и команды](docs/COMPATIBILITY.md) отдельно отмечают ещё не
@@ -17,7 +20,7 @@
 
 ```toml
 [dependencies]
-tg = { path = "C:/dev/Rust/TelegramRust" }
+tg = { path = "../gramrelay" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde_json = "1" # Для примера разбора callback Update
 ```

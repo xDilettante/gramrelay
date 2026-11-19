@@ -1,6 +1,6 @@
-# Telegram Rust
+# GramRelay
 
-This repository is developing the full Telegram library described in docs/ARCHITECTURE.md; crate name tg is provisional. Project name for reports: Telegram Rust.
+This repository develops the Telegram SDK described in docs/ARCHITECTURE.md. The Bot API crate is named tg. Project name for reports: GramRelay.
 
 - Read the active module spec and tasks/todo.md before changing behavior; SPEC-prototype.md records the completed initial slice.
 - Keep lazy request builders and one shared request/response path. Do not add automatic retries for ambiguous writes.
