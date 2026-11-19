@@ -785,28 +785,25 @@ mod tests {
         for lifetime in [false, true] {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("operations.sqlite");
-            let options = if lifetime {
-                JournalOptions::default().retention(Duration::from_millis(500))
-            } else {
-                JournalOptions::default().lease_duration(Duration::from_millis(500))
-            };
-            let journal = Journal::open(&path, options).await.unwrap();
+            let journal = Journal::open(&path, JournalOptions::default())
+                .await
+                .unwrap();
             let request =
                 OperationRequest::new("bot", "alice", "one", "send_message", &json!({})).unwrap();
             let Preparation::Ready(lease) = journal.prepare(request).await.unwrap() else {
                 panic!("expected reservation");
             };
             let (entered, waiting) = tokio::sync::oneshot::channel();
+            let (release, released) = std::sync::mpsc::channel();
             journal
                 .run(move |connection, _, _| {
                     let mut entered = Some(entered);
                     connection
-                        .busy_handler(Some(move |attempt| {
-                            if let Some(entered) = entered.take() {
-                                let _ = entered.send(());
-                            }
-                            std::thread::sleep(Duration::from_millis(1));
-                            attempt < 2000
+                        .busy_handler(Some(move |_| {
+                            entered.take().is_some_and(|entered| {
+                                entered.send(now()).is_ok()
+                                    && released.recv_timeout(Duration::from_secs(10)).is_ok()
+                            })
                         }))
                         .map_err(|_| storage())?;
                     Ok(())
@@ -817,30 +814,31 @@ mod tests {
             let transaction = blocker
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .unwrap();
-            let expires: i64 = transaction
-                .query_row(
-                    "SELECT lease_until_ms FROM operations WHERE operation_id='one'",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap();
             let worker = journal.clone();
             let task = tokio::spawn(async move { worker.begin(lease).await });
-            tokio::time::timeout(Duration::from_secs(2), waiting)
+            let blocked_at = tokio::time::timeout(Duration::from_secs(10), waiting)
                 .await
                 .unwrap()
+                .unwrap()
                 .unwrap();
-            let remaining = expires - now().unwrap();
-            assert!(
-                remaining > 0,
-                "fixture must enter lock wait before lease expiry"
-            );
-            tokio::time::sleep(Duration::from_millis(remaining as u64 + 20)).await;
+            // A timestamp sampled before the lock must precede this deadline.
+            let expires_at = blocked_at + 1;
+            let expire = if lifetime {
+                "UPDATE operations SET expires_at_ms=?1 WHERE operation_id='one'"
+            } else {
+                "UPDATE operations SET lease_until_ms=?1 WHERE operation_id='one'"
+            };
+            assert_eq!(transaction.execute(expire, [expires_at]).unwrap(), 1);
+            while now().unwrap() < expires_at {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
             transaction.commit().unwrap();
+            release.send(()).unwrap();
             assert_eq!(
                 task.await.unwrap().unwrap_err().kind(),
                 JournalErrorKind::LeaseLost
             );
+            journal.close().await.unwrap();
         }
     }
 
