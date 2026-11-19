@@ -15,6 +15,7 @@ use crate::Identifiable;
 
 const ALLOCATION_BUDGET: usize = 64 * 1024 * 1024;
 const VECTOR_ITEM_BUDGET: usize = 1024 * 1024;
+pub(crate) const NESTING_BUDGET: usize = 24;
 
 /// Errors that can be produced by [`Cursor`].
 #[derive(Clone, Debug, PartialEq)]
@@ -66,6 +67,7 @@ pub struct Cursor<'a> {
     pos: usize,
     remaining_allocation: usize,
     remaining_vector_items: usize,
+    remaining_nesting: usize,
 }
 
 impl<'a> Cursor<'a> {
@@ -82,6 +84,7 @@ impl<'a> Cursor<'a> {
             pos: 0,
             remaining_allocation: allocation.min(ALLOCATION_BUDGET),
             remaining_vector_items: vector_items.min(VECTOR_ITEM_BUDGET),
+            remaining_nesting: NESTING_BUDGET,
         }
     }
 
@@ -91,6 +94,24 @@ impl<'a> Cursor<'a> {
             .checked_sub(bytes)
             .ok_or(Error::LimitExceeded)?;
         Ok(())
+    }
+
+    fn with_nesting<T>(&mut self, decode: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        self.remaining_nesting = self
+            .remaining_nesting
+            .checked_sub(1)
+            .ok_or(Error::LimitExceeded)?;
+        let result = decode(self);
+        self.remaining_nesting += 1;
+        result
+    }
+
+    #[cfg(feature = "tl-api")]
+    pub(crate) fn read_box<T: Deserializable>(&mut self) -> Result<Box<T>> {
+        self.with_nesting(|buf| {
+            buf.charge_allocation(size_of::<T>())?;
+            Ok(Box::new(T::deserialize(buf)?))
+        })
     }
 
     // TODO not a fan we need to expose this (and a way to create `Cursor`),
@@ -160,6 +181,13 @@ impl<'a> Cursor<'a> {
     /// Reads the elements of a vector whose length was decoded by the caller.
     /// Nested vectors share the cursor's item and allocation budgets.
     pub fn read_vector<T: Deserializable>(&mut self, len: usize) -> Result<Vec<T>> {
+        if len == 0 {
+            return Ok(Vec::new());
+        }
+        self.with_nesting(|buf| buf.read_vector_items(len))
+    }
+
+    fn read_vector_items<T: Deserializable>(&mut self, len: usize) -> Result<Vec<T>> {
         let item_size = size_of::<T>();
         let bytes = len.checked_mul(item_size).ok_or(Error::LimitExceeded)?;
         if bytes > self.remaining_allocation {

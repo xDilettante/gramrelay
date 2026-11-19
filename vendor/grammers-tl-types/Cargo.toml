@@ -15,7 +15,7 @@ name = "grammers-tl-types"
 version = "0.12.0"
 publish = false
 authors = ["Lonami Exo <totufals@hotmail.com>"]
-build = "build.rs"
+build = "src/bounded_build.rs"
 include = [
     "build.rs",
     "src/*.rs",
@@ -83,7 +83,7 @@ optional = true
 version = "1.2.1"
 
 [build-dependencies.grammers-tl-gen]
-version = "0.12.0"
+version = "=0.12.0"
 
 [build-dependencies.grammers-tl-parser]
-version = "2.0.0"
+version = "=2.0.0"

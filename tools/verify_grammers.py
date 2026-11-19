@@ -33,7 +33,7 @@ PACKAGES = {
     "grammers-tl-types": (
         "eb4da570f8dbcea3e0d0a1746240045555bacc56b4d57d3a81204ee0e84736bd",
         {"Cargo.toml", "src/deserialize.rs"},
-        {"Cargo.lock", "PATCH.md", "tg-decode.patch", "LICENSE-APACHE", "src/tg_decode_tests.rs"},
+        {"Cargo.lock", "PATCH.md", "tg-decode.patch", "LICENSE-APACHE", "src/bounded_build.rs", "src/tg_decode_tests.rs"},
         "tg-decode.patch",
     ),
 }

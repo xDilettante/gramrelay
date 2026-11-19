@@ -1,16 +1,29 @@
 --- upstream/Cargo.toml
 +++ patched/Cargo.toml
-@@ -13,6 +13,7 @@
+@@ -13,8 +13,9 @@
  edition = "2024"
  name = "grammers-tl-types"
  version = "0.12.0"
 +publish = false
  authors = ["Lonami Exo <totufals@hotmail.com>"]
- build = "build.rs"
+-build = "build.rs"
++build = "src/bounded_build.rs"
  include = [
+     "build.rs",
+     "src/*.rs",
+@@ -82,7 +83,7 @@
+ version = "1.2.1"
+ 
+ [build-dependencies.grammers-tl-gen]
+-version = "0.12.0"
++version = "=0.12.0"
+ 
+ [build-dependencies.grammers-tl-parser]
+-version = "2.0.0"
++version = "=2.0.0"
 --- upstream/src/deserialize.rs
 +++ patched/src/deserialize.rs
-@@ -9,12 +9,20 @@
+@@ -9,12 +9,21 @@
  //! Types and traits involving the deserialization of the generated objects.
  
  use std::fmt;
@@ -20,6 +33,7 @@
 +
 +const ALLOCATION_BUDGET: usize = 64 * 1024 * 1024;
 +const VECTOR_ITEM_BUDGET: usize = 1024 * 1024;
++pub(crate) const NESTING_BUDGET: usize = 24;
  
  /// Errors that can be produced by [`Cursor`].
  #[derive(Clone, Debug, PartialEq)]
@@ -31,7 +45,7 @@
      /// The end of the buffer was reached earlier than anticipated, which
      /// implies there is not enough data to complete the deserialization.
      UnexpectedEof,
-@@ -43,6 +51,8 @@
+@@ -43,6 +52,8 @@
  impl fmt::Display for Error {
      fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
          match *self {
@@ -40,12 +54,13 @@
              Self::UnexpectedEof => write!(f, "unexpected eof"),
              Self::UnexpectedConstructor { id } => write!(f, "unexpected constructor: {id:08x}"),
          }
-@@ -54,12 +64,33 @@
+@@ -54,12 +65,53 @@
  pub struct Cursor<'a> {
      buf: &'a [u8],
      pos: usize,
 +    remaining_allocation: usize,
 +    remaining_vector_items: usize,
++    remaining_nesting: usize,
  }
  
  impl<'a> Cursor<'a> {
@@ -64,6 +79,7 @@
 +            pos: 0,
 +            remaining_allocation: allocation.min(ALLOCATION_BUDGET),
 +            remaining_vector_items: vector_items.min(VECTOR_ITEM_BUDGET),
++            remaining_nesting: NESTING_BUDGET,
 +        }
 +    }
 +
@@ -73,10 +89,28 @@
 +            .checked_sub(bytes)
 +            .ok_or(Error::LimitExceeded)?;
 +        Ok(())
++    }
++
++    fn with_nesting<T>(&mut self, decode: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
++        self.remaining_nesting = self
++            .remaining_nesting
++            .checked_sub(1)
++            .ok_or(Error::LimitExceeded)?;
++        let result = decode(self);
++        self.remaining_nesting += 1;
++        result
++    }
++
++    #[cfg(feature = "tl-api")]
++    pub(crate) fn read_box<T: Deserializable>(&mut self) -> Result<Box<T>> {
++        self.with_nesting(|buf| {
++            buf.charge_allocation(size_of::<T>())?;
++            Ok(Box::new(T::deserialize(buf)?))
++        })
      }
  
      // TODO not a fan we need to expose this (and a way to create `Cursor`),
-@@ -92,12 +123,68 @@
+@@ -92,12 +144,75 @@
          }
      }
  
@@ -120,6 +154,13 @@
 +    /// Reads the elements of a vector whose length was decoded by the caller.
 +    /// Nested vectors share the cursor's item and allocation budgets.
 +    pub fn read_vector<T: Deserializable>(&mut self, len: usize) -> Result<Vec<T>> {
++        if len == 0 {
++            return Ok(Vec::new());
++        }
++        self.with_nesting(|buf| buf.read_vector_items(len))
++    }
++
++    fn read_vector_items<T: Deserializable>(&mut self, len: usize) -> Result<Vec<T>> {
 +        let item_size = size_of::<T>();
 +        let bytes = len.checked_mul(item_size).ok_or(Error::LimitExceeded)?;
 +        if bytes > self.remaining_allocation {
@@ -148,7 +189,7 @@
      }
  }
  
-@@ -350,7 +437,7 @@
+@@ -350,7 +465,7 @@
              return Err(Error::UnexpectedConstructor { id });
          }
          let len = u32::deserialize(buf)?;
@@ -157,7 +198,7 @@
      }
  }
  
-@@ -370,11 +457,7 @@
+@@ -370,11 +485,7 @@
      /// ```
      fn deserialize(buf: Buffer) -> Result<Self> {
          let len = u32::deserialize(buf)?;
@@ -170,7 +211,7 @@
      }
  }
  
-@@ -416,7 +499,41 @@
+@@ -416,7 +527,41 @@
      /// );
      /// ```
      fn deserialize(buf: Buffer) -> Result<Self> {
@@ -213,7 +254,7 @@
      }
  }
  
-@@ -435,28 +552,47 @@
+@@ -435,28 +580,47 @@
      /// assert_eq!(Vec::<u8>::from_bytes(&[0x01, 0x7f, 0x00, 0x00]).unwrap(), vec![0x7f_u8]);
      /// ```
      fn deserialize(buf: Buffer) -> Result<Self> {
