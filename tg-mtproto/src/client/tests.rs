@@ -481,7 +481,7 @@ async fn an_owned_job_expiring_before_raw_dispatch_is_not_sent() {
     client.close().await.unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn an_observed_success_cannot_later_expire_and_close_the_generation() {
     let (_directory, session) = session().await;
     let mut options = ClientOptions::default()
@@ -493,7 +493,7 @@ async fn an_observed_success_cannot_later_expire_and_close_the_generation() {
         .invoke(&tl::functions::Ping { ping_id: 1 })
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(40)).await;
+    tokio::time::advance(Duration::from_millis(40)).await;
     client
         .invoke(&tl::functions::Ping { ping_id: 2 })
         .await
