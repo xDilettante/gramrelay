@@ -232,6 +232,8 @@ entries; this is navigation, not a transactional snapshot or update checkpoint.
 See SPEC-mtproto-dialogs.md. User-only dialogs support Main and Archive API peer
 folders, distinct from custom chat filters.
 
+## Send and download documents
+
 Upload and send one document intent, with an independently known content hash:
 
 `SendDocument::owned_bytes(name, mime, owner)` retains an immutable host owner
