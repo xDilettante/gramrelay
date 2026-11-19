@@ -41,7 +41,9 @@ the refresh cooldown. See the [message identifier rules][message-id] and
 [future salt request specification][future-salts].
 
 Completed transport writes record up to 2048 recent child and container
-headers for the current session. A rejection can adjust state once for that
+headers for the current session. Standalone receipt packets keep a separate
+64-header history so they preserve slots for outstanding regular requests.
+A rejection can adjust state once for that
 header with the original sequence number and a write age of at most five
 minutes. A matching aged rejection releases a pending internal refresh
 without applying a correction. Its direct future-salt reply can still finish
@@ -51,8 +53,22 @@ refresh if the notice identifies that request as part of the new generation.
 Rejected frames roll back applied notice effects, including rejection marks.
 Fresh recreation of an established session reports a catch-up signal.
 
+The receipt queue holds at most 16384 distinct IDs, including the batch in
+flight. Each `msgs_ack` carries at most 8192 IDs. A completed write consumes its
+prefix, while a discarded output buffer leaves the receipts due. A received
+frame that would exceed the queue limit rolls back its additions. The sender
+can flush a standalone receipt on its next write opportunity even without an
+application request. It advances scheduled salts first and alternates priority
+when a full-size application request needs the packet. See the [receipt
+specification][receipts].
+
+A detailed-info advisory repeats a receipt only for a recently acknowledged
+body. Recovery of a body mentioned only in an advisory still relies on peer
+redelivery and the higher-level recovery policy.
+
 [message-id]: https://core.telegram.org/mtproto/description#message-identifier-msg-id
 [future-salts]: https://core.telegram.org/mtproto/service_messages#request-for-several-future-salts
+[receipts]: https://core.telegram.org/mtproto/service_messages_about_messages#acknowledgment-of-receipt
 
 The sender integration installs limits before InitConnection and after 404
 reconnection. Plain authorization handshake responses are checked by Sender

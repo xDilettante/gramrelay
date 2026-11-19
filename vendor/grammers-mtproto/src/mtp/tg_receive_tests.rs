@@ -6,7 +6,7 @@ fn receiver() -> Encrypted {
 }
 
 fn record_sent_header(state: &mut Encrypted, id: i64, sequence: i32) {
-    state.sent_headers.push_back(SentHeader {
+    state.sent_history.regular.push_back(SentHeader {
         id: MsgId(id),
         sequence,
         sent_at: Instant::now(),
@@ -46,17 +46,299 @@ fn only_completed_transport_writes_record_container_and_message_headers() {
     let second = connection.buffer_request(&ping).unwrap();
     let container = connection.pack_outgoing_buffer().unwrap();
     let length = connection.io_buffers().1.len();
-    assert!(connection.mtp.sent_headers.is_empty());
+    assert!(connection.mtp.sent_history.regular.is_empty());
     assert!(!connection.handle_net_write(length - 1));
-    assert!(connection.mtp.sent_headers.is_empty());
+    assert!(connection.mtp.sent_history.regular.is_empty());
     assert!(connection.handle_net_write(1));
     let headers = connection
         .mtp
-        .sent_headers
+        .sent_history
+        .regular
         .iter()
         .map(|header| (header.id, header.sequence))
         .collect::<Vec<_>>();
     assert_eq!(headers, [(first, 1), (second, 3), (container, 4)]);
+}
+
+#[test]
+fn idle_transport_keeps_receipts_due_until_the_packet_finishes_writing() {
+    let mut connection = crate::connection::State::new(crate::transport::Full::new(), receiver());
+    let body = tl::enums::Pong::Pong(tl::types::Pong {
+        msg_id: 4,
+        ping_id: 1,
+    })
+    .to_bytes();
+    connection
+        .mtp
+        .process_message(message(body.clone()))
+        .unwrap();
+    let receipt = connection.pack_outgoing_buffer().unwrap();
+    let length = connection.io_buffers().1.len();
+    assert_eq!(connection.mtp.acknowledgements.pending, [1]);
+    assert!(!connection.handle_net_write(0));
+    assert!(!connection.handle_net_write(length - 1));
+    assert_eq!(connection.mtp.acknowledgements.pending, [1]);
+    let mut next = message(body);
+    next.msg_id = 3;
+    connection.mtp.process_message(next).unwrap();
+    assert_eq!(connection.mtp.acknowledgements.pending, [1, 3]);
+    assert!(connection.handle_net_write(1));
+    assert_eq!(connection.mtp.acknowledgements.pending, [3]);
+    assert_eq!(
+        connection.mtp.sent_history.standalone_receipts[0].id,
+        receipt
+    );
+    assert_eq!(
+        connection.mtp.sent_history.standalone_receipts[0].sequence,
+        0
+    );
+    connection.pack_outgoing_buffer().unwrap();
+    let length = connection.io_buffers().1.len();
+    assert!(connection.handle_net_write(length));
+    assert!(connection.mtp.acknowledgements.pending.is_empty());
+    assert!(connection.pack_outgoing_buffer().is_none());
+}
+
+#[test]
+fn receipt_queue_deduplicates_and_sends_bounded_batches() {
+    let mut state = receiver();
+    let limit = ACK_QUEUE_LIMIT as i64;
+    for id in 1..=limit {
+        state.acknowledgements.enqueue(id).unwrap();
+    }
+    state.acknowledgements.enqueue(1).unwrap();
+    assert_eq!(state.acknowledgements.pending.len(), ACK_QUEUE_LIMIT);
+    assert_eq!(
+        state.acknowledgements.enqueue(limit + 1),
+        Err(DeserializeError::LimitExceeded)
+    );
+    let mut buffer = DequeBuffer::with_capacity(512, 128);
+    state.buffer_acknowledgements(&mut buffer).unwrap();
+    let frame = manual_tl::Message::deserialize(&mut Cursor::from_slice(buffer.as_ref())).unwrap();
+    let tl::enums::MsgsAck::Ack(ack) = decode_exact::<tl::enums::MsgsAck>(&frame.body).unwrap();
+    assert_eq!(
+        ack.msg_ids,
+        (1..=ACK_BATCH_LIMIT as i64).collect::<Vec<_>>()
+    );
+    assert_eq!(frame.seq_no, 0);
+    let first_receipt = state.finalize(&mut buffer).unwrap();
+
+    buffer.clear();
+    let replacement = state.finalize(&mut buffer).unwrap();
+    assert_ne!(replacement, first_receipt);
+    assert_eq!(state.acknowledgements.pending.len(), ACK_QUEUE_LIMIT);
+    state.on_packet_sent();
+    assert_eq!(state.acknowledgements.pending.len(), ACK_BATCH_LIMIT);
+    assert_eq!(
+        state.acknowledgements.pending.front(),
+        Some(&(ACK_BATCH_LIMIT as i64 + 1))
+    );
+    buffer.clear();
+    state.finalize(&mut buffer).unwrap();
+    state.on_packet_sent();
+    assert!(state.acknowledgements.pending.is_empty());
+    assert!(state.acknowledgements.pending_ids.is_empty());
+    assert_eq!(
+        state.acknowledgements.recently_written.len(),
+        ACK_BATCH_LIMIT
+    );
+    assert_eq!(state.acknowledgements.written_ids.len(), ACK_BATCH_LIMIT);
+    assert!(!state.acknowledgements.written_ids.contains(&1));
+}
+
+#[test]
+fn detailed_info_acknowledges_only_a_recently_received_body() {
+    let mut state = receiver();
+    let mut info = message(
+        tl::enums::MsgDetailedInfo::MsgNewDetailedInfo(tl::types::MsgNewDetailedInfo {
+            answer_msg_id: 5,
+            bytes: 20,
+            status: 0,
+        })
+        .to_bytes(),
+    );
+    info.seq_no = 0;
+    let info_body = info.to_bytes();
+    state.process_message(info).unwrap();
+    assert!(state.acknowledgements.pending.is_empty());
+
+    let mut received = message(
+        tl::enums::Pong::Pong(tl::types::Pong {
+            msg_id: 4,
+            ping_id: 1,
+        })
+        .to_bytes(),
+    );
+    received.msg_id = 5;
+    state.process_message(received).unwrap();
+    let mut buffer = DequeBuffer::with_capacity(512, 128);
+    state.finalize(&mut buffer).unwrap();
+    state.on_packet_sent();
+    assert!(state.acknowledgements.pending.is_empty());
+    let info = manual_tl::Message::deserialize(&mut Cursor::from_slice(&info_body)).unwrap();
+    state.process_message(info).unwrap();
+    assert_eq!(state.acknowledgements.pending, [5]);
+}
+
+#[test]
+fn a_full_size_request_gets_room_during_continuous_receipts() {
+    let mut state = Encrypted::build()
+        .compression_threshold(None)
+        .finish([7; 256]);
+    let mut buffer = DequeBuffer::with_capacity(512, 128);
+    let body = vec![0; manual_tl::Message::MAX_BODY_SIZE];
+    for id in 1..=8 {
+        state.acknowledgements.enqueue(id).unwrap();
+    }
+    assert!(state.push(&mut buffer, &body).is_none());
+    state.finalize(&mut buffer).unwrap();
+    state.on_packet_sent();
+    buffer.clear();
+    for id in 9..=16 {
+        state.acknowledgements.enqueue(id).unwrap();
+    }
+    assert!(state.push(&mut buffer, &body).is_some());
+    state.finalize(&mut buffer).unwrap();
+    state.on_packet_sent();
+    assert_eq!(state.acknowledgements.pending.len(), 8);
+    buffer.clear();
+    assert!(state.push(&mut buffer, &body).is_none());
+    state.finalize(&mut buffer).unwrap();
+    state.on_packet_sent();
+    assert!(state.acknowledgements.pending.is_empty());
+}
+
+#[test]
+fn acknowledgement_only_output_preserves_regular_correlation_under_pressure() {
+    let mut state = receiver();
+    let salt_request = MsgId(4);
+    state.salt_request_msg_id = Some(salt_request);
+    for ordinal in 1..=SENT_HISTORY_LIMIT as i64 {
+        record_sent_header(&mut state, ordinal * 4, 1);
+    }
+    let mut buffer = DequeBuffer::with_capacity(512, 128);
+    for id in 1..=(2 * STANDALONE_RECEIPT_HISTORY_LIMIT) as i64 {
+        state.acknowledgements.enqueue(id).unwrap();
+        state.finalize(&mut buffer).unwrap();
+        state.on_packet_sent();
+        buffer.clear();
+    }
+    assert!(state.acknowledgements.pending.is_empty());
+    assert_eq!(state.sent_history.regular.len(), SENT_HISTORY_LIMIT);
+    assert_eq!(
+        state.sent_history.standalone_receipts.len(),
+        STANDALONE_RECEIPT_HISTORY_LIMIT
+    );
+    assert!(matches!(
+        state.sent_history.find(salt_request),
+        Some(SentHeaderLocation::Regular(0))
+    ));
+    assert!(matches!(
+        state.sent_history.find(MsgId(8)),
+        Some(SentHeaderLocation::Regular(1))
+    ));
+    state
+        .process_message(message(
+            tl::enums::FutureSalts::Salts(tl::types::FutureSalts {
+                req_msg_id: salt_request.0,
+                now: 100,
+                salts: tl::RawVec(Vec::new()),
+            })
+            .to_bytes(),
+        ))
+        .unwrap();
+    assert!(state.salt_request_msg_id.is_none());
+}
+
+#[test]
+fn idle_receipts_advance_the_salt_schedule_before_serialization() {
+    let mut state = Encrypted::build().first_salt(1).finish([7; 256]);
+    state.salts = vec![
+        tl::types::FutureSalt {
+            valid_since: 0,
+            valid_until: 100,
+            salt: 1,
+        },
+        tl::types::FutureSalt {
+            valid_since: 90,
+            valid_until: 300,
+            salt: 2,
+        },
+    ];
+    state.start_salt_time = Some((120, Instant::now()));
+    state.acknowledgements.enqueue(3).unwrap();
+    let mut buffer = DequeBuffer::with_capacity(512, 128);
+    assert!(state.finalize(&mut buffer).is_some());
+    assert_eq!(state.current_salt, 2);
+    assert_eq!(state.acknowledgements.in_packet, 1);
+}
+
+#[test]
+fn the_salt_request_leaves_alone_then_receipts_can_flush_while_it_waits() {
+    let mut state = Encrypted::build().first_salt(123).finish([7; 256]);
+    let mut buffer = DequeBuffer::with_capacity(512, 128);
+    state.acknowledgements.enqueue(3).unwrap();
+    let expected_salt_request = state.finalize(&mut buffer).unwrap();
+    assert_eq!(state.salt_request_msg_id, Some(expected_salt_request));
+    assert_eq!(state.acknowledgements.in_packet, 0);
+    state.on_packet_sent();
+
+    buffer.clear();
+    assert!(state.finalize(&mut buffer).is_some());
+    assert_eq!(state.acknowledgements.in_packet, 1);
+    state.on_packet_sent();
+    assert!(state.acknowledgements.pending.is_empty());
+    assert_eq!(state.salt_request_msg_id, Some(expected_salt_request));
+}
+
+#[test]
+fn incoming_recreation_replaces_an_obsolete_unpacked_salt_request() {
+    let mut state = Encrypted::build().first_salt(123).finish([7; 256]);
+    state.session_established = true;
+    record_sent_header(&mut state, 4, 1);
+    let mut buffer = DequeBuffer::with_capacity(512, 128);
+    let ping = tl::functions::Ping { ping_id: 1 }.to_bytes();
+    assert!(state.push(&mut buffer, &ping).is_none());
+    let obsolete = state.salt_request_msg_id.unwrap();
+    state.process_message(new_session(4, 5, 1)).unwrap();
+    assert!(state.salt_request_msg_id.is_none());
+
+    let replacement = state.finalize(&mut buffer).unwrap();
+    assert_ne!(replacement, obsolete);
+    assert_eq!(state.salt_request_msg_id, Some(replacement));
+    assert_eq!(state.acknowledgements.in_packet, 0);
+    state.on_packet_sent();
+    assert!(state.sent_history.find(obsolete).is_none());
+    assert!(state.sent_history.find(replacement).is_some());
+    assert_eq!(state.acknowledgements.pending, [5]);
+}
+
+#[test]
+fn overflowing_a_frame_rolls_back_its_receipts_only() {
+    let mut state = receiver();
+    for id in 1..ACK_QUEUE_LIMIT as i64 {
+        state.acknowledgements.enqueue(id).unwrap();
+    }
+    let pong = tl::enums::Pong::Pong(tl::types::Pong {
+        msg_id: 4,
+        ping_id: 1,
+    })
+    .to_bytes();
+    let mut first = message(pong.clone());
+    first.msg_id = ACK_QUEUE_LIMIT as i64;
+    let mut second = message(pong);
+    second.msg_id = first.msg_id + 1;
+    let mut frame = container(&[&first, &second]);
+    frame.seq_no = 0;
+    assert_eq!(
+        state.process_message(frame),
+        Err(DeserializeError::LimitExceeded)
+    );
+    assert_eq!(state.acknowledgements.pending.len(), ACK_QUEUE_LIMIT - 1);
+    assert!(!state.acknowledgements.pending_ids.contains(&first.msg_id));
+    assert!(state.deserialization.is_empty());
+    state.process_message(first).unwrap();
+    assert_eq!(state.acknowledgements.pending.len(), ACK_QUEUE_LIMIT);
 }
 
 #[test]
@@ -118,7 +400,7 @@ fn an_aged_internal_rejection_releases_refresh_without_correcting_state() {
     let mut state = receiver();
     let id = MsgId(4);
     record_sent_header(&mut state, id.0, 1);
-    state.sent_headers[0].sent_at -= SENT_HISTORY_AGE + Duration::from_secs(1);
+    state.sent_history.regular[0].sent_at -= SENT_HISTORY_AGE + Duration::from_secs(1);
     state.salt_request_msg_id = Some(id);
     state.process_message(bad_sequence(id, 1)).unwrap();
     assert_eq!(state.sequence, 0);
@@ -137,8 +419,8 @@ fn a_discarded_finalized_packet_does_not_enter_sent_history() {
     let sent = state.push(&mut buffer, &ping).unwrap();
     state.finalize(&mut buffer).unwrap();
     state.on_packet_sent();
-    assert!(state.sent_header_index(discarded).is_none());
-    assert!(state.sent_header_index(sent).is_some());
+    assert!(state.sent_history.find(discarded).is_none());
+    assert!(state.sent_history.find(sent).is_some());
 }
 
 #[test]
@@ -475,7 +757,7 @@ fn empty_internal_salt_reply_retains_current_salt_and_allows_requests() {
     let mut state = Encrypted::build().first_salt(123).finish([7; 256]);
     state.salt_request_msg_id = Some(MsgId(42));
     record_sent_header(&mut state, 42, 1);
-    state.sent_headers[0].sent_at -= SENT_HISTORY_AGE + Duration::from_secs(1);
+    state.sent_history.regular[0].sent_at -= SENT_HISTORY_AGE + Duration::from_secs(1);
     state
         .process_message(message(
             tl::enums::FutureSalts::Salts(tl::types::FutureSalts {
@@ -736,13 +1018,14 @@ fn rejected_controls_preserve_the_acknowledgements_of_prior_messages_only() {
         manual_tl::MessageContainer::CONSTRUCTOR_ID,
     ] {
         let mut state = receiver();
-        state.pending_ack.push(99);
+        state.acknowledgements.enqueue(99).unwrap();
         assert!(
             state
                 .process_message(message(constructor.to_le_bytes().to_vec()))
                 .is_err()
         );
-        assert_eq!(state.pending_ack, vec![99]);
+        assert_eq!(state.acknowledgements.pending, [99]);
+        assert_eq!(state.acknowledgements.pending_ids, HashSet::from([99]));
     }
 }
 
@@ -751,7 +1034,7 @@ fn a_rejected_container_rolls_back_the_effects_of_a_valid_prefix() {
     let mut state = receiver();
     let salts = state.salts.clone();
     let current = state.get_current_salt();
-    state.pending_ack.push(99);
+    state.acknowledgements.enqueue(99).unwrap();
     record_sent_header(&mut state, 4, 1);
     let first = new_session(4, 5, 23);
     let rejection = bad_sequence(MsgId(4), 1);
@@ -765,7 +1048,7 @@ fn a_rejected_container_rolls_back_the_effects_of_a_valid_prefix() {
             .process_message(container(&[&first, &rejection, &second]))
             .is_err()
     );
-    assert_eq!(state.pending_ack, vec![99]);
+    assert_eq!(state.acknowledgements.pending, [99]);
     assert_eq!(state.salts, salts);
     assert_eq!(state.get_current_salt(), current);
     assert_eq!(state.sequence, 0);

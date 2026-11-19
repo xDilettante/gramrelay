@@ -6,7 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::mem;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -42,7 +42,10 @@ const NUM_FUTURE_SALTS: i32 = 64;
 const SALT_USE_DELAY: i32 = 60;
 const MAX_MESSAGE_AHEAD: u64 = 30 << 32;
 const SENT_HISTORY_LIMIT: usize = 2048;
+const STANDALONE_RECEIPT_HISTORY_LIMIT: usize = 64;
 const SENT_HISTORY_AGE: Duration = Duration::from_secs(300);
+const ACK_BATCH_LIMIT: usize = 8192;
+const ACK_QUEUE_LIMIT: usize = 2 * ACK_BATCH_LIMIT;
 
 fn clock_correction(
     message_id: i64,
@@ -115,6 +118,117 @@ struct SentHeader {
     rejected: bool,
 }
 
+#[derive(Clone, Copy)]
+enum SentHeaderLocation {
+    Regular(usize),
+    StandaloneReceipt(usize),
+}
+
+#[derive(Default)]
+struct SentHistory {
+    regular: VecDeque<SentHeader>,
+    standalone_receipts: VecDeque<SentHeader>,
+}
+
+impl SentHistory {
+    fn find(&self, id: MsgId) -> Option<SentHeaderLocation> {
+        let id = id.0 as u64;
+        self.regular
+            .binary_search_by_key(&id, |header| header.id.0 as u64)
+            .ok()
+            .map(SentHeaderLocation::Regular)
+            .or_else(|| {
+                self.standalone_receipts
+                    .binary_search_by_key(&id, |header| header.id.0 as u64)
+                    .ok()
+                    .map(SentHeaderLocation::StandaloneReceipt)
+            })
+    }
+
+    fn get(&self, location: SentHeaderLocation) -> &SentHeader {
+        match location {
+            SentHeaderLocation::Regular(index) => &self.regular[index],
+            SentHeaderLocation::StandaloneReceipt(index) => &self.standalone_receipts[index],
+        }
+    }
+
+    fn get_mut(&mut self, location: SentHeaderLocation) -> &mut SentHeader {
+        match location {
+            SentHeaderLocation::Regular(index) => &mut self.regular[index],
+            SentHeaderLocation::StandaloneReceipt(index) => &mut self.standalone_receipts[index],
+        }
+    }
+
+    fn record_packet(&mut self, headers: &mut Vec<(MsgId, i32)>, standalone_receipt: bool) {
+        // Idle receipt traffic may be much more frequent than application RPCs.
+        let (history, limit) = if standalone_receipt {
+            (
+                &mut self.standalone_receipts,
+                STANDALONE_RECEIPT_HISTORY_LIMIT,
+            )
+        } else {
+            (&mut self.regular, SENT_HISTORY_LIMIT)
+        };
+        let evict = (history.len() + headers.len()).saturating_sub(limit);
+        history.drain(..evict);
+        let sent_at = Instant::now();
+        history.extend(headers.drain(..).map(|(id, sequence)| SentHeader {
+            id,
+            sequence,
+            sent_at,
+            rejected: false,
+        }));
+    }
+}
+
+#[derive(Default)]
+struct Acknowledgements {
+    pending: VecDeque<i64>,
+    pending_ids: HashSet<i64>,
+    recently_written: VecDeque<i64>,
+    written_ids: HashSet<i64>,
+    in_packet: usize,
+    previous_packet_carried_ack: bool,
+}
+
+impl Acknowledgements {
+    fn enqueue(&mut self, id: i64) -> Result<(), DeserializeError> {
+        if self.pending_ids.contains(&id) {
+            return Ok(());
+        }
+        if self.pending.len() >= ACK_QUEUE_LIMIT {
+            return Err(DeserializeError::LimitExceeded);
+        }
+        self.pending_ids.insert(id);
+        self.pending.push_back(id);
+        Ok(())
+    }
+
+    fn rollback(&mut self, length: usize) {
+        for id in self.pending.drain(length..) {
+            self.pending_ids.remove(&id);
+        }
+    }
+
+    fn packet_written(&mut self) {
+        let count = mem::take(&mut self.in_packet);
+        self.previous_packet_carried_ack = count != 0;
+        for id in self.pending.drain(..count) {
+            self.pending_ids.remove(&id);
+            if self.written_ids.contains(&id) {
+                continue;
+            }
+            if self.recently_written.len() == ACK_BATCH_LIMIT
+                && let Some(oldest) = self.recently_written.pop_front()
+            {
+                self.written_ids.remove(&oldest);
+            }
+            self.written_ids.insert(id);
+            self.recently_written.push_back(id);
+        }
+    }
+}
+
 /// An implementation of the [Mobile Transport Protocol] for ciphertext
 /// (encrypted) messages.
 ///
@@ -156,9 +270,10 @@ pub struct Encrypted {
     /// Headers from the packet being built or waiting for its transport write.
     packet_headers: Vec<(MsgId, i32)>,
     packet_finalized: bool,
-    sent_headers: VecDeque<SentHeader>,
+    salt_query_in_packet: Option<MsgId>,
+    sent_history: SentHistory,
     /// Rejection marks made by the current frame. A frame can roll them back.
-    applied_rejections: Vec<usize>,
+    applied_rejections: Vec<SentHeaderLocation>,
     /// Server generation ID and notification ID, ordered by unsigned wire ID.
     last_new_session: Option<(i64, u64)>,
     session_established: bool,
@@ -170,7 +285,7 @@ pub struct Encrypted {
     /// virtually all with the exception of containers and acknowledgments."
     ///
     /// [Content-related Message]: https://core.telegram.org/mtproto/description#content-related-message
-    pending_ack: Vec<i64>,
+    acknowledgements: Acknowledgements,
 
     /// If present, the threshold in bytes at which a message will be
     /// considered large enough to attempt compressing it. Otherwise,
@@ -228,11 +343,12 @@ impl Builder {
             serialize_error: None,
             packet_headers: Vec::new(),
             packet_finalized: false,
-            sent_headers: VecDeque::new(),
+            salt_query_in_packet: None,
+            sent_history: SentHistory::default(),
             applied_rejections: Vec::new(),
             last_new_session: None,
             session_established: false,
-            pending_ack: vec![],
+            acknowledgements: Acknowledgements::default(),
             compression_threshold: self.compression_threshold,
             deserialization: Vec::new(),
             msg_count: 0,
@@ -384,10 +500,51 @@ impl Encrypted {
         Some(msg_id)
     }
 
-    fn sent_header_index(&self, msg_id: MsgId) -> Option<usize> {
-        self.sent_headers
-            .binary_search_by_key(&(msg_id.0 as u64), |header| header.id.0 as u64)
-            .ok()
+    fn prepare_outgoing_buffer(&mut self, buffer: &mut DequeBuffer<u8>) -> bool {
+        if self.serialize_error.is_some() || (self.packet_finalized && !buffer.is_empty()) {
+            return false;
+        }
+        let stale_salt_query = self
+            .salt_query_in_packet
+            .is_some_and(|id| self.salt_request_msg_id != Some(id));
+        if self.packet_finalized || stale_salt_query {
+            // Only a salt query can become obsolete while building a packet.
+            // Direct callers can also discard the entire finalized buffer.
+            if self.salt_query_in_packet == self.salt_request_msg_id {
+                self.salt_request_msg_id = None;
+            }
+            self.acknowledgements.in_packet = 0;
+            self.packet_headers.clear();
+            self.packet_finalized = false;
+            self.salt_query_in_packet = None;
+            self.msg_count = 0;
+            buffer.clear();
+        }
+        if let Some((start_secs, start_instant)) = self.start_salt_time {
+            self.advance_salts(salt_time(start_secs, start_instant.elapsed()));
+        }
+        true
+    }
+
+    fn buffer_acknowledgements(&mut self, buffer: &mut DequeBuffer<u8>) -> Option<()> {
+        if self.acknowledgements.in_packet != 0
+            || self.acknowledgements.pending.is_empty()
+            || self.salt_query_in_packet.is_some()
+        {
+            return Some(());
+        }
+        let msg_ids: Vec<_> = self
+            .acknowledgements
+            .pending
+            .iter()
+            .take(ACK_BATCH_LIMIT)
+            .copied()
+            .collect();
+        let count = msg_ids.len();
+        let body = tl::enums::MsgsAck::Ack(tl::types::MsgsAck { msg_ids }).to_bytes();
+        self.try_serialize_msg(buffer, &body, false)?;
+        self.acknowledgements.in_packet = count;
+        Some(())
     }
 
     fn get_current_salt(&self) -> i64 {
@@ -433,6 +590,7 @@ impl Encrypted {
             }
             .to_bytes();
             self.salt_request_msg_id = self.try_serialize_msg(buffer, &body, true);
+            self.salt_query_in_packet = self.salt_request_msg_id;
         }
     }
 
@@ -525,7 +683,7 @@ impl Encrypted {
                 self.salt_request_msg_id,
                 self.sequence,
                 self.last_new_session,
-                self.pending_ack.len(),
+                self.acknowledgements.pending.len(),
             )
         });
         self.nesting += 1;
@@ -543,9 +701,9 @@ impl Encrypted {
             self.sequence = sequence;
             self.last_new_session = session;
             for index in self.applied_rejections.drain(..) {
-                self.sent_headers[index].rejected = false;
+                self.sent_history.get_mut(index).rejected = false;
             }
-            self.pending_ack.truncate(acks);
+            self.acknowledgements.rollback(acks);
             self.deserialization.truncate(results_before);
         }
         if self.nesting == 0 {
@@ -567,8 +725,9 @@ impl Encrypted {
                             Deserialization::RpcError(result) => result.msg_id,
                             _ => return false,
                         };
-                        self.sent_header_index(id)
-                            .is_some_and(|index| self.sent_headers[index].sequence % 2 == 1)
+                        self.sent_history
+                            .find(id)
+                            .is_some_and(|index| self.sent_history.get(index).sequence % 2 == 1)
                     });
             }
         }
@@ -580,7 +739,7 @@ impl Encrypted {
         message: manual_tl::Message,
     ) -> Result<(), DeserializeError> {
         if message.requires_ack() {
-            self.pending_ack.push(message.msg_id);
+            self.acknowledgements.enqueue(message.msg_id)?;
         }
 
         // Handle all the possible Service Messages:
@@ -907,10 +1066,10 @@ impl Encrypted {
         let bad_msg = decode_exact::<tl::enums::BadMsgNotification>(&message.body)?;
         let msg_id = MsgId(bad_msg.bad_msg_id());
         let internal = self.salt_request_msg_id == Some(msg_id);
-        let Some(index) = self.sent_header_index(msg_id) else {
+        let Some(index) = self.sent_history.find(msg_id) else {
             return Ok(());
         };
-        let sent = &mut self.sent_headers[index];
+        let sent = self.sent_history.get_mut(index);
         if sent.rejected
             || sent.sequence != bad_msg.bad_msg_seqno()
             || ((bad_msg.error_code() == 48)
@@ -1077,14 +1236,15 @@ impl Encrypted {
     ) -> Result<(), DeserializeError> {
         // TODO https://github.com/telegramdesktop/tdesktop/blob/8f82880b938e06b7a2a27685ef9301edb12b4648/Telegram/SourceFiles/mtproto/connection.cpp#L1790-L1820
         // TODO https://github.com/telegramdesktop/tdesktop/blob/8f82880b938e06b7a2a27685ef9301edb12b4648/Telegram/SourceFiles/mtproto/connection.cpp#L1822-L1845
-        let msg_detailed = decode_exact::<tl::enums::MsgDetailedInfo>(&message.body)?;
-        match msg_detailed {
-            tl::enums::MsgDetailedInfo::Info(x) => {
-                self.pending_ack.push(x.answer_msg_id);
-            }
-            tl::enums::MsgDetailedInfo::MsgNewDetailedInfo(x) => {
-                self.pending_ack.push(x.answer_msg_id);
-            }
+        let info = decode_exact::<tl::enums::MsgDetailedInfo>(&message.body)?;
+        let answer_id = match info {
+            tl::enums::MsgDetailedInfo::Info(value) => value.answer_msg_id,
+            tl::enums::MsgDetailedInfo::MsgNewDetailedInfo(value) => value.answer_msg_id,
+        };
+        // A pending receipt is already scheduled. Repeat a written receipt only
+        // for a body that this session has actually accepted.
+        if self.acknowledgements.written_ids.contains(&answer_id) {
+            self.acknowledgements.enqueue(answer_id)?;
         }
         Ok(())
     }
@@ -1152,7 +1312,7 @@ impl Encrypted {
 
         let msg_id = MsgId(salts.req_msg_id);
         if self.salt_request_msg_id == Some(msg_id) {
-            if self.pending_salt_reply.is_some() || self.sent_header_index(msg_id).is_none() {
+            if self.pending_salt_reply.is_some() || self.sent_history.find(msg_id).is_none() {
                 return Ok(());
             }
             // Response to internal request, do not propagate.
@@ -1305,11 +1465,11 @@ impl Encrypted {
         let tl::enums::NewSession::Created(session) =
             decode_exact::<tl::enums::NewSession>(&message.body)?;
         let first_id = MsgId(session.first_msg_id);
-        let Some(index) = self.sent_header_index(first_id) else {
+        let Some(index) = self.sent_history.find(first_id) else {
             return Ok(());
         };
         let notification = message.msg_id as u64;
-        if self.sent_headers[index].sent_at.elapsed() > SENT_HISTORY_AGE
+        if self.sent_history.get(index).sent_at.elapsed() > SENT_HISTORY_AGE
             || self
                 .last_new_session
                 .is_some_and(|(_, last)| notification <= last)
@@ -1529,52 +1689,22 @@ impl Mtp for Encrypted {
     ///
     /// [MTProto 2.0 guidelines]: https://core.telegram.org/mtproto/description.
     fn push(&mut self, buffer: &mut DequeBuffer<u8>, request: &[u8]) -> Option<MsgId> {
-        if self.serialize_error.is_some() {
+        if !self.prepare_outgoing_buffer(buffer) {
             return None;
-        }
-        if self.packet_finalized {
-            if !buffer.is_empty() {
-                return None;
-            }
-            // A direct caller can abandon a finalized packet by clearing the buffer.
-            // This cannot add its IDs to the sent history.
-            if self
-                .packet_headers
-                .first()
-                .is_some_and(|&(id, _)| self.salt_request_msg_id == Some(id))
-            {
-                self.salt_request_msg_id = None;
-            }
-            self.packet_headers.clear();
-            self.packet_finalized = false;
         }
         // TODO rather than taking in bytes, take requests, serialize them in place, and if too large drop the last part of the buffer
 
-        // Check to see if the next salt can be used already. If it can, drop the current one and,
-        // if the next salt is the last one, fetch more.
-        if let Some((start_secs, start_instant)) = self.start_salt_time {
-            self.advance_salts(salt_time(start_secs, start_instant.elapsed()));
-        }
-
         self.try_request_salts(buffer);
         if self.salt_request_msg_id.is_some() || self.serialize_error.is_some() {
-            // Don't add anything else to the container while we still need new salts.
+            // Application requests wait for the refresh. Finalize can still
+            // send a receipt packet after the salt request has been written.
             return None;
         }
 
-        // If we need to acknowledge messages, this notification goes in with the rest of requests
-        // so that we can also include it. It has priority over user requests because these should
-        // be sent out as soon as possible.
-        if !self.pending_ack.is_empty() {
-            // TODO avoid to_bytes here, serialize it in-place
-            let body = tl::enums::MsgsAck::Ack(tl::types::MsgsAck {
-                msg_ids: mem::take(&mut self.pending_ack),
-            })
-            .to_bytes();
-
-            // This should take priority during the next packet.
-            self.try_serialize_msg(buffer, &body, false)?;
-            // Don't allow other requests through until ^ can be sent.
+        if !self.acknowledgements.previous_packet_carried_ack {
+            // If a large RPC needs the whole packet, alternate priority so
+            // neither direction can keep the other waiting indefinitely.
+            self.buffer_acknowledgements(buffer)?;
         }
 
         // Requests that are too large would cause Telegram to close the
@@ -1603,7 +1733,16 @@ impl Mtp for Encrypted {
     }
 
     fn finalize(&mut self, buffer: &mut DequeBuffer<u8>) -> Option<MsgId> {
-        if self.packet_finalized || !self.finalize_plain(buffer) || buffer.is_empty() {
+        if !self.prepare_outgoing_buffer(buffer) {
+            return None;
+        }
+        if !self.acknowledgements.pending.is_empty() {
+            self.try_request_salts(buffer);
+        }
+        // If the current packet has no room, retain receipts for the next one.
+        // A terminal serializer error still prevents the whole packet going out.
+        let _ = self.buffer_acknowledgements(buffer);
+        if !self.finalize_plain(buffer) || buffer.is_empty() {
             None
         } else {
             let (padding, padding_len) = get_padding_data_v2(buffer.len());
@@ -1623,20 +1762,12 @@ impl Mtp for Encrypted {
         if !mem::take(&mut self.packet_finalized) {
             return;
         }
-        let evict = (self.sent_headers.len() + self.packet_headers.len())
-            .saturating_sub(SENT_HISTORY_LIMIT);
-        self.sent_headers.drain(..evict);
-        let sent_at = Instant::now();
-        self.sent_headers.extend(
-            self.packet_headers
-                .drain(..)
-                .map(|(id, sequence)| SentHeader {
-                    id,
-                    sequence,
-                    sent_at,
-                    rejected: false,
-                }),
-        );
+        self.salt_query_in_packet = None;
+        let standalone_receipt =
+            self.acknowledgements.in_packet != 0 && self.packet_headers.len() == 1;
+        self.sent_history
+            .record_packet(&mut self.packet_headers, standalone_receipt);
+        self.acknowledgements.packet_written();
     }
 
     /// Processes an encrypted response from the server.
