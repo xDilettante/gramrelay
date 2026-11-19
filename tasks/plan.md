@@ -21,12 +21,12 @@ and feature matrices pass; Linux x86_64 GNU repeats both compiler matrices,
 stable lint and relocated source consumer acceptance. Both macOS cells remain.
 Local normalized private-package preparation is also accepted on Windows1.100:
 eight exact private registry nodes, offline independent runtime, models and lock.
-Continue all Q1–Q4 documentation, evaluation, measurement, platform and security
-acceptance. The user chose to keep original code closed; record private licensing
-separately, preserving third-party licenses and publish=false. This does not
-remove or weaken any remaining completion gate.
+The user chose to keep original code closed. Private licensing is recorded
+alongside third-party licenses and publish=false. The closed candidate 94269339316a
+passed source ZIP and eight-package local registry acceptance on Windows.
 
 Q1 task documentation and the shared command/callback example have local
-MSRV/stable acceptance. The frozen 30-task corpus passes its reference
-checks, including T15 for the separately implemented InputFile::reader.
-Continue with fresh-agent first submissions and the ten-question MCP exercise.
+MSRV/stable acceptance. The first-check evaluation passed 27 of 30 tasks and
+the MCP archive evaluation passed ten questions. Q1 still needs the observed
+new-human live timing. Q2 benchmark and Q4 source-review evidence are recorded
+in tasks/todo.md. Both native macOS cells remain open under Q3.

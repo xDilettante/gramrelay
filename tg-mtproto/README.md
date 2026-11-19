@@ -76,8 +76,9 @@ a confirmed RPC refusal is `Rejected`, and a locally unsent call is `NotSent`.
 Diagnostics retain static kinds/codes and allowlisted numeric flood waits only.
 Raw TL is a trusted host capability, never a generic agent tool. Encoded response,
 gzip expansion and envelope nesting limits apply before SDK control/update
-decoding. Arbitrary Rust deserializers are trusted; decoded TL heap/stack fuzzing
-remains a release gate.
+decoding. The generated TL decoders also bound collection work, allocations and
+recursive depth. The SDK tests exercise these limits with seeded structural input.
+Host-provided Rust deserializers control their own resource use.
 
 Build this development package from the repository workspace.
 The hardened grammers graph uses direct relative SDK paths throughout the full
