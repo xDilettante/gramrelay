@@ -1,0 +1,339 @@
+use super::*;
+use crate::updates::StoredUpdate;
+use sha2::{Digest, Sha256};
+
+use crate::executor::callback_clock::CallbackClock;
+pub use crate::executor::callback_clock::CallbackClockPolicy;
+#[derive(Clone)]
+pub(super) struct ReferenceDeadline {
+    pub(super) received_at_ms: i64,
+    pub(super) expires_at_ms: i64,
+    instant: Instant,
+    clock: CallbackClock,
+}
+impl ReferenceDeadline {
+    pub(super) fn cap_rpc(&self, deadline: Instant) -> Instant {
+        deadline.min(self.instant)
+    }
+    pub(super) fn remaining(&self, time: i64) -> Result<Duration> {
+        let time = self.clock.observe(time);
+        let wall = self
+            .expires_at_ms
+            .checked_sub(time)
+            .filter(|v| *v > 0)
+            .and_then(|v| u64::try_from(v).ok())
+            .map(Duration::from_millis)
+            .ok_or_else(expired)?;
+        let mono = self
+            .instant
+            .checked_duration_since(Instant::now())
+            .filter(|v| !v.is_zero())
+            .ok_or_else(expired)?;
+        Ok(wall.min(mono))
+    }
+}
+/// Host-issued metadata. It is not deserializable and grants no extra authority.
+#[derive(Clone)]
+pub struct CallbackReference {
+    query_id: String,
+    scope: OperationScope,
+    deadline: ReferenceDeadline,
+}
+impl CallbackReference {
+    pub fn callback_query_id(&self) -> &str {
+        &self.query_id
+    }
+    pub fn expires_at_ms(&self) -> i64 {
+        self.deadline.expires_at_ms
+    }
+    pub fn chat_id(&self) -> Option<ChatId> {
+        self.scope.chat
+    }
+}
+impl fmt::Debug for CallbackReference {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CallbackReference([REDACTED])")
+    }
+}
+type Key = (Principal, String, [u8; 32]);
+#[derive(Default)]
+pub(super) struct CallbackRegistry {
+    entries: BTreeMap<Key, CallbackReference>,
+    clock: CallbackClock,
+}
+impl CallbackRegistry {
+    pub(super) fn prune(&mut self, time: i64) -> usize {
+        let time = self.clock.observe(time);
+        let before = self.entries.len();
+        self.entries
+            .retain(|_, reference| reference.deadline.remaining(time).is_ok());
+        before - self.entries.len()
+    }
+    pub(super) fn register_event(
+        &mut self,
+        profile: &Profile,
+        principal: &Principal,
+        name: &str,
+        event: &StoredUpdate,
+        options: &ExecutorOptions,
+        time: i64,
+    ) -> Result<CallbackReference> {
+        let time = self.clock.observe(time);
+        let mut reference = candidate(profile, event, options, time)?;
+        self.clock.observe(reference.deadline.clock.highest());
+        reference.deadline.clock = self.clock.clone();
+        let key = (
+            principal.clone(),
+            name.to_owned(),
+            callback_hash(&reference.query_id),
+        );
+        if let Some(existing) = self.entries.get(&key) {
+            if existing.scope != reference.scope
+                || existing.deadline.received_at_ms != reference.deadline.received_at_ms
+                || existing.deadline.expires_at_ms != reference.deadline.expires_at_ms
+            {
+                return Err(ExecutorError::new(ExecutorErrorKind::Conflict));
+            }
+            existing.deadline.remaining(time)?;
+            return Ok(existing.clone());
+        }
+        if self.entries.len() >= options.max_callback_references {
+            return Err(ExecutorError::new(ExecutorErrorKind::Capacity));
+        }
+        self.entries.insert(key, reference.clone());
+        Ok(reference)
+    }
+    fn lookup(
+        &mut self,
+        principal: &Principal,
+        name: &str,
+        id: &str,
+        time: i64,
+    ) -> Result<CallbackReference> {
+        let time = self.clock.observe(time);
+        let reference = self
+            .entries
+            .get(&(principal.clone(), name.to_owned(), callback_hash(id)))
+            .ok_or_else(unavailable)?;
+        if reference.query_id != id {
+            return Err(unavailable());
+        }
+        reference.deadline.remaining(time)?;
+        Ok(reference.clone())
+    }
+}
+impl Executor {
+    /// Explicit host observation from the same journal/profile. Never tool input.
+    pub fn observe_callback(
+        &self,
+        principal: &Principal,
+        profile: &str,
+        event: &StoredUpdate,
+    ) -> Result<CallbackReference> {
+        valid_id(profile)?;
+        let source = self
+            .profiles
+            .read()
+            .map_err(|_| ExecutorError::new(ExecutorErrorKind::InvalidPolicy))?
+            .get(profile)
+            .cloned()
+            .ok_or_else(|| ExecutorError::new(ExecutorErrorKind::Denied))?;
+        let time = now()?;
+        let reference = candidate(&source, event, &self.options, time)?;
+        self.policy.check_callback_observation(
+            principal,
+            profile,
+            source.bot_id,
+            reference.scope.chat,
+            time,
+        )?;
+        let mut registry = self
+            .callback_references
+            .lock()
+            .map_err(|_| ExecutorError::new(ExecutorErrorKind::InvalidPolicy))?;
+        let time = now()?;
+        registry.prune(time);
+        registry.register_event(&source, principal, profile, event, &self.options, time)
+    }
+    pub fn prune_callback_references(&self) -> Result<usize> {
+        Ok(self
+            .callback_references
+            .lock()
+            .map_err(|_| ExecutorError::new(ExecutorErrorKind::InvalidPolicy))?
+            .prune(now()?))
+    }
+    pub(super) fn callback_context(
+        &self,
+        profile: &Profile,
+        principal: &Principal,
+        request: &Request,
+    ) -> Result<(OperationScope, ReferenceDeadline)> {
+        self.policy
+            .check_lookup(principal, request, profile.bot_id, now()?)?;
+        let ActionCall::AnswerCallbackQuery(args) = request.call() else {
+            return Err(ExecutorError::new(ExecutorErrorKind::InvalidInput));
+        };
+        let reference = self
+            .callback_references
+            .lock()
+            .map_err(|_| ExecutorError::new(ExecutorErrorKind::InvalidPolicy))?
+            .lookup(
+                principal,
+                request.profile(),
+                &args.callback_query_id,
+                now()?,
+            )?;
+        Ok((reference.scope, reference.deadline))
+    }
+}
+fn candidate(
+    profile: &Profile,
+    event: &StoredUpdate,
+    options: &ExecutorOptions,
+    time: i64,
+) -> Result<CallbackReference> {
+    if !event.is_from(&profile.journal)
+        || !event
+            .cursor()
+            .matches_profile(profile.feed.executor_binding().1)
+    {
+        return Err(ExecutorError::new(ExecutorErrorKind::Denied));
+    }
+    let update = event.update();
+    if update.known_event_count() != 1
+        || !update.unknown_fields().is_empty()
+        || read::ambiguous_callback(update)
+    {
+        return Err(ExecutorError::new(ExecutorErrorKind::InvalidInput));
+    }
+    let callback = update
+        .callback_query
+        .as_ref()
+        .ok_or_else(|| ExecutorError::new(ExecutorErrorKind::InvalidInput))?;
+    let id = callback.id.as_str();
+    if id.is_empty() || id.len() > 256 || id.chars().any(char::is_control) {
+        return Err(ExecutorError::new(ExecutorErrorKind::InvalidInput));
+    }
+    let received = event.received_at_ms();
+    if received < 0 || received > time {
+        return Err(expired());
+    }
+    let expires = received
+        .checked_add(options.callback_ttl.as_millis() as i64)
+        .ok_or_else(expired)?;
+    let remaining = expires
+        .checked_sub(time)
+        .filter(|v| *v > 0)
+        .and_then(|v| u64::try_from(v).ok())
+        .map(Duration::from_millis)
+        .ok_or_else(expired)?;
+    let wall_deadline = Instant::now().checked_add(remaining).ok_or_else(expired)?;
+    let instant = match (options.callback_clock_policy, event.callback_received()) {
+        (_, Some(source)) => Instant::from_std(source)
+            .checked_add(options.callback_ttl)
+            .ok_or_else(expired)?
+            .min(wall_deadline),
+        (CallbackClockPolicy::TrustedWallClock, None) => wall_deadline,
+        (CallbackClockPolicy::JournalMonotonic, None) => return Err(unavailable()),
+    };
+    let deadline = ReferenceDeadline {
+        received_at_ms: received,
+        expires_at_ms: expires,
+        instant,
+        clock: CallbackClock::default(),
+    };
+    deadline.remaining(time)?;
+    let chat = callback
+        .message
+        .as_ref()
+        .map(|message| ChatId::new(i64::from(message.chat().id)))
+        .transpose()
+        .map_err(|_| ExecutorError::new(ExecutorErrorKind::InvalidInput))?;
+    let scope = OperationScope {
+        account: profile.expected,
+        action: Action::AnswerCallbackQuery,
+        chat,
+        file: None,
+        reference_hash: Some(callback_hash(id)),
+    };
+    Ok(CallbackReference {
+        query_id: id.to_owned(),
+        scope,
+        deadline,
+    })
+}
+fn callback_hash(id: &str) -> [u8; 32] {
+    // Stable across owners, registries, timestamps and process restarts. The
+    // database's profile + hash unique index fences all admitted aliases.
+    let mut hash = Sha256::new();
+    hash.update(b"tg-agent/callback/v1\0");
+    hash.update(id.as_bytes());
+    hash.finalize().into()
+}
+fn expired() -> ExecutorError {
+    ExecutorError::new(ExecutorErrorKind::ReferenceExpired)
+}
+fn unavailable() -> ExecutorError {
+    ExecutorError::new(ExecutorErrorKind::ReferenceUnavailable)
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+    #[tokio::test]
+    async fn bot_callback_copy_retains_registry_wall_expiry_after_clock_rollback() {
+        use crate::updates::{SourceMode, UpdateOptions};
+        let dir = tempfile::tempdir().unwrap();
+        let journal = Journal::open(
+            dir.path().join("callback-clock.sqlite"),
+            journal::JournalOptions::default(),
+        )
+        .await
+        .unwrap();
+        let feed = UpdateFeed::open(journal.clone(), "primary", 0, UpdateOptions::default())
+            .await
+            .unwrap();
+        let lease = feed.claim_source(SourceMode::Webhook).await.unwrap();
+        let update:tg::Update=serde_json::from_value(serde_json::json!({"update_id":1,"callback_query":{"id":"synthetic","from":{"id":2,"is_bot":false,"first_name":"Synthetic"},"chat_instance":"untrusted","message":{"message_id":1,"date":1,"chat":{"id":1,"type":"private"}}}})).unwrap();
+        feed.append_webhook(&lease, update).await.unwrap();
+        feed.release_source(lease).await.unwrap();
+        let event = feed
+            .read(None, 1)
+            .await
+            .unwrap()
+            .into_events()
+            .pop()
+            .unwrap();
+        let mock = tg::test_kit::MockTransport::new([]).unwrap();
+        let profile = Profile {
+            bot: mock.bot().unwrap(),
+            expected: crate::profiles::ProfileIdentity::bot_api(0).unwrap(),
+            journal: journal.clone(),
+            bot_id: 0,
+            identity: OnceCell::new(),
+            feed,
+        };
+        let principal = Principal::new("alice").unwrap();
+        let time = now().unwrap();
+        let mut registry = CallbackRegistry::default();
+        let reference = registry
+            .register_event(
+                &profile,
+                &principal,
+                "primary",
+                &event,
+                &ExecutorOptions::default(),
+                time,
+            )
+            .unwrap();
+        let copied = registry
+            .lookup(&principal, "primary", reference.callback_query_id(), time)
+            .unwrap();
+        assert_eq!(registry.prune(time + 30_000), 1);
+        assert_eq!(
+            copied.deadline.remaining(time).unwrap_err().kind(),
+            ExecutorErrorKind::ReferenceExpired
+        );
+        journal.close().await.unwrap();
+    }
+}

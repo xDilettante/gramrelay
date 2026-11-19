@@ -1,0 +1,153 @@
+# One-shot AsyncRead upload (client / Q1 T15 prerequisite)
+
+## Objective
+
+Expose the architecture's bounded one-shot streaming source through InputFile.
+The documentation corpus exposed that the public variants currently only accept
+bytes, owned bytes, paths and file IDs. Keep T15, implement this capability as a
+separate client slice, then validate its executable reference before corpus freeze.
+Do not count draft feasibility or reference runs as an agent success score.
+
+## API and ownership
+
+Add one constructor:
+
+```rust
+pub fn reader(
+    name: impl Into<String>,
+    reader: impl tokio::io::AsyncRead + Send + 'static,
+    length: u64,
+) -> InputFile;
+```
+
+The reader is owned once; no Clone/reopen/replay factory or full-file RAM copy.
+Accept !Unpin and !Sync readers by boxing/pinning internally. Preserve existing
+InputFile Send+Sync auto traits with private per-reader shared state. A std Mutex
+may protect the pinned reader/progress and a registered body waker during a
+nonblocking poll/state transition; never hold it across await. No global lock
+or background cancellation task. Other source behavior and all agent file-handle
+APIs stay unchanged.
+Arbitrary AsyncRead implementations are trusted Rust code; this is not a new
+raw-stream tool or permission boundary for an untrusted agent.
+
+## Byte and error contract
+
+- length defines exactly the prefix to upload. Preflight validates name and the
+  existing remaining upload budget before polling the reader. Zero length does
+  not poll it; after length bytes, do not probe/read the suffix or wait for EOF.
+- Use Tokio Take to enforce that prefix plus a small AsyncRead adapter that
+  reports premature EOF while bytes remain. ReaderStream provides bounded
+  chunks/backpressure; never read_to_end or stage a copy on disk.
+- All sources use the existing shared attachment preparation/request path,
+  semaphore and absolute deadline. Local bad name/size is NotSent; read errors,
+  partial upload, timeout and cancellation after dispatch remain Unknown.
+- Sanitize reader I/O failures before they can enter body-error diagnostic
+  chains. Public Error contains only existing safe kind/field/outcome data;
+  reader error strings/sources, credentials and payload bytes are never retained.
+- Attachment retry refusal applies before reading this source, for direct
+  send_document and generated named/nested attachment calls. No automatic
+  replay, detached library producer task or widening agent grants.
+- A request-scoped guard must survive preparation/send/response handling for
+  every reader attachment in direct and generated calls. On completion or drop
+  (including a cancelled caller), it cancels/wakes the body and takes/drops the
+  actual reader from shared state, even if Hyper still retains a body adapter.
+  This is a per-reader control mechanism, not a promise to synchronously join
+  reqwest/Hyper connection drivers or caller-owned producer tasks.
+- An ok:true response is not sufficient while the reader prefix is incomplete
+  or failed. Check recorded completion/error state before returning success;
+  return a static safe Unknown upload error if the body has not supplied the
+  prefix. Preserve a confirmed remote Rejected result while cancelling the
+  remaining source. Do not wait for an unread suffix. Do not let early success
+  or a request future disappearing hide EOF/I/O failure or retain the reader.
+  Mark completion when the body adapter asks for the next chunk after the
+  prefix and receives clean EOF. A zero remaining byte count inside the last
+  AsyncRead call does not prove that ReaderStream handed that chunk to its caller.
+  After completion, the body still sees clean EOF if the request drops its guard.
+  This checks payload handoff to the transport rather than remote receipt of
+  the multipart trailer.
+- The private reader part uses reqwest Part::stream with an unknown HTTP part
+  length, while length remains our enforced prefix/budget. The authenticated
+  reqwest 0.13.5 source computes known Form lengths with unchecked u64 additions;
+  do not introduce a caller-controlled u64 overflow through stream_with_length.
+  Exercise length=u64::MAX with an explicitly large configured budget and a tiny
+  short reader: fail safely, never panic/allocate by declared size. HTTP/1.1 may
+  use chunked transfer; do not change existing bytes/owned/path wire behavior.
+- The reader drops when the consuming request is dropped/cancelled/completed.
+  External producer tasks remain the caller's responsibility. Reader source
+  polling never happens merely by constructing/dropping a lazy descriptor.
+
+## Tests, scope and commands
+
+Read src/files.rs, shared request/typed attachment code and existing tests first.
+Add behavioral RED tests before implementation: happy exact prefix/no suffix
+read, zero, premature EOF/error redaction, !Unpin/!Sync reader, invalid/oversized
+preflight with zero polls, pending reader deadline/cancellation/drop/capacity,
+generated attachments and retry refusal. Use synthetic data and localhost or
+MockTransport. Verify both production HTTP and in-memory paths.
+Add production localhost early-response RED tests: retain Incoming body at the
+server, respond ok:true after a client reader becomes Pending, assert no false
+success and reader release before returning/dropping the caller. Also exercise
+early confirmed refusal and a partial/short reader racing a successful response.
+MockTransport drains the body before replying and cannot prove these cases.
+MockTransport's body-capture ceiling is not a large-upload memory benchmark.
+Verify the adapter transition between reading the last bytes and reporting EOF
+and the result of polling the completed adapter after dropping its guard.
+Add compile assertions for preserved auto traits and a small runnable stream
+example/recipe. Keep schema/SDK source, dependencies and Cargo.lock unchanged.
+
+```
+cargo test --locked -p tg --features test-kit --test reader_upload
+cargo test --locked --workspace --all-targets
+cargo test --locked --workspace --all-features --all-targets
+cargo test --locked --workspace --all-features --doc
+cargo fmt --all -- --check
+cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
+python -m unittest discover -s tools/tests -v
+python tools/schema.py check
+cargo audit
+```
+
+Use bounded separate targets/evidence, check the 20 GiB reserve/budget, and clean
+only terminal owned build caches with Cargo. Verify the new surface on Rust
+1.89.0 and current stable; broader native matrices remain the compatibility gate.
+
+Sources: pinned local reqwest 0.13.5 async_impl/multipart.rs compute_length/
+PartLength; [Tokio Take](https://docs.rs/tokio/1.54.1/tokio/io/trait.AsyncReadExt.html#method.take),
+[ReaderStream](https://docs.rs/tokio-util/0.7.20/tokio_util/io/struct.ReaderStream.html),
+[reqwest multipart](https://docs.rs/reqwest/0.13.5/reqwest/multipart/index.html).
+
+First scoped review exposed the early-response lifecycle/completeness gaps
+above. Pinned hyper-util 0.1.21 legacy client may return response and spawn
+on_idle while an upload is outstanding; hyper 1.12.0 H1 dispatch retains body_rx
+separately from response delivery. The guard and completion state are required
+before implementation acceptance; a bare ReaderStream variant is insufficient.
+Cross-model skipped in the autonomous continuation.
+
+## Acceptance evidence
+
+InputFile::reader now accepts owned AsyncRead + Send + 'static values. Direct
+documents and generated attachments carry reader guards through the shared
+request and response path. Prefix reads use Tokio Take and an 8 KiB ReaderStream.
+Reader I/O errors enter the body as static diagnostics. HTTP/1.1 reader
+attachments can use chunked transfer, which keeps the declared u64 count out
+of multipart header and boundary length arithmetic.
+
+Windows x86_64 MSVC passed ten targeted tests on Rust 1.89.0 and 1.100.0. Cases
+include exact prefix and empty input, non-Sync and non-Unpin readers, total
+attachment budgets, retry refusal, short/I/O errors, early HTTP responses,
+timeout and caller drop. Disabling the completion check reproduced a false
+success in the localhost test. The finer transition test also failed before
+the EOF fix and now passes on both compilers. Scoped re-review found no
+remaining production issue. Its remaining test finding was addressed by the
+localhost short-EOF race using an actual duplex reader and an early ok:true.
+
+Stable workspace runs passed 408 default tests, 693 all-feature tests and
+16 doctests. The short-EOF race was added after the all-feature binaries were
+built and passed in the final default and both focused runs. Clippy with
+-D warnings, fmt, the test_kit offline example, 52 Python tests, schema and
+all five SDK verifiers passed. The fresh root lock audit scanned 337 packages
+with no advisories reported. Evidence lives in target/reader-upload-*.log.
+
+Cargo cleaned 8.8 GiB and 725.1 MiB from the two completed targets. The
+reference example and regression suite are available for the T15 harness.
+The 30-task corpus remains draft pending executable evaluation fixtures.

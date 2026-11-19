@@ -1,0 +1,15 @@
+[package]
+name = "telegram-external-consumer"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+tg = { @tg@, default-features = false, features = ["webhook", "test-kit", "tracing", "metrics"] }
+tg-agent = { @tg-agent@, default-features = false, features = ["mcp", "mtproto", "webhook", "tracing", "metrics"@agent-test-kit@] }
+tg-mtproto = { @tg-mtproto@, default-features = false, features = [@mt-test-kit@] }
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt", "time", "io-util"] }

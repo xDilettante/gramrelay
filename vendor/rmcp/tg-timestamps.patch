@@ -1,0 +1,349 @@
+--- upstream/Cargo.toml
++++ patched/Cargo.toml
+@@ -14,6 +14,7 @@
+ rust-version = "1.88"
+ name = "rmcp"
+ version = "3.11.0"
++publish = false
+ build = "build.rs"
+ exclude = ["tests/test_package_license.rs"]
+ autolib = false
+@@ -923,7 +924,6 @@
+ 
+ [dependencies.schemars]
+ version = "1.0"
+-features = ["chrono04"]
+ optional = true
+ 
+ [dependencies.serde]
+@@ -1027,7 +1027,6 @@
+ 
+ [dev-dependencies.schemars]
+ version = "1.1.0"
+-features = ["chrono04"]
+ 
+ [dev-dependencies.serde_json]
+ version = "1.0"
+@@ -1057,22 +1056,17 @@
+ [dev-dependencies.url]
+ version = "2.4"
+ 
+-[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies.chrono]
+-version = "0.4.38"
++[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies.jiff]
++version = "=0.2.46"
+ features = [
+-    "serde",
+-    "clock",
+     "std",
+-    "oldtime",
++    "js",
+ ]
+ default-features = false
+ 
+-[target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies.chrono]
+-version = "0.4.38"
+-features = [
+-    "serde",
+-    "now",
+-]
++[target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies.jiff]
++version = "=0.2.46"
++features = ["std"]
+ default-features = false
+ 
+ [target."cfg(unix)".dependencies.libc]
+--- upstream/src/lib.rs
++++ patched/src/lib.rs
+@@ -3,6 +3,7 @@
+ #![doc = include_str!("../README.md")]
+ 
+ mod error;
++mod tg_timestamp;
+ pub use error::{ErrorData, RmcpError};
+ 
+ /// Basic data types in MCP specification
+--- upstream/src/model/annotated.rs
++++ patched/src/model/annotated.rs
+@@ -3,7 +3,8 @@
+ //! The `Annotations` struct carries optional hints about audience, priority, and freshness.
+ //! Individual content/resource types embed `annotations: Option<Annotations>` directly.
+ 
+-use chrono::{DateTime, Utc};
++/// Maintained timestamp type used by the resource annotation builders.
++pub use jiff::Timestamp;
+ use serde::{Deserialize, Serialize};
+ 
+ use super::Role;
+@@ -33,14 +34,14 @@
+     /// # Panics
+     ///
+     /// Panics if `priority` is not in the inclusive range `0.0..=1.0`.
+-    pub fn for_resource(priority: f32, timestamp: DateTime<Utc>) -> Self {
++    pub fn for_resource(priority: f32, timestamp: Timestamp) -> Self {
+         assert!(
+             (0.0..=1.0).contains(&priority),
+             "Priority {priority} must be between 0.0 and 1.0"
+         );
+         Self {
+             priority: Some(priority),
+-            last_modified: Some(timestamp.to_rfc3339()),
++            last_modified: Some(crate::tg_timestamp::rfc3339(timestamp)),
+             audience: None,
+         }
+     }
+@@ -56,20 +57,19 @@
+     }
+ 
+     /// Sets `lastModified` from a typed timestamp, serialized as RFC 3339.
+-    pub fn with_timestamp(mut self, timestamp: DateTime<Utc>) -> Self {
+-        self.last_modified = Some(timestamp.to_rfc3339());
++    pub fn with_timestamp(mut self, timestamp: Timestamp) -> Self {
++        self.last_modified = Some(crate::tg_timestamp::rfc3339(timestamp));
+         self
+     }
+ 
+     /// Sets `lastModified` to the current time, serialized as RFC 3339.
+     pub fn with_timestamp_now(self) -> Self {
+-        self.with_timestamp(Utc::now())
++        self.with_timestamp(Timestamp::now())
+     }
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+-    use chrono::TimeZone;
+     use serde_json::json;
+ 
+     use super::*;
+@@ -111,11 +111,11 @@
+ 
+     #[test]
+     fn timestamp_round_trips_as_rfc3339_string() {
+-        let timestamp = Utc.with_ymd_and_hms(2025, 1, 12, 15, 0, 58).unwrap();
++        let timestamp = "2025-01-12T15:00:58Z".parse::<Timestamp>().unwrap();
+         let annotations = Annotations::default().with_timestamp(timestamp);
+ 
+         let value = serde_json::to_value(&annotations).unwrap();
+-        assert_eq!(value["lastModified"], json!(timestamp.to_rfc3339()));
++        assert_eq!(value["lastModified"], json!("2025-01-12T15:00:58+00:00"));
+ 
+         let round_tripped: Annotations = serde_json::from_value(value).unwrap();
+         assert_eq!(round_tripped, annotations);
+--- upstream/src/model/request_state.rs
++++ patched/src/model/request_state.rs
+@@ -782,7 +782,7 @@
+     }
+ 
+     fn now_ms() -> i64 {
+-        chrono::Utc::now().timestamp_millis()
++        crate::tg_timestamp::epoch_millis(jiff::Timestamp::now())
+     }
+ }
+ 
+--- upstream/src/service.rs
++++ patched/src/service.rs
+@@ -89,7 +89,7 @@
+     SubscriptionLagged { capacity: usize },
+     #[error("task cancelled for reason {}", reason.as_deref().unwrap_or("<unknown>"))]
+     Cancelled { reason: Option<String> },
+-    #[error("request timeout after {}", chrono::Duration::from_std(*timeout).unwrap_or_default())]
++    #[error("request timeout after {timeout:?}")]
+     Timeout { timeout: Duration },
+     /// The peer kept returning `input_required` beyond the configured round cap.
+     #[error("input_required did not complete within {max_rounds} MRTR rounds")]
+--- upstream/src/task_manager.rs
++++ patched/src/task_manager.rs
+@@ -43,7 +43,7 @@
+ 
+ /// Helper to generate an ISO 8601 timestamp for task metadata.
+ pub fn current_timestamp() -> String {
+-    chrono::Utc::now().to_rfc3339()
++    crate::tg_timestamp::rfc3339(jiff::Timestamp::now())
+ }
+ 
+ /// Handle passed to a running task operation, allowing it to surface
+--- upstream/src/tg_timestamp.rs
++++ patched/src/tg_timestamp.rs
+@@ -0,0 +1,111 @@
++//! UTC compatibility helpers for the downstream maintained-clock patch.
++
++use jiff::{Timestamp, fmt::temporal::DateTimePrinter, tz::Offset};
++
++pub(crate) fn rfc3339(timestamp: Timestamp) -> String {
++    let nanos = timestamp.subsec_nanosecond();
++    let precision = if nanos == 0 {
++        0
++    } else if nanos % 1_000_000 == 0 {
++        3
++    } else if nanos % 1_000 == 0 {
++        6
++    } else {
++        9
++    };
++    let mut output = String::with_capacity(35);
++    DateTimePrinter::new()
++        .precision(Some(precision))
++        .print_timestamp_with_offset(&timestamp, Offset::UTC, &mut output)
++        .expect("formatting a timestamp into String cannot fail");
++    output
++}
++
++#[cfg(any(feature = "request-state", test))]
++pub(crate) fn epoch_millis(timestamp: Timestamp) -> i64 {
++    // Preserve chrono's floor semantics before the epoch. Jiff's direct
++    // as_millisecond() truncates toward zero. Its bounded timestamp range fits
++    // i64 milliseconds (including both extrema), so this conversion is exact.
++    i64::try_from(timestamp.as_nanosecond().div_euclid(1_000_000))
++        .expect("Jiff's timestamp range fits i64 milliseconds")
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn utc_auto_precision_golden_values_and_round_trips() {
++        for (source, expected) in [
++            ("1970-01-01T00:00:00Z", "1970-01-01T00:00:00+00:00"),
++            ("2000-01-01T00:00:00.1Z", "2000-01-01T00:00:00.100+00:00"),
++            ("2000-01-01T00:00:00.001Z", "2000-01-01T00:00:00.001+00:00"),
++            (
++                "2000-01-01T00:00:00.0001Z",
++                "2000-01-01T00:00:00.000100+00:00",
++            ),
++            (
++                "2000-01-01T00:00:00.1234Z",
++                "2000-01-01T00:00:00.123400+00:00",
++            ),
++            (
++                "2000-01-01T00:00:00.000000001Z",
++                "2000-01-01T00:00:00.000000001+00:00",
++            ),
++            (
++                "2000-01-01T00:00:00.123456789Z",
++                "2000-01-01T00:00:00.123456789+00:00",
++            ),
++            (
++                "1969-12-31T23:59:59.999999999Z",
++                "1969-12-31T23:59:59.999999999+00:00",
++            ),
++            ("1969-12-31T23:59:59.999Z", "1969-12-31T23:59:59.999+00:00"),
++            (
++                "2024-02-29T23:59:59.000001Z",
++                "2024-02-29T23:59:59.000001+00:00",
++            ),
++            ("2000-01-01T00:30:00+01:00", "1999-12-31T23:30:00+00:00"),
++            ("0000-01-01T00:00:00Z", "0000-01-01T00:00:00+00:00"),
++            (
++                "9999-12-30T00:00:00.999999999Z",
++                "9999-12-30T00:00:00.999999999+00:00",
++            ),
++        ] {
++            let timestamp = source
++                .parse::<Timestamp>()
++                .unwrap_or_else(|error| panic!("{source}: {error}"));
++            let actual = rfc3339(timestamp);
++            assert_eq!(actual, expected, "source: {source}");
++            assert_eq!(actual.parse::<Timestamp>().unwrap(), timestamp);
++        }
++    }
++
++    #[test]
++    fn epoch_milliseconds_floor_negative_fractions_and_fit_extrema() {
++        for (nanoseconds, milliseconds) in [
++            (0, 0),
++            (1, 0),
++            (999_999, 0),
++            (1_000_000, 1),
++            (1_000_001, 1),
++            (-1, -1),
++            (-999_999, -1),
++            (-1_000_000, -1),
++            (-1_000_001, -2),
++            (-999_999_999, -1_000),
++            (-1_000_000_001, -1_001),
++        ] {
++            assert_eq!(
++                epoch_millis(Timestamp::from_nanosecond(nanoseconds).unwrap()),
++                milliseconds
++            );
++        }
++        for timestamp in [Timestamp::MIN, Timestamp::MAX] {
++            let milliseconds = epoch_millis(timestamp);
++            let nanos = timestamp.as_nanosecond();
++            assert!(i128::from(milliseconds) * 1_000_000 <= nanos);
++            assert!(nanos < (i128::from(milliseconds) + 1) * 1_000_000);
++        }
++    }
++}
+--- upstream/tests/common/handlers.rs
++++ patched/tests/common/handlers.rs
+@@ -138,7 +138,7 @@
+                         "message": "Failed to process request",
+                         "error_code": "E1001",
+                         "error_details": "Connection timeout",
+-                        "timestamp": chrono::Utc::now().to_rfc3339(),
++                        "timestamp": rmcp::task_manager::current_timestamp(),
+                     }),
+                     Some("error_handler".to_string()),
+                 ),
+@@ -151,7 +151,7 @@
+                             "request_id": "req-123",
+                             "user_id": "user-456"
+                         },
+-                        "timestamp": chrono::Utc::now().to_rfc3339(),
++                        "timestamp": rmcp::task_manager::current_timestamp(),
+                     }),
+                     Some("debug_logger".to_string()),
+                 ),
+@@ -164,14 +164,14 @@
+                             "average_latency_ms": 45,
+                             "error_rate": 0.01
+                         },
+-                        "timestamp": chrono::Utc::now().to_rfc3339(),
++                        "timestamp": rmcp::task_manager::current_timestamp(),
+                     }),
+                     Some("monitoring".to_string()),
+                 ),
+                 _ => (
+                     serde_json::json!({
+                         "message": format!("Message at level {:?}", request.level),
+-                        "timestamp": chrono::Utc::now().to_rfc3339(),
++                        "timestamp": rmcp::task_manager::current_timestamp(),
+                     }),
+                     None,
+                 ),
+--- upstream/tests/test_logging.rs
++++ patched/tests/test_logging.rs
+@@ -31,7 +31,7 @@
+                     LoggingLevel::Info,
+                     serde_json::json!({
+                         "message": "Server initiated message",
+-                        "timestamp": chrono::Utc::now().to_rfc3339(),
++                        "timestamp": rmcp::task_manager::current_timestamp(),
+                     }),
+                 )
+                 .with_logger("test_server"),
+@@ -87,7 +87,9 @@
+ 
+         // Verify timestamp
+         let timestamp = data["timestamp"].as_str().unwrap();
+-        chrono::DateTime::parse_from_rfc3339(timestamp).expect("RFC3339 timestamp");
++        timestamp
++            .parse::<rmcp::model::Timestamp>()
++            .expect("RFC3339 timestamp");
+ 
+         messages.clear();
+     }
+@@ -329,7 +331,9 @@
+ 
+         // Verify timestamp
+         let timestamp = data["timestamp"].as_str().unwrap();
+-        chrono::DateTime::parse_from_rfc3339(timestamp).expect("RFC3339 timestamp");
++        timestamp
++            .parse::<rmcp::model::Timestamp>()
++            .expect("RFC3339 timestamp");
+ 
+         messages.clear();
+     }

@@ -1,0 +1,219 @@
+--- upstream/Cargo.toml
++++ patched/Cargo.toml
+@@ -13,6 +13,7 @@
+ edition = "2024"
+ name = "grammers-session"
+ version = "0.12.0"
++publish = false
+ authors = ["Lonami Exo <totufals@hotmail.com>"]
+ build = false
+ autolib = false
+@@ -39,7 +40,7 @@
+ default = ["sqlite-storage"]
+ serde = [
+     "dep:serde",
+-    "dep:serde_with",
++    "dep:hex",
+ ]
+ sqlite-storage = [
+     "dep:libsql",
+@@ -55,7 +56,7 @@
+ path = "tests/deps.rs"
+ 
+ [dependencies.grammers-tl-types]
+-version = "0.12.0"
++path = "../grammers-tl-types"
+ 
+ [dependencies.libsql]
+ version = "0.10.0"
+@@ -68,9 +69,8 @@
+ features = ["derive"]
+ optional = true
+ 
+-[dependencies.serde_with]
+-version = "3"
+-features = ["hex"]
++[dependencies.hex]
++version = "0.4.3"
+ optional = true
+ 
+ [dependencies.tokio]
+--- upstream/src/message_box/adaptor.rs
++++ patched/src/message_box/adaptor.rs
+@@ -477,6 +477,9 @@
+ 
+ impl PtsInfo {
+     pub(super) fn from_update(update: &tl::enums::Update) -> Option<Self> {
++        Self::from_update_unfiltered(update).filter(|info| info.pts != NO_PTS)
++    }
++    pub(super) fn from_update_unfiltered(update: &tl::enums::Update) -> Option<Self> {
+         use tl::enums::Update::*;
+         match update {
+             NewMessage(u) => {
+@@ -757,6 +760,5 @@
+             PaidReactionPrivacy(_) => None,
+             _ => None,
+         }
+-        .filter(|info| info.pts != NO_PTS)
+-    }
+-}
++    }
++}
+--- upstream/src/message_box/mod.rs
++++ patched/src/message_box/mod.rs
+@@ -56,14 +56,21 @@
+     Instant::now() + defs::NO_UPDATES_TIMEOUT
+ }
+ 
+-fn update_sort_key(update: &tl::enums::Update) -> i32 {
++fn update_sort_key(update: &tl::enums::Update) -> i64 {
+     match PtsInfo::from_update(update) {
+-        Some(info) => info.pts - info.count,
+-        None => NO_PTS,
++        Some(info) => i64::from(info.pts) - i64::from(info.count),
++        None => i64::from(NO_PTS),
+     }
+ }
+ 
+ impl MessageBox {
++    /// Observe the same counter metadata used by maintained update sequencing.
++    /// Invalid semantic constructors retain the upstream assertion behavior.
++    pub fn update_metadata(update: &tl::enums::Update) -> Option<(Self, i32)> {
++        let info = PtsInfo::from_update_unfiltered(update)?;
++        let count = info.count;
++        Some((info.into(), count))
++    }
+     pub fn pts(&self) -> i32 {
+         match self {
+             MessageBox::Common { pts } => *pts,
+@@ -98,6 +105,10 @@
+ #[allow(clippy::new_without_default)]
+ /// Creation, querying, and setting base state.
+ impl MessageBoxes {
++    /// Normalize owned wire constructors without changing message-box state.
++    pub fn normalize_updates(input: UpdatesLike) -> Result<tl::types::UpdatesCombined, Gap> {
++        adaptor::adapt(input)
++    }
+     /// Create a new, empty [`MessageBoxes`].
+     pub fn new() -> Self {
+         trace!("created new message box with no previous state");
+@@ -233,6 +244,34 @@
+     /// Return true if the message box is empty and has no state yet.
+     pub fn is_empty(&self) -> bool {
+         self.entries.is_empty()
++    }
++
++    /// Number of updates retained while waiting for gaps to close.
++    /// This read-only observation lets callers enforce a bounded backlog.
++    pub fn buffered_updates(&self) -> usize {
++        self.entries
++            .iter()
++            .filter_map(|entry| entry.possible_gap.as_ref())
++            .fold(0usize, |count, gap| count.saturating_add(gap.updates.len()))
++    }
++
++    /// Encoded bytes of retained updates, stopping once `limit` is exceeded.
++    /// Adapted short updates can exceed their original wire envelope size.
++    pub fn buffered_updates_bytes(&self, limit: usize) -> usize {
++        use grammers_tl_types::Serializable;
++        let mut bytes = 0usize;
++        for update in self
++            .entries
++            .iter()
++            .filter_map(|entry| entry.possible_gap.as_ref())
++            .flat_map(|gap| &gap.updates)
++        {
++            update.serialize(&mut |part| bytes = bytes.saturating_add(part.len()));
++            if bytes > limit {
++                break;
++            }
++        }
++        bytes
+     }
+ 
+     /// Return the next deadline when receiving updates should timeout.
+@@ -430,7 +469,7 @@
+         // > For all the other [not `updates` or `updatesCombined`] `Updates` type constructors
+         // > there is no need to check `seq` or change a local state.
+         if seq_start != NO_SEQ {
+-            match (self.seq + 1).cmp(&seq_start) {
++            match (i64::from(self.seq) + 1).cmp(&i64::from(seq_start)) {
+                 // Apply
+                 Ordering::Equal => {}
+                 // Ignore
+@@ -513,7 +552,7 @@
+                     possible_gap: None,
+                 },
+                 |entry| {
+-                    match (entry.pts + info.count).cmp(&info.pts) {
++                    match (i64::from(entry.pts) + i64::from(info.count)).cmp(&i64::from(info.pts)) {
+                         // Apply
+                         Ordering::Equal => {
+                             entry.pts = info.pts;
+@@ -557,7 +596,9 @@
+                             let gap_info = PtsInfo::from_update(&gap_update)
+                                 .expect("only updates with pts info may be stored as gaps");
+ 
+-                            match (entry.pts + gap_info.count).cmp(&gap_info.pts) {
++                            match (i64::from(entry.pts) + i64::from(gap_info.count))
++                                .cmp(&i64::from(gap_info.pts))
++                            {
+                                 Ordering::Equal => {
+                                     entry.pts = gap_info.pts;
+                                     // possible gap can only be resolve if new update closed
+--- upstream/src/types.rs
++++ patched/src/types.rs
+@@ -17,7 +17,6 @@
+ /// This is very similar to Telegram's own `dcOption` type, except it also
+ /// contains the permanent authentication key and serves as a stable interface.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+-#[cfg_attr(feature = "serde", serde_with::serde_as)]
+ #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+ pub struct DcOption {
+     /// Datacenter identifier.
+@@ -40,8 +39,44 @@
+     pub auth_key: Option<[u8; 256]>,
+ 
+     #[cfg(feature = "serde")]
+-    #[serde_as(as = "Option<serde_with::hex::Hex>")]
++    #[serde(default, with = "auth_key_hex")]
+     pub auth_key: Option<[u8; 256]>,
++}
++
++// Keep the existing snapshot representation without serde_with's unused chrono
++// integration in Cargo.lock. Hex decoding writes directly into the fixed array.
++#[cfg(feature = "serde")]
++mod auth_key_hex {
++    use std::borrow::Cow;
++
++    use serde::{Deserialize, Deserializer, Serializer, de::Error};
++
++    pub(super) fn serialize<S: Serializer>(
++        key: &Option<[u8; 256]>,
++        serializer: S,
++    ) -> Result<S::Ok, S::Error> {
++        match key {
++            Some(key) => serializer.serialize_some(&hex::encode(key)),
++            None => serializer.serialize_none(),
++        }
++    }
++
++    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
++        deserializer: D,
++    ) -> Result<Option<[u8; 256]>, D::Error> {
++        let Some(text) = Option::<Cow<'de, str>>::deserialize(deserializer)
++            .map_err(|_| D::Error::custom("invalid authentication key"))?
++        else {
++            return Ok(None);
++        };
++        if text.len() != 512 {
++            return Err(D::Error::custom("invalid authentication key"));
++        }
++        let mut key = [0; 256];
++        hex::decode_to_slice(text.as_bytes(), &mut key)
++            .map_err(|_| D::Error::custom("invalid authentication key"))?;
++        Ok(Some(key))
++    }
+ }
+ 
+ /// Full update state needed to process updates in order without gaps.

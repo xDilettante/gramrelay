@@ -1,0 +1,28 @@
+{
+  "profile": "archive",
+  "chats": [
+    {"id": "-101", "title": "Product decisions"},
+    {"id": "-102", "title": "Deployment log"},
+    {"id": "-103", "title": "Release audit"}
+  ],
+  "events": [
+    {"chat": "-101", "author": "Mila", "text": "R17: propose version 2.7.0, codename Lyra. R18 will be 3.0.0."},
+    {"chat": "-102", "author": "Ilya", "text": "R17: first canary eu-west-1, 20 nodes. Do not count a canary as a production release."},
+    {"chat": "-103", "author": "Mila", "text": "R17: draft audit r17-draft.pdf is rejected; signature pending."},
+    {"chat": "-101", "author": "Anton", "text": "R18: owner Anton, codename Vega. Its discussion is separate from R17."},
+    {"chat": "-102", "author": "Ilya", "text": "R17: eu-west-1 canary failed; rollback completed. This region was never released."},
+    {"chat": "-101", "author": "Mila", "text": "R17: approved target changes to 2.7.1. Freeze date is 2024-05-14."},
+    {"chat": "-103", "author": "Nina", "text": "R18: r18-audit-final.pdf is approved. This does not approve the R17 draft."},
+    {"chat": "-102", "author": "Ilya", "text": "R17: production us-east-1 completed; preliminary count 40 nodes."},
+    {"chat": "-101", "author": "Mila", "text": "R17: transfer release ownership to Oleg. Mila remains the final auditor."},
+    {"chat": "-103", "author": "Mila", "text": "R17: r17-audit-final.pdf approved; SHA-256 prefix abc123. This supersedes the rejected draft.", "document": {"file_id":"synthetic-audit-final","file_unique_id":"synthetic-unique-final","file_name":"r17-audit-final.pdf","file_size":4096}},
+    {"chat": "-101", "author": "Oleg", "text": "R17: final customer-facing codename is Orion, replacing Lyra."},
+    {"chat": "-102", "author": "Ilya", "text": "R17: correct us-east-1 production count to 36 nodes. Four of the earlier 40 were staging nodes."},
+    {"chat": "-103", "author": "Nina", "text": "R17: unsigned candidate had checksum prefix dead00. Do not use it; the signed final report remains authoritative."},
+    {"chat": "-102", "author": "Ilya", "text": "R18: production ap-south-1 completed on 12 nodes. Keep counts separate from R17."},
+    {"chat": "-101", "author": "Oleg", "text": "R17: support window is 90 days from release. R18 support window is 180 days."},
+    {"chat": "-103", "author": "Mila", "text": "R17: audit closed. Final report size is 4096 bytes; no additional deployment region was approved."},
+    {"chat": "-101", "author": "Oleg", "text": "R17: change freeze remains unchanged after the codename correction."},
+    {"chat": "-102", "author": "Ilya", "text": "R17: postmortem closed; no additional production nodes were added after the corrected count."}
+  ]
+}

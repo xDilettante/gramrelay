@@ -1,0 +1,326 @@
+--- upstream/Cargo.toml
++++ patched/Cargo.toml
+@@ -13,8 +13,9 @@
+ edition = "2024"
+ name = "grammers-tl-types"
+ version = "0.12.0"
++publish = false
+ authors = ["Lonami Exo <totufals@hotmail.com>"]
+-build = "build.rs"
++build = "src/bounded_build.rs"
+ include = [
+     "build.rs",
+     "src/*.rs",
+@@ -82,7 +83,7 @@
+ version = "1.2.1"
+ 
+ [build-dependencies.grammers-tl-gen]
+-version = "0.12.0"
++version = "=0.12.0"
+ 
+ [build-dependencies.grammers-tl-parser]
+-version = "2.0.0"
++version = "=2.0.0"
+--- upstream/src/deserialize.rs
++++ patched/src/deserialize.rs
+@@ -9,12 +9,21 @@
+ //! Types and traits involving the deserialization of the generated objects.
+ 
+ use std::fmt;
++use std::mem::size_of;
+ 
+ use crate::Identifiable;
++
++const ALLOCATION_BUDGET: usize = 64 * 1024 * 1024;
++const VECTOR_ITEM_BUDGET: usize = 1024 * 1024;
++pub(crate) const NESTING_BUDGET: usize = 24;
+ 
+ /// Errors that can be produced by [`Cursor`].
+ #[derive(Clone, Debug, PartialEq)]
+ pub enum Error {
++    /// Noncanonical byte-string length or nonzero TL padding.
++    InvalidEncoding,
++    /// Decoding exceeded its resource budget or a checked allocation failed.
++    LimitExceeded,
+     /// The end of the buffer was reached earlier than anticipated, which
+     /// implies there is not enough data to complete the deserialization.
+     UnexpectedEof,
+@@ -43,6 +52,8 @@
+ impl fmt::Display for Error {
+     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+         match *self {
++            Self::InvalidEncoding => write!(f, "invalid TL encoding"),
++            Self::LimitExceeded => write!(f, "TL decode resource limit exceeded"),
+             Self::UnexpectedEof => write!(f, "unexpected eof"),
+             Self::UnexpectedConstructor { id } => write!(f, "unexpected constructor: {id:08x}"),
+         }
+@@ -54,12 +65,53 @@
+ pub struct Cursor<'a> {
+     buf: &'a [u8],
+     pos: usize,
++    remaining_allocation: usize,
++    remaining_vector_items: usize,
++    remaining_nesting: usize,
+ }
+ 
+ impl<'a> Cursor<'a> {
+-    /// Constructors a cursor from a slice of bytes.
++    /// Constructs a cursor with the default decoding budgets.
+     pub fn from_slice(buf: &'a [u8]) -> Self {
+-        Self { buf, pos: 0 }
++        Self::with_budgets(buf, ALLOCATION_BUDGET, VECTOR_ITEM_BUDGET)
++    }
++
++    /// Constructs a cursor with tighter ceilings on allocation bytes and vector elements.
++    /// Values above the default budgets are clamped to those defaults.
++    pub fn with_budgets(buf: &'a [u8], allocation: usize, vector_items: usize) -> Self {
++        Self {
++            buf,
++            pos: 0,
++            remaining_allocation: allocation.min(ALLOCATION_BUDGET),
++            remaining_vector_items: vector_items.min(VECTOR_ITEM_BUDGET),
++            remaining_nesting: NESTING_BUDGET,
++        }
++    }
++
++    fn charge_allocation(&mut self, bytes: usize) -> Result<()> {
++        self.remaining_allocation = self
++            .remaining_allocation
++            .checked_sub(bytes)
++            .ok_or(Error::LimitExceeded)?;
++        Ok(())
++    }
++
++    fn with_nesting<T>(&mut self, decode: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
++        self.remaining_nesting = self
++            .remaining_nesting
++            .checked_sub(1)
++            .ok_or(Error::LimitExceeded)?;
++        let result = decode(self);
++        self.remaining_nesting += 1;
++        result
++    }
++
++    #[cfg(feature = "tl-api")]
++    pub(crate) fn read_box<T: Deserializable>(&mut self) -> Result<Box<T>> {
++        self.with_nesting(|buf| {
++            buf.charge_allocation(size_of::<T>())?;
++            Ok(Box::new(T::deserialize(buf)?))
++        })
+     }
+ 
+     // TODO not a fan we need to expose this (and a way to create `Cursor`),
+@@ -92,12 +144,75 @@
+         }
+     }
+ 
++    /// Reads an owned byte field of known length, checking availability and
++    /// the decode budget before allocating.
++    pub fn read_bytes(&mut self, len: usize) -> Result<Vec<u8>> {
++        let end = self.pos.checked_add(len).ok_or(Error::UnexpectedEof)?;
++        let bytes = self.buf.get(self.pos..end).ok_or(Error::UnexpectedEof)?;
++        let mut result = Vec::new();
++        self.extend_bytes(&mut result, bytes)?;
++        self.pos = end;
++        Ok(result)
++    }
++
+     /// Reads all the way to the end of the slice buffer.
+     pub fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize> {
+-        buf.extend(&self.buf[self.pos..]);
+-        let old = self.pos;
++        let rest = &self.buf[self.pos..];
++        self.extend_bytes(buf, rest)?;
+         self.pos = self.buf.len();
+-        Ok(self.pos - old)
++        Ok(rest.len())
++    }
++
++    fn extend_bytes(&mut self, output: &mut Vec<u8>, bytes: &[u8]) -> Result<()> {
++        if bytes.len() > output.capacity() - output.len() {
++            let new_capacity = output
++                .len()
++                .checked_add(bytes.len())
++                .ok_or(Error::LimitExceeded)?;
++            self.charge_allocation(new_capacity)?;
++            output
++                .try_reserve_exact(bytes.len())
++                .map_err(|_| Error::LimitExceeded)?;
++        }
++        output.extend_from_slice(bytes);
++        Ok(())
++    }
++
++    /// Reads the elements of a vector whose length was decoded by the caller.
++    /// Nested vectors share the cursor's item and allocation budgets.
++    pub fn read_vector<T: Deserializable>(&mut self, len: usize) -> Result<Vec<T>> {
++        if len == 0 {
++            return Ok(Vec::new());
++        }
++        self.with_nesting(|buf| buf.read_vector_items(len))
++    }
++
++    fn read_vector_items<T: Deserializable>(&mut self, len: usize) -> Result<Vec<T>> {
++        let item_size = size_of::<T>();
++        let bytes = len.checked_mul(item_size).ok_or(Error::LimitExceeded)?;
++        if bytes > self.remaining_allocation {
++            return Err(Error::LimitExceeded);
++        }
++        self.remaining_vector_items = self
++            .remaining_vector_items
++            .checked_sub(len)
++            .ok_or(Error::LimitExceeded)?;
++
++        let mut items = Vec::new();
++        for _ in 0..len {
++            let value = T::deserialize(self)?;
++            if items.len() == items.capacity() {
++                // Grow only after another item was decoded. Charge the whole
++                // capacity because resize can temporarily hold two allocations.
++                let capacity = items.len().saturating_mul(2).max(4).min(len);
++                self.charge_allocation(capacity * item_size)?;
++                items
++                    .try_reserve_exact(capacity - items.len())
++                    .map_err(|_| Error::LimitExceeded)?;
++            }
++            items.push(value);
++        }
++        Ok(items)
+     }
+ }
+ 
+@@ -350,7 +465,7 @@
+             return Err(Error::UnexpectedConstructor { id });
+         }
+         let len = u32::deserialize(buf)?;
+-        (0..len).map(|_| T::deserialize(buf)).collect()
++        buf.read_vector(len as usize)
+     }
+ }
+ 
+@@ -370,11 +485,7 @@
+     /// ```
+     fn deserialize(buf: Buffer) -> Result<Self> {
+         let len = u32::deserialize(buf)?;
+-        Ok(Self(
+-            (0..len)
+-                .map(|_| T::deserialize(buf))
+-                .collect::<Result<Vec<T>>>()?,
+-        ))
++        Ok(Self(buf.read_vector(len as usize)?))
+     }
+ }
+ 
+@@ -416,7 +527,41 @@
+     /// );
+     /// ```
+     fn deserialize(buf: Buffer) -> Result<Self> {
+-        Ok(String::from_utf8_lossy(&Vec::<u8>::deserialize(buf)?).into())
++        let bytes = read_byte_string(buf)?;
++        let mut text = String::new();
++        match std::str::from_utf8(bytes) {
++            Ok(utf8) => {
++                buf.charge_allocation(utf8.len())?;
++                text.try_reserve_exact(utf8.len())
++                    .map_err(|_| Error::LimitExceeded)?;
++                text.push_str(utf8);
++            }
++            Err(_) => {
++                let bytes_needed = bytes
++                    .utf8_chunks()
++                    .try_fold(0usize, |length, chunk| {
++                        let replacement = if chunk.invalid().is_empty() {
++                            0
++                        } else {
++                            '\u{fffd}'.len_utf8()
++                        };
++                        length
++                            .checked_add(chunk.valid().len())?
++                            .checked_add(replacement)
++                    })
++                    .ok_or(Error::LimitExceeded)?;
++                buf.charge_allocation(bytes_needed)?;
++                text.try_reserve_exact(bytes_needed)
++                    .map_err(|_| Error::LimitExceeded)?;
++                for chunk in bytes.utf8_chunks() {
++                    text.push_str(chunk.valid());
++                    if !chunk.invalid().is_empty() {
++                        text.push('\u{fffd}');
++                    }
++                }
++            }
++        }
++        Ok(text)
+     }
+ }
+ 
+@@ -435,28 +580,47 @@
+     /// assert_eq!(Vec::<u8>::from_bytes(&[0x01, 0x7f, 0x00, 0x00]).unwrap(), vec![0x7f_u8]);
+     /// ```
+     fn deserialize(buf: Buffer) -> Result<Self> {
+-        let first_byte = buf.read_byte()?;
+-        let (len, padding) = if first_byte == 254 {
+-            let mut buffer = [0u8; 3];
+-            buf.read_exact(&mut buffer)?;
+-            let len =
+-                (buffer[0] as usize) | ((buffer[1] as usize) << 8) | ((buffer[2] as usize) << 16);
+-
+-            (len, len % 4)
+-        } else {
+-            let len = first_byte as usize;
+-            (len, (len + 1) % 4)
+-        };
+-
+-        let mut result = vec![0u8; len];
+-        buf.read_exact(&mut result)?;
+-
+-        if padding > 0 {
+-            for _ in 0..(4 - padding) {
+-                buf.read_byte()?;
+-            }
+-        }
+-
++        let bytes = read_byte_string(buf)?;
++        let mut result = Vec::new();
++        buf.extend_bytes(&mut result, bytes)?;
+         Ok(result)
+     }
+ }
++
++fn read_byte_string<'a>(buf: &mut Cursor<'a>) -> Result<&'a [u8]> {
++    let first_byte = buf.read_byte()?;
++    let (len, padding) = if first_byte == 254 {
++        let mut buffer = [0u8; 3];
++        buf.read_exact(&mut buffer)?;
++        let len = (buffer[0] as usize) | ((buffer[1] as usize) << 8) | ((buffer[2] as usize) << 16);
++
++        if len < 254 {
++            return Err(Error::InvalidEncoding);
++        }
++
++        (len, len % 4)
++    } else {
++        if first_byte == 255 {
++            return Err(Error::InvalidEncoding);
++        }
++        let len = first_byte as usize;
++        (len, (len + 1) % 4)
++    };
++
++    let padding = (4 - padding) % 4;
++    let data_end = buf.pos.checked_add(len).ok_or(Error::UnexpectedEof)?;
++    let end = data_end.checked_add(padding).ok_or(Error::UnexpectedEof)?;
++    if end > buf.buf.len() {
++        return Err(Error::UnexpectedEof);
++    }
++    if buf.buf[data_end..end].iter().any(|byte| *byte != 0) {
++        return Err(Error::InvalidEncoding);
++    }
++    let data = &buf.buf[buf.pos..data_end];
++    buf.pos = end;
++    Ok(data)
++}
++
++#[cfg(test)]
++#[path = "tg_decode_tests.rs"]
++mod tg_decode_tests;

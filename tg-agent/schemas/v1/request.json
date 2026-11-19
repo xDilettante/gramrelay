@@ -1,0 +1,469 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "At most 65536 UTF-8 JSON bytes. Runtime checks byte bounds and immutable policy context.",
+  "oneOf": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "call": {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "additionalProperties": false,
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "tool": {
+              "const": "get_me"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        "profile": {
+          "pattern": "^[A-Za-z0-9_.:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "profile",
+        "call"
+      ],
+      "type": "object"
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "call": {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "additionalProperties": false,
+              "properties": {
+                "chat_id": {
+                  "pattern": "^(?:(?:[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)|-(?:[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-7]|9223372036854775808))(?![\\s\\S])",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "chat_id"
+              ],
+              "type": "object"
+            },
+            "tool": {
+              "const": "get_chat"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        "profile": {
+          "pattern": "^[A-Za-z0-9_.:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "profile",
+        "call"
+      ],
+      "type": "object"
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "call": {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "additionalProperties": false,
+              "properties": {
+                "cursor": {
+                  "anyOf": [
+                    {
+                      "maxLength": 1024,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Opaque cursor validated against this profile; at most 1024 UTF-8 bytes."
+                },
+                "limit": {
+                  "default": 20,
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [],
+              "type": "object"
+            },
+            "tool": {
+              "const": "read_updates"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        "profile": {
+          "pattern": "^[A-Za-z0-9_.:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "profile",
+        "call"
+      ],
+      "type": "object"
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "call": {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "additionalProperties": false,
+              "properties": {
+                "chat_id": {
+                  "pattern": "^(?:(?:[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)|-(?:[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-7]|9223372036854775808))(?![\\s\\S])",
+                  "type": "string"
+                },
+                "disable_notification": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "message_thread_id": {
+                  "anyOf": [
+                    {
+                      "pattern": "^(?:(?:[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807))(?![\\s\\S])",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "text": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "pattern": "^[^\\u0000]*(?![\\s\\S])",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "chat_id",
+                "text"
+              ],
+              "type": "object"
+            },
+            "tool": {
+              "const": "send_message"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        "operation_id": {
+          "pattern": "^[A-Za-z0-9_.:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "profile": {
+          "pattern": "^[A-Za-z0-9_.:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "profile",
+        "call",
+        "operation_id"
+      ],
+      "type": "object"
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "call": {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "additionalProperties": false,
+              "properties": {
+                "chat_id": {
+                  "pattern": "^(?:(?:[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)|-(?:[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-7]|9223372036854775808))(?![\\s\\S])",
+                  "type": "string"
+                },
+                "message_id": {
+                  "pattern": "^(?:(?:[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807))(?![\\s\\S])",
+                  "type": "string"
+                },
+                "text": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "pattern": "^[^\\u0000]*(?![\\s\\S])",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "chat_id",
+                "message_id",
+                "text"
+              ],
+              "type": "object"
+            },
+            "tool": {
+              "const": "edit_message_text"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        "operation_id": {
+          "pattern": "^[A-Za-z0-9_.:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "profile": {
+          "pattern": "^[A-Za-z0-9_.:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "profile",
+        "call",
+        "operation_id"
+      ],
+      "type": "object"
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "call": {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "additionalProperties": false,
+              "properties": {
+                "callback_query_id": {
+                  "description": "At most 256 UTF-8 bytes; requires an unexpired host-observed reference.",
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+(?![\\s\\S])",
+                  "type": "string"
+                },
+                "show_alert": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "text": {
+                  "anyOf": [
+                    {
+                      "maxLength": 200,
+                      "minLength": 0,
+                      "pattern": "^[^\\u0000]*(?![\\s\\S])",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "callback_query_id"
+              ],
+              "type": "object"
+            },
+            "tool": {
+              "const": "answer_callback_query"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        "operation_id": {
+          "pattern": "^[A-Za-z0-9_.:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "profile": {
+          "pattern": "^[A-Za-z0-9_.:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "profile",
+        "call",
+        "operation_id"
+      ],
+      "type": "object"
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "call": {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "additionalProperties": false,
+              "properties": {
+                "operation_id": {
+                  "pattern": "^[A-Za-z0-9_.:-]{1,128}(?![\\s\\S])",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "operation_id"
+              ],
+              "type": "object"
+            },
+            "tool": {
+              "const": "get_operation"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        "profile": {
+          "pattern": "^[A-Za-z0-9_.:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "profile",
+        "call"
+      ],
+      "type": "object"
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "call": {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "additionalProperties": false,
+              "properties": {
+                "caption": {
+                  "anyOf": [
+                    {
+                      "maxLength": 1024,
+                      "minLength": 0,
+                      "pattern": "^[^\\u0000]*(?![\\s\\S])",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "chat_id": {
+                  "pattern": "^(?:(?:[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)|-(?:[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-7]|9223372036854775808))(?![\\s\\S])",
+                  "type": "string"
+                },
+                "file_handle": {
+                  "pattern": "^[A-Za-z0-9_.:-]{1,128}(?![\\s\\S])",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "chat_id",
+                "file_handle"
+              ],
+              "type": "object"
+            },
+            "tool": {
+              "const": "send_document"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        "operation_id": {
+          "pattern": "^[A-Za-z0-9_.:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "profile": {
+          "pattern": "^[A-Za-z0-9_.:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "profile",
+        "call",
+        "operation_id"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "Telegram agent request v1"
+}

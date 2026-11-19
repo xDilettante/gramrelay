@@ -1,0 +1,1137 @@
+--- upstream/Cargo.toml
++++ patched/Cargo.toml
+@@ -13,6 +13,7 @@
+ edition = "2024"
+ name = "grammers-mtsender"
+ version = "0.12.0"
++publish = false
+ authors = ["Lonami Exo <totufals@hotmail.com>"]
+ build = false
+ autolib = false
+@@ -41,6 +42,8 @@
+ resolver = "2"
+ 
+ [features]
++tg-test-kit = []
++upstream-live-tests = []
+ proxy = [
+     "tokio-socks",
+     "hickory-resolver",
+@@ -54,23 +57,30 @@
+ [[test]]
+ name = "deps"
+ path = "tests/deps.rs"
++required-features = ["upstream-live-tests"]
+ 
+ [[test]]
+ name = "lib"
+ path = "tests/lib.rs"
++required-features = ["upstream-live-tests"]
+ 
+ [dependencies.bytes]
+ version = "1.12.1"
+ 
++[dependencies.futures-util]
++version = "0.3"
++default-features = false
++features = ["std"]
++
+ [dependencies.grammers-mtproto]
+-version = "0.12.0"
++path = "../grammers-mtproto"
+ 
+ [dependencies.grammers-session]
+-version = "0.12.0"
++path = "../grammers-session"
+ default-features = false
+ 
+ [dependencies.grammers-tl-types]
+-version = "0.12.0"
++path = "../grammers-tl-types"
+ features = [
+     "tl-mtproto",
+     "deserializable-functions",
+@@ -113,6 +123,10 @@
+ [dev-dependencies.socks5-server]
+ version = "0.10.1"
+ 
++[dev-dependencies.tokio]
++version = "1.54.1"
++features = ["rt-multi-thread"]
++
+ [dev-dependencies.toml]
+ version = "1.2.1"
+ 
+--- upstream/src/configuration.rs
++++ patched/src/configuration.rs
+@@ -65,6 +65,12 @@
+     ///
+     /// When the channel is full, newly received updates are **dropped**.
+     pub updates_channel_capacity: NonZeroUsize,
++    /// Maximum uncompressed incoming RPC/control body, including setup calls.
++    pub max_response_bytes: usize,
++    /// Cumulative gzip output allowed in one encrypted transport payload.
++    pub max_expanded_bytes: usize,
++    /// Maximum nesting of incoming protocol envelopes and compressed objects.
++    pub max_incoming_nesting: usize,
+ 
+     pub transport: Box<TransportFactory>,
+ 
+@@ -154,6 +160,9 @@
+             proxy_url: None,
+             retry_policy: Box::new(super::AutoSleep::default()),
+             updates_channel_capacity: NonZeroUsize::new(100).unwrap(),
++            max_response_bytes: 8 * 1024 * 1024,
++            max_expanded_bytes: 16 * 1024 * 1024,
++            max_incoming_nesting: 32,
+             transport: Box::new(|| Box::new(transport::Full::new())),
+             __non_exhaustive: (),
+         }
+--- upstream/src/errors.rs
++++ patched/src/errors.rs
+@@ -18,6 +18,8 @@
+     Io(io::Error),
+     /// Error propagated from attempting to deserialize an invalid [`tl::Deserializable`].
+     Deserialize(mtp::DeserializeError),
++    /// Local arithmetic made the session unable to encode another packet.
++    Serialize(mtp::SerializeError),
+ }
+ 
+ impl std::error::Error for ReadError {}
+@@ -31,6 +33,7 @@
+                     .unwrap_or_else(|| io::Error::new(e.kind(), e.to_string())),
+             ),
+             Self::Deserialize(e) => Self::Deserialize(e.clone()),
++            Self::Serialize(e) => Self::Serialize(*e),
+         }
+     }
+ }
+@@ -40,6 +43,7 @@
+         match self {
+             Self::Io(err) => write!(f, "read error, IO failed: {err}"),
+             Self::Deserialize(err) => write!(f, "read error, bad response: {err}"),
++            Self::Serialize(err) => write!(f, "session serialization error: {err}"),
+         }
+     }
+ }
+@@ -209,6 +213,12 @@
+     /// Otherwise it might happen on bleeding-edge layers that have not had time to settle yet.
+     Deserialize(mtp::DeserializeError),
+ 
++    /// A terminal serialization failure for a request known to be unsent.
++    UnsentSerialization(mtp::SerializeError),
++
++    /// The session could not serialize another packet while effects were uncertain.
++    SerializationInterrupted(mtp::SerializeError),
++
+     /// Error propagated from the underlying [`transport`].
+     ///
+     /// The most common variant is [`transport::Error::BadStatus`], which can occur when
+@@ -242,6 +252,8 @@
+             Self::Rpc(err) => write!(f, "request error: {err}"),
+             Self::Io(err) => write!(f, "request error: {err}"),
+             Self::Deserialize(err) => write!(f, "request error: {err}"),
++            Self::UnsentSerialization(err) => write!(f, "request was not sent: {err}"),
++            Self::SerializationInterrupted(err) => write!(f, "request outcome is unknown: {err}"),
+             Self::Transport(err) => write!(f, "request error: {err}"),
+             Self::Dropped(err) => write!(f, "request error: dropped: {err}"),
+             Self::InvalidDc => write!(f, "request error: invalid dc"),
+@@ -261,6 +273,7 @@
+         match error {
+             ReadError::Io(error) => Self::from(error),
+             ReadError::Deserialize(error) => Self::from(error),
++            ReadError::Serialize(error) => Self::SerializationInterrupted(error),
+         }
+     }
+ }
+--- upstream/src/sender.rs
++++ patched/src/sender.rs
+@@ -20,11 +20,54 @@
+ use tokio::sync::oneshot;
+ use tokio::sync::oneshot::error::TryRecvError;
+ use tokio::time::{Instant, sleep_until};
+-use tracing::{debug, error, info, trace, warn};
++use tracing::{debug, info, trace, warn};
+ 
+ use crate::RpcError;
+ use crate::errors::{InvocationError, ReadError};
+ use crate::net::{NetStream, ServerAddr};
++
++pub(crate) fn decode_exact<T: Deserializable>(bytes: &[u8]) -> Result<T, mtp::DeserializeError> {
++    let mut cursor = tl::Cursor::from_slice(bytes);
++    let value = T::deserialize(&mut cursor)?;
++    if cursor.pos() != bytes.len() {
++        return Err(mtp::DeserializeError::TrailingData);
++    }
++    Ok(value)
++}
++
++fn decode_response<T: Deserializable>(
++    bytes: &[u8],
++    limit: usize,
++) -> Result<T, mtp::DeserializeError> {
++    if bytes.len() > limit {
++        return Err(mtp::DeserializeError::LimitExceeded);
++    }
++    decode_exact(bytes)
++}
++
++fn decode_updates_exact(bytes: &[u8]) -> Result<UpdatesLike, mtp::DeserializeError> {
++    match decode_exact::<tl::enums::Updates>(bytes) {
++        Ok(value) => Ok(UpdatesLike::Updates(value)),
++        Err(original) => {
++            if let Ok(tl::enums::messages::AffectedMessages::Messages(value)) =
++                decode_exact::<tl::enums::messages::AffectedMessages>(bytes)
++            {
++                return Ok(UpdatesLike::AffectedMessages(value));
++            }
++            if let Ok(tl::enums::messages::InvitedUsers::Users(value)) =
++                decode_exact::<tl::enums::messages::InvitedUsers>(bytes)
++            {
++                return Ok(UpdatesLike::InvitedUsers(value));
++            }
++            if let Ok(tl::enums::messages::ChatInviteJoinResult::Ok(value)) =
++                decode_exact::<tl::enums::messages::ChatInviteJoinResult>(bytes)
++            {
++                return Ok(UpdatesLike::ChatInviteJoinResult(value));
++            }
++            Err(original)
++        }
++    }
++}
+ 
+ /// Every how often are pings sent?
+ const PING_DELAY: Duration = Duration::from_secs(60);
+@@ -66,12 +109,14 @@
+     state: connection::State<T, M>,
+     requests: Vec<Request>,
+     next_ping: Instant,
++    incoming_response_limit: usize,
+ }
+ 
+ struct Request {
+     body: Vec<u8>,
+     state: RequestState,
+     result: oneshot::Sender<Result<Vec<u8>, InvocationError>>,
++    remaining_setup_repairs: u8,
+ }
+ 
+ #[derive(Clone, Debug)]
+@@ -108,6 +153,7 @@
+             state: connection::State::new(transport, mtp),
+             requests: vec![],
+             next_ping: Instant::now() + PING_DELAY,
++            incoming_response_limit: 8 * 1024 * 1024,
+         })
+     }
+ 
+@@ -125,22 +171,53 @@
+         &mut self,
+         request: &R,
+     ) -> Result<R::Return, InvocationError> {
++        self.invoke_with_setup_repairs(request, 0).await
++    }
++
++    pub(crate) async fn invoke_connection_setup(
++        &mut self,
++        request: &tl::functions::InvokeWithLayer<
++            tl::functions::InitConnection<tl::functions::help::GetConfig>,
++        >,
++    ) -> Result<tl::enums::Config, InvocationError> {
++        // The read-only setup can need both clock and salt repair.
++        self.invoke_with_setup_repairs(request, 2).await
++    }
++
++    async fn invoke_with_setup_repairs<R: RemoteCall>(
++        &mut self,
++        request: &R,
++        remaining_setup_repairs: u8,
++    ) -> Result<R::Return, InvocationError> {
+         let body = request.to_bytes();
+         if body.len() > MAX_REQUEST_SIZE {
+             return Err(InvocationError::Dropped("request body is too large"));
+         }
+ 
+         let (tx, rx) = oneshot::channel();
+-        self.enqueue_body(body, tx);
+-        self.step_until_receive(rx)
+-            .await
+-            .and_then(|vec| R::Return::from_bytes(&vec).map_err(|err| err.into()))
++        self.enqueue(body, tx, remaining_setup_repairs);
++        self.step_until_receive(rx).await.and_then(|vec| {
++            decode_response::<R::Return>(&vec, self.incoming_response_limit).map_err(Into::into)
++        })
++    }
++
++    pub(crate) fn set_response_limit(&mut self, limit: usize) {
++        self.incoming_response_limit = limit;
+     }
+ 
+     pub(crate) fn enqueue_body(
+         &mut self,
+         body: Vec<u8>,
+         tx: oneshot::Sender<Result<Vec<u8>, InvocationError>>,
++    ) {
++        self.enqueue(body, tx, 0);
++    }
++
++    fn enqueue(
++        &mut self,
++        body: Vec<u8>,
++        tx: oneshot::Sender<Result<Vec<u8>, InvocationError>>,
++        remaining_setup_repairs: u8,
+     ) {
+         assert!(body.len() >= 4);
+         let req_id = u32::from_le_bytes([body[0], body[1], body[2], body[3]]);
+@@ -153,6 +230,7 @@
+             body,
+             state: RequestState::NotSerialized,
+             result: tx,
++            remaining_setup_repairs,
+         });
+     }
+ 
+@@ -161,7 +239,14 @@
+         mut rx: oneshot::Receiver<Result<Vec<u8>, InvocationError>>,
+     ) -> Result<Vec<u8>, InvocationError> {
+         loop {
+-            self.step().await?;
++            if let Err(error) = self.step().await {
++                if matches!(error, ReadError::Serialize(_))
++                    && let Ok(result) = rx.try_recv()
++                {
++                    return result;
++                }
++                return Err(error.into());
++            }
+             match rx.try_recv() {
+                 Ok(x) => break x,
+                 Err(TryRecvError::Empty) => continue,
+@@ -179,10 +264,28 @@
+     /// If an error is returned, the connection should be treated
+     /// as dead and the sender instance recreated.
+     pub async fn step(&mut self) -> Result<Vec<UpdatesLike>, ReadError> {
++        let mut recovery_results = Vec::new();
++        let recovery_deadline = self
++            .state
++            .mtp
++            .poll_recovery(Instant::now().into_std(), &mut recovery_results);
++        if !recovery_results.is_empty() {
++            let mut updates = Vec::new();
++            self.process_mtp_buffer(recovery_results, &mut updates);
++            return Ok(updates);
++        }
+         self.try_fill_write();
++        if let Some(error) = self.state.mtp.serialize_error() {
++            let error = ReadError::Serialize(error);
++            self.on_error(&error);
++            return Err(error);
++        }
+ 
+         let (mut reader, mut writer) = self.stream.split();
+-        let sleep = sleep_until(self.next_ping);
++        let wake_at = recovery_deadline
++            .map(Instant::from_std)
++            .map_or(self.next_ping, |due| self.next_ping.min(due));
++        let sleep = sleep_until(wake_at);
+         let (read, write) = self.state.io_buffers();
+ 
+         trace!(
+@@ -200,8 +303,14 @@
+                 })
+             }
+             _ = sleep => {
+-                self.on_ping_timeout();
+-                Ok(Vec::new())
++                let now = Instant::now();
++                if now >= self.next_ping {
++                    self.on_ping_timeout();
++                }
++                self.state.mtp.poll_recovery(now.into_std(), &mut recovery_results);
++                let mut updates = Vec::new();
++                self.process_mtp_buffer(recovery_results, &mut updates);
++                Ok(updates)
+             }
+         };
+ 
+@@ -302,9 +411,20 @@
+             &error
+         );
+ 
+-        self.requests
+-            .drain(..)
+-            .for_each(|r| drop(r.result.send(Err(InvocationError::from(error.clone())))));
++        let no_packed_packet = self.state.can_buffer_requests();
++        for request in self.requests.drain(..) {
++            let error = match error {
++                ReadError::Serialize(cause)
++                    if matches!(request.state, RequestState::NotSerialized)
++                        || (no_packed_packet
++                            && matches!(request.state, RequestState::Serialized(_))) =>
++                {
++                    InvocationError::UnsentSerialization(*cause)
++                }
++                _ => InvocationError::from(error.clone()),
++            };
++            drop(request.result.send(Err(error)));
++        }
+     }
+ 
+     /// Process the result of deserializing an MTP buffer.
+@@ -313,6 +433,8 @@
+         results: Vec<mtp::Deserialization>,
+         updates: &mut Vec<UpdatesLike>,
+     ) {
++        let mut rejections = Vec::new();
++        let mut unavailable = Vec::new();
+         for result in results {
+             match result {
+                 mtp::Deserialization::OwnUpdate { msg_id, update } => {
+@@ -321,9 +443,42 @@
+                 mtp::Deserialization::Update(update) => self.process_update(updates, update),
+                 mtp::Deserialization::RpcResult(result) => self.process_result(result),
+                 mtp::Deserialization::RpcError(error) => self.process_error(error),
+-                mtp::Deserialization::BadMessage(bad_msg) => self.process_bad_message(bad_msg),
+-                mtp::Deserialization::Failure(failure) => self.process_deserialize_error(failure),
+-            }
++                mtp::Deserialization::BadMessage(bad_msg) => rejections.push(bad_msg),
++                mtp::Deserialization::SessionRecreated => {
++                    updates.push(UpdatesLike::ConnectionClosed)
++                }
++                mtp::Deserialization::ResponseUnavailable { target } => unavailable.push(target),
++                mtp::Deserialization::Failure(failure) => {
++                    self.process_deserialize_error(failure, updates);
++                }
++            }
++        }
++        let mut gap = false;
++        for target in unavailable {
++            match target {
++                mtp::RecoveryTarget::Request(request) => {
++                    if let Some(pending) = self.pop_request(request) {
++                        drop(pending.result.send(Err(InvocationError::Dropped(
++                            "response could not be recovered",
++                        ))));
++                    }
++                    gap = true;
++                }
++                mtp::RecoveryTarget::Unsolicited => gap = true,
++                mtp::RecoveryTarget::SaltRefresh(_) => {}
++            }
++        }
++        if gap
++            && !updates
++                .iter()
++                .any(|update| matches!(update, UpdatesLike::ConnectionClosed))
++        {
++            updates.push(UpdatesLike::ConnectionClosed);
++        }
++        // A matching reply in this frame resolves its request before a
++        // notification referring to the whole outgoing container can interrupt it.
++        for rejection in rejections {
++            self.process_bad_message(rejection);
+         }
+     }
+ 
+@@ -333,11 +488,15 @@
+         msg_id: MsgId,
+         update: Vec<u8>,
+     ) {
++        let Some(request) = self
++            .sent_request_index(msg_id)
++            .map(|index| &self.requests[index])
++        else {
++            return;
++        };
+         match (
+-            UpdatesLike::from_bytes(&update),
+-            self.peek_request(msg_id).and_then(|request| {
+-                tl::functions::messages::SendMessage::from_boxed_bytes(&request.body).ok()
+-            }),
++            decode_updates_exact(&update),
++            tl::functions::messages::SendMessage::from_boxed_bytes(&request.body).ok(),
+         ) {
+             (
+                 Ok(UpdatesLike::Updates(tl::enums::Updates::UpdateShortSentMessage(u))),
+@@ -350,16 +509,13 @@
+             (Ok(UpdatesLike::AffectedMessages(affected)), _) => {
+                 // Check if the original request targeted a channel (e.g. channels.deleteMessages).
+                 // If so, the pts belongs to that channel, not the common/user pts sequence.
+-                let channel_id = self
+-                    .peek_request(msg_id)
+-                    .and_then(|request| {
+-                        tl::functions::channels::DeleteMessages::from_boxed_bytes(&request.body)
+-                            .ok()
+-                    })
+-                    .and_then(|request| match request.channel {
+-                        tl::enums::InputChannel::Channel(c) => Some((c.channel_id, request.id)),
+-                        _ => None,
+-                    });
++                let channel_id =
++                    tl::functions::channels::DeleteMessages::from_boxed_bytes(&request.body)
++                        .ok()
++                        .and_then(|request| match request.channel {
++                            tl::enums::InputChannel::Channel(c) => Some((c.channel_id, request.id)),
++                            _ => None,
++                        });
+                 if let Some((channel_id, message_ids)) = channel_id {
+                     updates.push(UpdatesLike::AffectedChannelMessages {
+                         affected,
+@@ -378,13 +534,14 @@
+             (Err(e), _) => {
+                 // This shouldn't happen. We just made the request, so they shouldn't be stale.
+                 // If the request failed with a failed-to-deserialize error, callers will handle it.
+-                warn!("telegram responded with updates that failed to be deserialized: {e}")
++                warn!("telegram responded with updates that failed to be deserialized: {e}");
++                updates.push(UpdatesLike::MalformedUpdates);
+             }
+         }
+     }
+ 
+     fn process_update(&mut self, updates: &mut Vec<UpdatesLike>, update: Vec<u8>) {
+-        match UpdatesLike::from_bytes(&update) {
++        match decode_updates_exact(&update) {
+             Ok(u) => updates.push(u),
+             Err(e) => {
+                 // These are to be treated as a gap.
+@@ -418,7 +575,10 @@
+ 
+     fn process_error(&mut self, error: mtp::RpcResultError) {
+         if let Some(req) = self.pop_request(error.msg_id) {
+-            debug!(error = ?error.error, "got rpc error");
++            let rpc_code = (100..600)
++                .contains(&error.error.error_code)
++                .then_some(error.error.error_code);
++            debug!(?rpc_code, "got rpc error");
+             let x = req.body.as_slice();
+             drop(
+                 req.result.send(Err(InvocationError::Rpc(
+@@ -436,56 +596,33 @@
+ 
+     fn process_bad_message(&mut self, bad_msg: mtp::BadMessage) {
+         for i in (0..self.requests.len()).rev() {
+-            match &self.requests[i].state {
+-                RequestState::Serialized(pair)
+-                    if pair.msg_id == bad_msg.msg_id || pair.container_msg_id == bad_msg.msg_id =>
+-                {
+-                    panic!(
+-                        "bad msg for unsent request {:?}: {}",
+-                        bad_msg.msg_id,
+-                        bad_msg.description()
+-                    );
+-                }
+-                RequestState::Sent(pair)
+-                    if pair.msg_id == bad_msg.msg_id || pair.container_msg_id == bad_msg.msg_id =>
+-                {
+-                    // TODO add a test to make sure we resend the request
+-                    if bad_msg.retryable() {
+-                        info!(
+-                            request = ?pair.msg_id,
+-                            "{}; re-sending request",
+-                            bad_msg.description(),
+-                        );
+-
+-                        // TODO check if actually retryable first!
+-                        self.requests[i].state = RequestState::NotSerialized;
+-                    } else {
+-                        if bad_msg.fatal() {
+-                            error!(
+-                                request = ?pair.msg_id,
+-                                "{}; cannot retry request",
+-                                bad_msg.description(),
+-                            );
+-                        } else {
+-                            warn!(
+-                                request = ?pair.msg_id,
+-                                "{}; cannot retry request",
+-                                bad_msg.description(),
+-                            );
+-                        }
+-                        let req = self.requests.swap_remove(i);
+-                        drop(req.result.send(Err(InvocationError::Dropped(
+-                            "response was non-retryable bad msg",
+-                        ))));
+-                    }
+-                }
+-                _ => {}
+-            }
+-        }
+-    }
+-
+-    fn process_deserialize_error(&mut self, failure: mtp::DeserializationFailure) {
++            let request = &mut self.requests[i];
++            if !matches!(&request.state, RequestState::Sent(pair) if pair.msg_id == bad_msg.msg_id || pair.container_msg_id == bad_msg.msg_id)
++            {
++                continue;
++            }
++            if bad_msg.retryable() && request.remaining_setup_repairs > 0 {
++                request.remaining_setup_repairs -= 1;
++                request.state = RequestState::NotSerialized;
++            } else {
++                // An RPC result can still follow this notice. Preserve uncertainty
++                // without replaying the request or reporting a confirmed refusal.
++                let request = self.requests.swap_remove(i);
++                drop(request.result.send(Err(InvocationError::Dropped(
++                    "request interrupted by a protocol rejection",
++                ))));
++            }
++        }
++    }
++
++    fn process_deserialize_error(
++        &mut self,
++        failure: mtp::DeserializationFailure,
++        updates: &mut Vec<UpdatesLike>,
++    ) {
+         if let Some(req) = self.pop_request(failure.msg_id) {
++            // A failed response to a sent RPC may have contained an own update.
++            updates.push(UpdatesLike::MalformedUpdates);
+             debug!(error = ?failure.error, "got deserialization failure");
+             drop(req.result.send(Err(InvocationError::from(failure.error))));
+         } else {
+@@ -496,32 +633,25 @@
+         }
+     }
+ 
+-    fn peek_request(&mut self, msg_id: MsgId) -> Option<&Request> {
+-        self.requests.iter().find(|request| match request.state {
+-            RequestState::NotSerialized => false,
+-            RequestState::Serialized(MsgIdPair { msg_id: m, .. }) => m == msg_id,
+-            RequestState::Sent(MsgIdPair { msg_id: m, .. }) => m == msg_id,
+-        })
++    fn sent_request_index(&self, msg_id: MsgId) -> Option<usize> {
++        self.requests.iter().position(
++            |request| matches!(&request.state, RequestState::Sent(pair) if pair.msg_id == msg_id),
++        )
+     }
+ 
+     fn pop_request(&mut self, msg_id: MsgId) -> Option<Request> {
+-        for i in 0..self.requests.len() {
+-            match &self.requests[i].state {
+-                RequestState::Serialized(pair) if pair.msg_id == msg_id => {
+-                    panic!("got response {msg_id:?} for unsent request {pair:?}");
+-                }
+-                RequestState::Sent(pair) if pair.msg_id == msg_id => {
+-                    return Some(self.requests.swap_remove(i));
+-                }
+-                _ => {}
+-            }
+-        }
+-
+-        None
++        let index = self.sent_request_index(msg_id)?;
++        Some(self.requests.swap_remove(index))
+     }
+ }
+ 
+ impl<T: Transport> Sender<T, mtp::Encrypted> {
++    pub(crate) fn set_incoming_limits(&mut self, response: usize, expanded: usize, nesting: usize) {
++        self.incoming_response_limit = response;
++        self.state
++            .mtp
++            .set_incoming_limits(response, expanded, nesting);
++    }
+     pub fn auth_key(&self) -> [u8; 256] {
+         self.state.mtp.auth_key()
+     }
+@@ -563,6 +693,7 @@
+         state: sender.state.into_encrypted(auth),
+         requests: sender.requests,
+         next_ping: Instant::now() + PING_DELAY,
++        incoming_response_limit: sender.incoming_response_limit,
+     })
+ }
+ 
+@@ -574,3 +705,7 @@
+ ) -> Result<Sender<T, mtp::Encrypted>, io::Error> {
+     Sender::connect(transport, mtp::Encrypted::build().finish(auth_key), addr).await
+ }
++
++#[cfg(test)]
++#[path = "tg_sender_receive_tests.rs"]
++mod tg_sender_receive_tests;
+--- upstream/src/sender_pool.rs
++++ patched/src/sender_pool.rs
+@@ -6,10 +6,11 @@
+ // option. This file may not be copied, modified, or distributed
+ // except according to those terms.
+ 
++use futures_util::FutureExt;
+ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+ use std::num::NonZeroU32;
+ use std::ops::{ControlFlow, Deref};
+-use std::sync::Arc;
++use std::sync::{Arc, OnceLock};
+ use std::time::{Duration, Instant};
+ use std::{fmt, panic};
+ 
+@@ -18,10 +19,10 @@
+ use grammers_session::storages::{ErasedSession, erase};
+ use grammers_session::types::DcOption;
+ use grammers_session::updates::UpdatesLike;
+-use grammers_tl_types::{self as tl, Deserializable, enums};
++use grammers_tl_types::{self as tl, enums};
+ use tokio::task::AbortHandle;
+ use tokio::{
+-    sync::{mpsc, oneshot},
++    sync::{mpsc, oneshot, watch},
+     task::JoinSet,
+     time::sleep,
+ };
+@@ -29,12 +30,16 @@
+ 
+ use crate::configuration::{ConnectionParams, RetryContext};
+ use crate::errors::{InvocationError, ReadError};
+-use crate::{Sender, ServerAddr, connect, connect_with_auth};
++use crate::{Sender, ServerAddr, connect_with_auth};
+ 
+ /// How long to wait after warning the user that the updates was dropped.
+ const UPDATES_DROPPED_LOG_COOLDOWN: Duration = Duration::from_secs(300);
+ 
+ type InvokeResponse = Vec<u8>;
++
++#[cfg(feature = "tg-test-kit")]
++#[path = "tg_rpc_fixture.rs"]
++mod tg_rpc_fixture;
+ 
+ enum Request {
+     Invoke {
+@@ -51,7 +56,6 @@
+     Disconnect {
+         dc_id: i32,
+     },
+-    Quit,
+ }
+ 
+ struct Rpc {
+@@ -62,6 +66,7 @@
+ struct ConnectionInfo {
+     dc_id: i32,
+     rpc_tx: mpsc::UnboundedSender<Rpc>,
++    serialization_failure: Arc<OnceLock<mtp::SerializeError>>,
+     abort_handle: AbortHandle,
+ }
+ 
+@@ -85,7 +90,12 @@
+ 
+ /// Cheaply cloneable handle to interact with its [`SenderPoolRunner`].
+ #[derive(Clone)]
+-pub struct SenderPoolHandle(mpsc::UnboundedSender<Request>);
++pub struct SenderPoolHandle(
++    mpsc::UnboundedSender<Request>,
++    watch::Sender<bool>,
++    watch::Receiver<bool>,
++    #[cfg(feature = "tg-test-kit")] std::sync::Weak<tg_rpc_fixture::TestUpdates>,
++);
+ 
+ /// Builder to configure the runner to drive I/O and linked handles.
+ pub struct SenderPool {
+@@ -117,6 +127,10 @@
+     updates_tx: mpsc::Sender<UpdatesLike>,
+     connections: Vec<ConnectionInfo>,
+     connection_pool: JoinSet<Result<(), ReadError>>,
++    shutdown: watch::Receiver<bool>,
++    update_loss: watch::Sender<bool>,
++    #[cfg(feature = "tg-test-kit")]
++    test_rpc: Option<tg_rpc_fixture::TestRpc>,
+ }
+ 
+ impl Deref for SenderPoolFatHandle {
+@@ -137,7 +151,7 @@
+     ) -> Result<R::Return, InvocationError> {
+         self.do_invoke_in_dc(dc_id, request.to_bytes())
+             .await
+-            .and_then(|body| R::Return::from_bytes(&body).map_err(|e| e.into()))
++            .and_then(|body| crate::sender::decode_exact::<R::Return>(&body).map_err(Into::into))
+     }
+ 
+     /// Communicate with the running [`SenderPoolRunner`] instance
+@@ -147,6 +161,9 @@
+         dc_id: i32,
+         body: Vec<u8>,
+     ) -> Result<InvokeResponse, InvocationError> {
++        if *self.1.borrow() {
++            return Err(InvocationError::Dropped("SenderPoolRunner is stopping"));
++        }
+         if body.len() > MAX_REQUEST_SIZE {
+             return Err(InvocationError::Dropped("request body is too large"));
+         }
+@@ -167,13 +184,26 @@
+     /// This is useful after datacenter migrations during sign in,
+     /// when the old connection is known to not be needed anymore.
+     pub fn disconnect_from_dc(&self, dc_id: i32) -> bool {
+-        self.0.send(Request::Disconnect { dc_id }).is_ok()
++        !*self.1.borrow() && self.0.send(Request::Disconnect { dc_id }).is_ok()
+     }
+ 
+     /// Communicate with the running [`SenderPoolRunner`] instance
+     /// to drop all active connections and gracefully stop running.
+     pub fn quit(&self) -> bool {
+-        self.0.send(Request::Quit).is_ok()
++        if self.1.is_closed() {
++            return false;
++        }
++        self.1.send_replace(true);
++        true
++    }
++
++    /// Sticky loss signal for this runner generation, independent of the update queue.
++    ///
++    /// True means an update or connection-closed notification could not be forwarded.
++    /// It is never reset, including after the queue drains or a quiet period.
++    /// Applications must recover the gap before acknowledging subsequent checkpoints.
++    pub fn update_loss(&self) -> watch::Receiver<bool> {
++        self.2.clone()
+     }
+ 
+     /// do [`Self::raw_invoke_in_dc`] with [`Self::check_retry`]
+@@ -188,19 +218,16 @@
+         loop {
+             match self.raw_invoke_in_dc(dc_id, request_body.clone()).await {
+                 Ok(response) => break Ok(response),
+-                Err(e) => {
+-                    let error_info = format!("{}", e);
+-                    match self.check_retry(e, fail_count, slept_so_far).await {
+-                        ControlFlow::Continue(delay) => {
+-                            info!(?delay, "sleeping on {} before retrying", error_info);
+-                            sleep(delay).await;
+-                            fail_count = fail_count.saturating_add(1);
+-                            slept_so_far += delay;
+-                            continue;
+-                        }
+-                        ControlFlow::Break(final_error) => break Err(final_error),
++                Err(e) => match self.check_retry(e, fail_count, slept_so_far).await {
++                    ControlFlow::Continue(delay) => {
++                        info!(?delay, "sleeping before retrying request");
++                        sleep(delay).await;
++                        fail_count = fail_count.saturating_add(1);
++                        slept_so_far += delay;
++                        continue;
+                     }
+-                }
++                    ControlFlow::Break(final_error) => break Err(final_error),
++                },
+             }
+         }
+     }
+@@ -213,6 +240,9 @@
+         fail_count: NonZeroU32,
+         slept_so_far: Duration,
+     ) -> ControlFlow<InvocationError, Duration> {
++        if *self.1.borrow() {
++            return ControlFlow::Break(error);
++        }
+         let (tx, rx) = oneshot::channel();
+         if self
+             .0
+@@ -269,6 +299,8 @@
+         let (request_tx, request_rx) = mpsc::unbounded_channel();
+         let (updates_tx, updates_rx) =
+             mpsc::channel(connection_params.updates_channel_capacity.get());
++        let (shutdown_tx, shutdown) = watch::channel(false);
++        let (update_loss, loss_rx) = watch::channel(false);
+ 
+         Self {
+             runner: SenderPoolRunner {
+@@ -279,9 +311,19 @@
+                 updates_tx,
+                 connections: Vec::new(),
+                 connection_pool: JoinSet::new(),
++                shutdown,
++                update_loss,
++                #[cfg(feature = "tg-test-kit")]
++                test_rpc: None,
+             },
+             handle: SenderPoolFatHandle {
+-                thin: SenderPoolHandle(request_tx),
++                thin: SenderPoolHandle(
++                    request_tx,
++                    shutdown_tx,
++                    loss_rx,
++                    #[cfg(feature = "tg-test-kit")]
++                    Default::default(),
++                ),
+                 session: Arc::clone(&session),
+                 api_id,
+             },
+@@ -291,13 +333,18 @@
+ }
+ 
+ impl SenderPoolRunner {
+-    /// Run the sender pool until [`SenderPoolHandle::quit`] is called or the returned future is dropped.
++    /// Run the sender pool until [`SenderPoolHandle::quit`] is called or all handles close.
+     ///
+     /// Connections will be initiated on-demand whenever the first request to a datacenter is made.
++    /// Call quit and await this future to join every child, including pending connection setup.
++    /// Dropping/aborting this future only aborts children; it cannot await their termination.
+     pub async fn run(mut self) {
++        let outcome = panic::AssertUnwindSafe(async {
++        let mut shutdown = self.shutdown.clone();
+         loop {
+             tokio::select! {
+                 biased;
++                _ = async { let _ = shutdown.wait_for(|stop| *stop).await; } => break,
+                 completion = self.connection_pool.join_next(), if !self.connection_pool.is_empty() => {
+                     if let Err(err) = completion.unwrap()
+                         && let Ok(reason) = err.try_into_panic()
+@@ -308,10 +355,11 @@
+                         .retain(|connection| !connection.abort_handle.is_finished());
+                 }
+                 request = self.request_rx.recv() => {
+-                    let flow = if let Some(request) = request {
+-                        self.process_request(request).await
+-                    } else {
+-                        ControlFlow::Break(())
++                    let Some(request) = request else { break; };
++                    let flow = tokio::select! {
++                        biased;
++                        _ = async { let _ = shutdown.wait_for(|stop| *stop).await; } => break,
++                        flow = self.process_request(request) => flow,
+                     };
+                     match flow {
+                         ControlFlow::Continue(_) => continue,
+@@ -320,14 +368,36 @@
+                 }
+             }
+         }
+-
+-        self.connections.clear(); // drop all channels to cause the `run_sender` loops to stop
+-        self.connection_pool.join_all().await;
++        }).catch_unwind().await;
++        let mut panic_reason = outcome.err();
++        self.request_rx.close();
++        self.connections.clear();
++        self.connection_pool.abort_all();
++        while let Some(completion) = self.connection_pool.join_next().await {
++            if let Err(error) = completion
++                && let Ok(reason) = error.try_into_panic()
++                && panic_reason.is_none()
++            {
++                panic_reason = Some(reason);
++            }
++        }
++        if let Some(reason) = panic_reason {
++            panic::resume_unwind(reason);
++        }
+     }
+ 
+     async fn process_request(&mut self, request: Request) -> ControlFlow<()> {
+         match request {
+             Request::Invoke { dc_id, body, tx } => {
++                #[cfg(feature = "tg-test-kit")]
++                if let Some(fixture) = &self.test_rpc {
++                    let response = (fixture.invoke)(dc_id, body);
++                    self.connection_pool.spawn(async move {
++                        let _ = tx.send(response.await);
++                        Ok(())
++                    });
++                    return ControlFlow::Continue(());
++                }
+                 let connection = match self
+                     .connections
+                     .iter()
+@@ -337,12 +407,24 @@
+                     None => match self.create_connection(dc_id).await {
+                         Ok(x) => x,
+                         Err(e) => {
+-                            let _ = tx.send(Err(e));
++                            let error = match e {
++                                InvocationError::SerializationInterrupted(cause) => {
++                                    InvocationError::UnsentSerialization(cause)
++                                }
++                                error => error,
++                            };
++                            let _ = tx.send(Err(error));
+                             return ControlFlow::Continue(());
+                         }
+                     },
+                 };
+-                let _ = connection.rpc_tx.send(Rpc { body, tx });
++                if let Err(error) = connection.rpc_tx.send(Rpc { body, tx }) {
++                    let cause = connection.serialization_failure.get().copied().map_or(
++                        InvocationError::Dropped("sender connection is closed"),
++                        InvocationError::UnsentSerialization,
++                    );
++                    let _ = error.0.tx.send(Err(cause));
++                }
+                 ControlFlow::Continue(())
+             }
+             Request::CheckRetry {
+@@ -378,7 +460,6 @@
+                 });
+                 ControlFlow::Continue(())
+             }
+-            Request::Quit => ControlFlow::Break(()),
+         }
+     }
+ 
+@@ -394,15 +475,19 @@
+         self.session.set_dc_option(&dc_option).await?;
+ 
+         let (rpc_tx, rpc_rx) = mpsc::unbounded_channel();
++        let serialization_failure = Arc::new(OnceLock::new());
+         let abort_handle = self.connection_pool.spawn(run_sender(
+             sender,
+             rpc_rx,
++            serialization_failure.clone(),
+             self.updates_tx.clone(),
++            self.update_loss.clone(),
+             dc_option.id == self.session.home_dc_id()?,
+         ));
+         self.connections.push(ConnectionInfo {
+             dc_id,
+             rpc_tx,
++            serialization_failure,
+             abort_handle,
+         });
+         Ok(self.connections.last().unwrap())
+@@ -452,17 +537,36 @@
+                 .await
+                 .map_err(InvocationError::Io)?
+         } else {
+-            connect(transport(), addr()).await?
++            let mut plain = Sender::connect(transport(), mtp::Plain::new(), addr())
++                .await
++                .map_err(InvocationError::Io)?;
++            plain.set_response_limit(self.connection_params.max_response_bytes);
++            crate::generate_auth_key(plain).await?
+         };
+-
+-        let enums::Config::Config(remote_config) = match sender.invoke(&init_connection).await {
+-            Ok(config) => config,
+-            Err(InvocationError::Transport(transport::Error::BadStatus { status: 404 })) => {
+-                sender = connect(transport(), addr()).await?;
+-                sender.invoke(&init_connection).await?
+-            }
+-            Err(e) => return Err(e),
+-        };
++        sender.set_incoming_limits(
++            self.connection_params.max_response_bytes,
++            self.connection_params.max_expanded_bytes,
++            self.connection_params.max_incoming_nesting,
++        );
++
++        let enums::Config::Config(remote_config) =
++            match sender.invoke_connection_setup(&init_connection).await {
++                Ok(config) => config,
++                Err(InvocationError::Transport(transport::Error::BadStatus { status: 404 })) => {
++                    let mut plain = Sender::connect(transport(), mtp::Plain::new(), addr())
++                        .await
++                        .map_err(InvocationError::Io)?;
++                    plain.set_response_limit(self.connection_params.max_response_bytes);
++                    sender = crate::generate_auth_key(plain).await?;
++                    sender.set_incoming_limits(
++                        self.connection_params.max_response_bytes,
++                        self.connection_params.max_expanded_bytes,
++                        self.connection_params.max_incoming_nesting,
++                    );
++                    sender.invoke_connection_setup(&init_connection).await?
++                }
++                Err(e) => return Err(e),
++            };
+ 
+         self.update_config(remote_config).await?;
+ 
+@@ -524,7 +628,9 @@
+ async fn run_sender(
+     mut sender: Sender<Box<dyn transport::Transport + Send>, grammers_mtproto::mtp::Encrypted>,
+     mut rpc_rx: mpsc::UnboundedReceiver<Rpc>,
++    serialization_failure: Arc<OnceLock<mtp::SerializeError>>,
+     updates: mpsc::Sender<UpdatesLike>,
++    update_loss: watch::Sender<bool>,
+     home_sender: bool,
+ ) -> Result<(), ReadError> {
+     let mut dropped: usize = 0;
+@@ -539,9 +645,12 @@
+                         continue;
+                     }
+                     for new_updates in all_new_updates {
+-                        if let Err(e) = updates.try_send(new_updates) {
++                        if !home_sender && matches!(new_updates, UpdatesLike::ConnectionClosed) {
++                            continue;
++                        }
++                        if let Err(e) = forward_update(&updates, &update_loss, new_updates) {
+                             match e {
+-                                mpsc::error::TrySendError::Full(_) => {
++                                ForwardError::Full => {
+                                     dropped += 1;
+                                     if last_update_limit_warn.elapsed() >= UPDATES_DROPPED_LOG_COOLDOWN {
+                                         warn!(
+@@ -554,7 +663,7 @@
+                                         last_update_limit_warn = Instant::now();
+                                     }
+                                 }
+-                                mpsc::error::TrySendError::Closed(_) => {
++                                ForwardError::Closed => {
+                                     debug!("updates channel closed, stopping update forwarding");
+                                     updates_closed = true;
+                                     break;
+@@ -564,8 +673,12 @@
+                     }
+                 },
+                 Err(err) => {
++                    if let ReadError::Serialize(cause) = &err {
++                        let _ = serialization_failure.set(*cause);
++                        fail_unsent_rpcs(&mut rpc_rx, *cause).await;
++                    }
+                     if home_sender {
+-                        let _ = updates.try_send(UpdatesLike::ConnectionClosed);
++                        let _ = forward_update(&updates, &update_loss, UpdatesLike::ConnectionClosed);
+                     }
+                     break Err(err)
+                 },
+@@ -575,6 +688,15 @@
+                 None => break Ok(()),
+             },
+         }
++    }
++}
++
++async fn fail_unsent_rpcs(receiver: &mut mpsc::UnboundedReceiver<Rpc>, cause: mtp::SerializeError) {
++    receiver.close();
++    while let Some(rpc) = receiver.recv().await {
++        let _ = rpc
++            .tx
++            .send(Err(InvocationError::UnsentSerialization(cause)));
+     }
+ }
+ 
+@@ -608,7 +730,34 @@
+             Self::Disconnect { dc_id } => {
+                 f.debug_struct("Disconnect").field("dc_id", dc_id).finish()
+             }
+-            Self::Quit => write!(f, "Quit"),
+-        }
+-    }
+-}
++        }
++    }
++}
++
++#[derive(Debug)]
++enum ForwardError {
++    Full,
++    Closed,
++}
++
++fn forward_update(
++    updates: &mpsc::Sender<UpdatesLike>,
++    loss: &watch::Sender<bool>,
++    update: UpdatesLike,
++) -> Result<(), ForwardError> {
++    let error = match updates.try_send(update) {
++        Ok(()) => return Ok(()),
++        Err(mpsc::error::TrySendError::Full(_)) => ForwardError::Full,
++        Err(mpsc::error::TrySendError::Closed(_)) => ForwardError::Closed,
++    };
++    loss.send_if_modified(|lost| {
++        let changed = !*lost;
++        *lost = true;
++        changed
++    });
++    Err(error)
++}
++
++#[cfg(test)]
++#[path = "tg_safety_tests.rs"]
++mod tg_safety_tests;

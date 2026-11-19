@@ -1,0 +1,19 @@
+[package]
+name = "tg-mtproto-backend-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+chacha20poly1305 = { version = "=0.11.0", default-features = false, features = ["alloc", "zeroize"] }
+getrandom = "0.4"
+grammers-client = { version = "=0.12.0", default-features = false }
+grammers-session = { version = "=0.12.0", default-features = false, features = ["serde"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt", "time", "net", "io-util"] }
+zeroize = "1"
+
+[lints.rust]
+unsafe_code = "forbid"

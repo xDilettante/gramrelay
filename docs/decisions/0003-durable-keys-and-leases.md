@@ -1,0 +1,13 @@
+# Durable keys, ownership and result retention
+
+Accepted: 16 November 2026. Scope: J1 / tg-agent.
+
+SQLite owns atomic reservation and version checks. Each Journal instance gets an OS-random worker identity; clone handles share it. Private Prepared/InFlight leases are separate types. begin commits in_flight before the caller may send, and complete uses the same worker/revision/state fence. A known NotSent releases prepared; rejected/unknown/succeeded never grant execution. Recovery advances the revision of expired in-flight attempts without allowing replay. This suppresses duplicate attempts in the local executor, not external side effects across a crash gap.
+
+Operation IDs remain caller-chosen strings, matching the architecture examples. Deleting an old key would make a delayed delivery indistinguishable from a new operation. We therefore expire result bodies/lifetimes while retaining bounded key/hash/owner/state tombstones. A full journal rejects new keys. Operators may explicitly archive/rotate a namespace, ending its deduplication guarantee. This trades automatic unlimited lifetime throughput for predictable replay protection and explicit capacity. Limits are configurable; no hidden purge runs.
+
+The journal stores canonical parameter fingerprints, not raw requests. Cached result projections are explicitly supplied by the host, bounded and optional. Known success remains succeeded if its body is omitted/expired. Current grants remain the executor's responsibility before any cache disclosure; journal principal matching is an additional boundary.
+
+A connection owns one database thread and a bounded std channel, including open and final close. A destructor-thread regression caught SQLite closing on the async runtime in the initial spawn_blocking/mutex implementation. The owning thread fixes that lifetime boundary; close drains admitted work and releases only unstarted reservations. Semaphore permits remain with cancelled work until it finishes. Current external async adapters require rusqlite 0.42/0.41; this small bridge keeps the reviewed 0.43 backend and a bounded queue without another dependency.
+
+Adversarial review found that begin sampled time before waiting for BEGIN IMMEDIATE and could admit an expired prepared lease. A real lock-contention regression reproduced the failure. Time is now sampled after acquisition; both lease and lifetime expiry cases pass. A second scoped read-only review found no remaining substantive issue in this transition. Cross-model review was skipped in the autonomous run; no external CLI was invoked. Tests also kill actual child processes at reservation, attempt, external-effect and receipt boundaries and race independent processes for one key.

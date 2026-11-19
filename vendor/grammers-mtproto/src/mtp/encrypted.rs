@@ -1,0 +1,2149 @@
+// Copyright 2020 - developers of the `grammers` project.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::collections::{HashSet, VecDeque};
+use std::mem;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use grammers_crypto::{AuthKey, decrypt_data_v2, encrypt_data_v2, get_padding_data_v2};
+use grammers_tl_types::{self as tl, Cursor, Deserializable, Identifiable, Serializable};
+use tracing::info;
+
+use super::recovery::{MissingResponse, Recoveries};
+use super::{
+    Deserialization, DeserializationFailure, DeserializeError, Mtp, RecoveryTarget, RpcResult,
+    RpcResultError, SerializeError,
+};
+use crate::utils::StackBuffer;
+use crate::{DequeBuffer, MsgId, manual_tl};
+
+fn decode_exact<T: Deserializable>(bytes: &[u8]) -> Result<T, DeserializeError> {
+    let mut cursor = Cursor::from_slice(bytes);
+    let value = T::deserialize(&mut cursor)?;
+    if cursor.pos() != bytes.len() {
+        return Err(DeserializeError::TrailingData);
+    }
+    Ok(value)
+}
+
+/// How many future salts to fetch or have stored at a given time.
+///
+/// Not an `usize` because the API expects a signed `i32`. Should be more than two because the
+/// code expects to fetch more salts when going from two to one.
+const NUM_FUTURE_SALTS: i32 = 64;
+
+/// When switching to a different salt, how many seconds must have passed since its `valid_since`.
+///
+/// Used to prevent small fluctuations in the system clock.
+const SALT_USE_DELAY: i32 = 60;
+const MAX_MESSAGE_AHEAD: u64 = 30 << 32;
+const SENT_HISTORY_LIMIT: usize = 2048;
+const STANDALONE_RECEIPT_HISTORY_LIMIT: usize = 64;
+const SENT_HISTORY_AGE: Duration = Duration::from_secs(300);
+const ACK_BATCH_LIMIT: usize = 8192;
+const ACK_QUEUE_LIMIT: usize = 2 * ACK_BATCH_LIMIT;
+
+fn clock_correction(
+    message_id: i64,
+    now: Duration,
+    previous: i64,
+) -> Result<i32, DeserializeError> {
+    let remote_seconds = ((message_id as u64) >> 32) as i64;
+    let local_seconds =
+        i64::try_from(now.as_secs()).map_err(|_| DeserializeError::InvalidEncoding)?;
+    let offset = i32::try_from(remote_seconds - local_seconds)
+        .map_err(|_| DeserializeError::InvalidEncoding)?;
+    let next = next_msg_id(now, offset, previous).map_err(|_| DeserializeError::InvalidEncoding)?;
+    if next as u64 > (message_id as u64).saturating_add(MAX_MESSAGE_AHEAD) {
+        // A clock adjustment cannot make a same-session ID go backwards.
+        return Err(DeserializeError::InvalidEncoding);
+    }
+    Ok(offset)
+}
+
+fn next_msg_id(now: Duration, offset: i32, previous: i64) -> Result<i64, SerializeError> {
+    let seconds = i64::try_from(now.as_secs())
+        .ok()
+        .and_then(|seconds| seconds.checked_add(i64::from(offset)))
+        .and_then(|seconds| u32::try_from(seconds).ok())
+        .ok_or(SerializeError::InvalidClock)?;
+    let fraction = (u64::from(now.subsec_nanos()) << 2).max(4);
+    let clock = (u64::from(seconds) << 32) | fraction;
+    let last = previous as u64;
+    let id = if clock > last {
+        clock
+    } else {
+        let next = last
+            .checked_add(4)
+            .ok_or(SerializeError::MessageIdsExhausted)?;
+        // The fractional part cannot be zero, including after a second boundary.
+        if next as u32 == 0 { next + 4 } else { next }
+    };
+    Ok(id as i64)
+}
+
+fn salt_time(start_secs: i32, elapsed: Duration) -> i128 {
+    i128::from(start_secs) + i128::from(elapsed.as_secs())
+}
+
+static UPDATE_IDS: [u32; 9] = [
+    tl::types::UpdateShortMessage::CONSTRUCTOR_ID,
+    tl::types::UpdateShortChatMessage::CONSTRUCTOR_ID,
+    tl::types::UpdateShort::CONSTRUCTOR_ID,
+    tl::types::UpdatesCombined::CONSTRUCTOR_ID,
+    tl::types::Updates::CONSTRUCTOR_ID,
+    tl::types::UpdateShortSentMessage::CONSTRUCTOR_ID,
+    tl::types::messages::AffectedMessages::CONSTRUCTOR_ID,
+    tl::types::messages::InvitedUsers::CONSTRUCTOR_ID,
+    tl::types::messages::ChatInviteJoinResultOk::CONSTRUCTOR_ID,
+];
+
+/// A builder to configure [`Mtp`] instances.
+///
+/// Use the [`Encrypted::build`] method to create builder instances.
+pub struct Builder {
+    time_offset: i32,
+    first_salt: i64,
+    compression_threshold: Option<usize>,
+}
+
+struct SentHeader {
+    id: MsgId,
+    sequence: i32,
+    sent_at: Instant,
+    rejected: bool,
+    answered: bool,
+    is_salt_refresh: bool,
+}
+
+#[derive(Clone, Copy)]
+enum SentHeaderLocation {
+    Regular(usize),
+    StandaloneReceipt(usize),
+}
+
+#[derive(Default)]
+struct SentHistory {
+    regular: VecDeque<SentHeader>,
+    standalone_receipts: VecDeque<SentHeader>,
+}
+
+impl SentHistory {
+    fn find(&self, id: MsgId) -> Option<SentHeaderLocation> {
+        let id = id.0 as u64;
+        self.regular
+            .binary_search_by_key(&id, |header| header.id.0 as u64)
+            .ok()
+            .map(SentHeaderLocation::Regular)
+            .or_else(|| {
+                self.standalone_receipts
+                    .binary_search_by_key(&id, |header| header.id.0 as u64)
+                    .ok()
+                    .map(SentHeaderLocation::StandaloneReceipt)
+            })
+    }
+
+    fn get(&self, location: SentHeaderLocation) -> &SentHeader {
+        match location {
+            SentHeaderLocation::Regular(index) => &self.regular[index],
+            SentHeaderLocation::StandaloneReceipt(index) => &self.standalone_receipts[index],
+        }
+    }
+
+    fn get_mut(&mut self, location: SentHeaderLocation) -> &mut SentHeader {
+        match location {
+            SentHeaderLocation::Regular(index) => &mut self.regular[index],
+            SentHeaderLocation::StandaloneReceipt(index) => &mut self.standalone_receipts[index],
+        }
+    }
+
+    fn record_packet(
+        &mut self,
+        headers: &mut Vec<(MsgId, i32)>,
+        standalone_control: bool,
+        salt_refresh: Option<MsgId>,
+    ) {
+        // Idle control traffic may be much more frequent than application RPCs.
+        let (history, limit) = if standalone_control {
+            (
+                &mut self.standalone_receipts,
+                STANDALONE_RECEIPT_HISTORY_LIMIT,
+            )
+        } else {
+            (&mut self.regular, SENT_HISTORY_LIMIT)
+        };
+        let evict = (history.len() + headers.len()).saturating_sub(limit);
+        history.drain(..evict);
+        let sent_at = Instant::now();
+        history.extend(headers.drain(..).map(|(id, sequence)| SentHeader {
+            id,
+            sequence,
+            sent_at,
+            rejected: false,
+            answered: false,
+            is_salt_refresh: salt_refresh == Some(id),
+        }));
+    }
+}
+
+#[derive(Default)]
+struct Acknowledgements {
+    pending: VecDeque<i64>,
+    pending_ids: HashSet<i64>,
+    recently_written: VecDeque<i64>,
+    written_ids: HashSet<i64>,
+    in_packet: usize,
+    previous_packet_carried_ack: bool,
+    previous_packet_was_standalone_ack: bool,
+}
+
+impl Acknowledgements {
+    fn enqueue(&mut self, id: i64) -> Result<(), DeserializeError> {
+        if self.pending_ids.contains(&id) {
+            return Ok(());
+        }
+        if self.pending.len() >= ACK_QUEUE_LIMIT {
+            return Err(DeserializeError::LimitExceeded);
+        }
+        self.pending_ids.insert(id);
+        self.pending.push_back(id);
+        Ok(())
+    }
+
+    fn rollback(&mut self, length: usize) {
+        for id in self.pending.drain(length..) {
+            self.pending_ids.remove(&id);
+        }
+    }
+
+    fn packet_written(&mut self, standalone: bool) {
+        let count = mem::take(&mut self.in_packet);
+        self.previous_packet_carried_ack = count != 0;
+        self.previous_packet_was_standalone_ack = self.previous_packet_carried_ack && standalone;
+        for id in self.pending.drain(..count) {
+            self.pending_ids.remove(&id);
+            if self.written_ids.contains(&id) {
+                continue;
+            }
+            if self.recently_written.len() == ACK_BATCH_LIMIT
+                && let Some(oldest) = self.recently_written.pop_front()
+            {
+                self.written_ids.remove(&oldest);
+            }
+            self.written_ids.insert(id);
+            self.recently_written.push_back(id);
+        }
+    }
+}
+
+/// An implementation of the [Mobile Transport Protocol] for ciphertext
+/// (encrypted) messages.
+///
+/// [Mobile Transport Protocol]: https://core.telegram.org/mtproto
+pub struct Encrypted {
+    /// The Authorization Key to use to encrypt payload.
+    auth_key: AuthKey,
+
+    /// The time offset from the server's time, in seconds.
+    time_offset: i32,
+
+    /// The last usable salt, retained when the schedule has no active interval.
+    current_salt: i64,
+
+    /// Current and future salt intervals. Active overlaps are kept until expiration.
+    salts: Vec<tl::types::FutureSalt>,
+
+    /// The `now` received from future salts along with the instant when it occured.
+    ///
+    /// Used to accurately determine when salts become valid.
+    start_salt_time: Option<(i32, Instant)>,
+
+    /// Internal request for salts which should not be propagated.
+    salt_request_msg_id: Option<MsgId>,
+    /// A valid response waiting for the rest of its frame to commit.
+    pending_salt_reply: Option<tl::types::FutureSalts>,
+
+    /// The secure, random identifier for this instance.
+    session_id: i64,
+
+    /// The current message sequence number.
+    sequence: i32,
+
+    /// The ID of the last message.
+    last_msg_id: i64,
+
+    serialize_error: Option<SerializeError>,
+
+    /// Headers from the packet being built or waiting for its transport write.
+    packet_headers: Vec<(MsgId, i32)>,
+    packet_finalized: bool,
+    salt_query_in_packet: Option<MsgId>,
+    sent_history: SentHistory,
+    /// Rejection marks made by the current frame. A frame can roll them back.
+    applied_rejections: Vec<SentHeaderLocation>,
+    /// Server generation ID and notification ID, ordered by unsigned wire ID.
+    last_new_session: Option<(i64, u64)>,
+    session_established: bool,
+
+    /// Identifiers that need to be acknowledged to the server.
+    ///
+    /// A [Content-related Message] is "a message requiring an explicit
+    /// acknowledgment. These include all the user and many service messages,
+    /// virtually all with the exception of containers and acknowledgments."
+    ///
+    /// [Content-related Message]: https://core.telegram.org/mtproto/description#content-related-message
+    acknowledgements: Acknowledgements,
+    recoveries: Recoveries,
+
+    /// If present, the threshold in bytes at which a message will be
+    /// considered large enough to attempt compressing it. Otherwise,
+    /// outgoing messages will never be compressed.
+    compression_threshold: Option<usize>,
+
+    /// Temporary deserialization results.
+    deserialization: Vec<Deserialization>,
+
+    /// How many messages are there in the buffer.
+    msg_count: usize,
+    rpc_response_limit: usize,
+    expansion_limit: usize,
+    nesting_limit: usize,
+    expansion_used: usize,
+    nesting: usize,
+}
+
+impl Builder {
+    /// Configures the time offset to Telegram servers.
+    pub fn time_offset(mut self, offset: i32) -> Self {
+        self.time_offset = offset;
+        self
+    }
+
+    pub fn first_salt(mut self, first_salt: i64) -> Self {
+        self.first_salt = first_salt;
+        self
+    }
+
+    /// Configures the compression threshold for outgoing messages.
+    pub fn compression_threshold(mut self, threshold: Option<usize>) -> Self {
+        self.compression_threshold = threshold;
+        self
+    }
+
+    /// Finishes the builder and returns the `MTProto` instance with all
+    /// the configuration changes applied.
+    pub fn finish(self, auth_key: [u8; 256]) -> Encrypted {
+        Encrypted {
+            auth_key: AuthKey::from_bytes(auth_key),
+            time_offset: self.time_offset,
+            current_salt: self.first_salt,
+            salts: Vec::new(),
+            start_salt_time: None,
+            salt_request_msg_id: None,
+            pending_salt_reply: None,
+            session_id: {
+                let mut buffer = [0u8; 8];
+                getrandom::fill(&mut buffer).expect("failed to generate a secure session_id");
+                i64::from_le_bytes(buffer)
+            },
+            sequence: 0,
+            last_msg_id: 0,
+            serialize_error: None,
+            packet_headers: Vec::new(),
+            packet_finalized: false,
+            salt_query_in_packet: None,
+            sent_history: SentHistory::default(),
+            applied_rejections: Vec::new(),
+            last_new_session: None,
+            session_established: false,
+            acknowledgements: Acknowledgements::default(),
+            recoveries: Recoveries::default(),
+            compression_threshold: self.compression_threshold,
+            deserialization: Vec::new(),
+            msg_count: 0,
+            rpc_response_limit: 8 * 1024 * 1024,
+            expansion_limit: 16 * 1024 * 1024,
+            nesting_limit: 32,
+            expansion_used: 0,
+            nesting: 0,
+        }
+    }
+}
+
+impl Encrypted {
+    /// Limits all incoming RPC/control bodies, cumulative gzip output per
+    /// transport payload and recursive envelope processing. A zero limit rejects
+    /// the corresponding input. Cryptographic processing is unchanged.
+    pub fn set_incoming_limits(
+        &mut self,
+        response_bytes: usize,
+        expanded_bytes: usize,
+        nesting: usize,
+    ) {
+        self.rpc_response_limit = response_bytes;
+        self.expansion_limit = expanded_bytes;
+        self.nesting_limit = nesting.min(128);
+    }
+
+    fn inflate(
+        &mut self,
+        packed: &manual_tl::GzipPacked,
+        limit: usize,
+    ) -> Result<Vec<u8>, DeserializeError> {
+        let remaining = self
+            .expansion_limit
+            .saturating_sub(self.expansion_used)
+            .min(limit);
+        if remaining == 0 {
+            return Err(DeserializeError::LimitExceeded);
+        }
+        let result = match packed.decompress_limited(remaining) {
+            Ok(result) => result,
+            Err(error) => {
+                // A failed decoder may already have produced up to the remaining
+                // allowance. Do not give the next result a fresh expansion budget.
+                self.expansion_used = self.expansion_limit;
+                return Err(error);
+            }
+        };
+        self.expansion_used = self
+            .expansion_used
+            .checked_add(result.len())
+            .ok_or(DeserializeError::LimitExceeded)?;
+        Ok(result)
+    }
+    /// Start building a new encrypted MTP.
+    pub fn build() -> Builder {
+        Builder {
+            time_offset: 0,
+            compression_threshold: crate::DEFAULT_COMPRESSION_THRESHOLD,
+            first_salt: 0,
+        }
+    }
+
+    /// The Authorization Key used for encryption and decryption.
+    pub fn auth_key(&self) -> [u8; 256] {
+        self.auth_key.to_bytes()
+    }
+
+    /// Correct our time offset based on a known valid message ID.
+    fn correct_time_offset(&mut self, msg_id: i64) -> Result<(), DeserializeError> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| DeserializeError::InvalidEncoding)?;
+        self.time_offset = clock_correction(msg_id, now, self.last_msg_id)?;
+        Ok(())
+    }
+
+    fn correct_sequence(&mut self, adjustment: i32) -> Result<(), DeserializeError> {
+        self.sequence = self
+            .sequence
+            .checked_add(adjustment)
+            .filter(|seq| (0..=i32::MAX - 2).contains(seq) && seq & 1 == 0)
+            .ok_or(DeserializeError::InvalidEncoding)?;
+        Ok(())
+    }
+
+    fn checked_header(&mut self, content_related: bool) -> Result<(i64, i32), SerializeError> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| SerializeError::InvalidClock)?;
+        let id = next_msg_id(now, self.time_offset, self.last_msg_id)?;
+        let sequence = if content_related {
+            let next = self
+                .sequence
+                .checked_add(2)
+                .ok_or(SerializeError::SequenceExhausted)?;
+            self.sequence = next;
+            next - 1
+        } else {
+            self.sequence
+        };
+        self.last_msg_id = id;
+        Ok((id, sequence))
+    }
+
+    fn outgoing_header(&mut self, content_related: bool) -> Option<(i64, i32)> {
+        match self.checked_header(content_related) {
+            Ok(header) => Some(header),
+            Err(error) => {
+                self.serialize_error = Some(error);
+                None
+            }
+        }
+    }
+
+    fn try_serialize_msg(
+        &mut self,
+        buffer: &mut DequeBuffer<u8>,
+        body: &[u8],
+        content_related: bool,
+    ) -> Option<MsgId> {
+        // Make sure it's within bounds both in message count and buffer size.
+        if self.msg_count == manual_tl::MessageContainer::MAXIMUM_LENGTH {
+            return None;
+        }
+        let container_overhead = if self.msg_count == 0 {
+            0
+        } else {
+            manual_tl::MessageContainer::SIZE_OVERHEAD
+        };
+        if buffer.len() + body.len() + manual_tl::Message::SIZE_OVERHEAD + container_overhead
+            > manual_tl::MAX_ENCRYPTED_DATA_SIZE
+        {
+            return None;
+        }
+
+        // Within bounds; add it.
+        let (msg_id, sequence) = self.outgoing_header(content_related)?;
+
+        let sink = &mut |bytes: &[u8]| buffer.extend_back(bytes);
+        msg_id.serialize(sink);
+        sequence.serialize(sink);
+        (body.len() as i32).serialize(sink);
+        buffer.extend_back(body);
+
+        self.msg_count += 1;
+        let msg_id = MsgId(msg_id);
+        self.packet_headers.push((msg_id, sequence));
+        Some(msg_id)
+    }
+
+    fn prepare_outgoing_buffer(&mut self, buffer: &mut DequeBuffer<u8>) -> bool {
+        if self.serialize_error.is_some() || (self.packet_finalized && !buffer.is_empty()) {
+            return false;
+        }
+        let stale_salt_query = self
+            .salt_query_in_packet
+            .is_some_and(|id| self.salt_request_msg_id != Some(id));
+        if self.packet_finalized || stale_salt_query {
+            // Only a salt query can become obsolete while building a packet.
+            // Direct callers can also discard the entire finalized buffer.
+            if self.salt_query_in_packet == self.salt_request_msg_id {
+                self.salt_request_msg_id = None;
+            }
+            self.acknowledgements.in_packet = 0;
+            self.recoveries.discard_packet();
+            self.packet_headers.clear();
+            self.packet_finalized = false;
+            self.salt_query_in_packet = None;
+            self.msg_count = 0;
+            buffer.clear();
+        }
+        if let Some((start_secs, start_instant)) = self.start_salt_time {
+            self.advance_salts(salt_time(start_secs, start_instant.elapsed()));
+        }
+        true
+    }
+
+    fn buffer_acknowledgements(&mut self, buffer: &mut DequeBuffer<u8>) -> Option<()> {
+        if self.acknowledgements.in_packet != 0
+            || self.acknowledgements.pending.is_empty()
+            || self.salt_query_in_packet.is_some()
+            || self.recoveries.packet_is_staged()
+        {
+            return Some(());
+        }
+        let msg_ids: Vec<_> = self
+            .acknowledgements
+            .pending
+            .iter()
+            .take(ACK_BATCH_LIMIT)
+            .copied()
+            .collect();
+        let count = msg_ids.len();
+        let body = tl::enums::MsgsAck::Ack(tl::types::MsgsAck { msg_ids }).to_bytes();
+        self.try_serialize_msg(buffer, &body, false)?;
+        self.acknowledgements.in_packet = count;
+        Some(())
+    }
+
+    fn buffer_recovery(&mut self, buffer: &mut DequeBuffer<u8>) {
+        let Some(answer) = self.recoveries.pending_answer() else {
+            return;
+        };
+        let body = tl::enums::MsgResendReq::Req(tl::types::MsgResendReq {
+            msg_ids: vec![answer],
+        })
+        .to_bytes();
+        if let Some(query) = self.try_serialize_msg(buffer, &body, false) {
+            self.recoveries.stage_packet(answer, query);
+        }
+    }
+
+    fn get_current_salt(&self) -> i64 {
+        self.current_salt
+    }
+
+    fn advance_salts(&mut self, now: i128) {
+        self.salts.retain(|salt| now < i128::from(salt.valid_until));
+        let active = self
+            .salts
+            .iter()
+            .filter(|salt| now >= i128::from(salt.valid_since));
+        let current = active
+            .clone()
+            .filter(|salt| salt.salt == self.current_salt)
+            .max_by_key(|salt| salt.valid_since);
+        if let Some(next) = active
+            .filter(|salt| {
+                current.is_none_or(|current| {
+                    salt.valid_since > current.valid_since
+                        && now >= i128::from(salt.valid_since) + i128::from(SALT_USE_DELAY)
+                })
+            })
+            .max_by_key(|salt| salt.valid_since)
+        {
+            self.current_salt = next.salt;
+        }
+    }
+
+    fn try_request_salts(&mut self, buffer: &mut DequeBuffer<u8>) {
+        if self.msg_count == 0
+            && self.salts.len() <= 1
+            && self.salt_request_msg_id.is_none()
+            && self.get_current_salt() != 0
+            && self.start_salt_time.is_none_or(|(_, since)| {
+                since.elapsed() >= Duration::from_secs(SALT_USE_DELAY as u64)
+            })
+        {
+            // Keep this request alone so even a protocol refusal refers to its exact ID.
+            info!("only one future salt remaining; asking for more salts");
+            let body = tl::functions::GetFutureSalts {
+                num: NUM_FUTURE_SALTS,
+            }
+            .to_bytes();
+            self.salt_request_msg_id = self.try_serialize_msg(buffer, &body, true);
+            self.salt_query_in_packet = self.salt_request_msg_id;
+        }
+    }
+
+    /// `finalize`, but without encryption.
+    ///
+    /// The buffer is *not* cleared, but is instead returned.
+    fn finalize_plain(&mut self, buffer: &mut DequeBuffer<u8>) -> bool {
+        if self.serialize_error.is_some() {
+            return false;
+        }
+        if self.msg_count == 0 {
+            return true;
+        }
+
+        if self.msg_count != 1 {
+            // Prepend a container, setting its message ID and sequence number.
+            // + 8 because it has to include the constructor ID and length (4 bytes each).
+            let len = (buffer.len() + 8) as i32;
+            let mut header = StackBuffer::<MESSAGE_CONTAINER_HEADER_LEN>::new();
+
+            // Manually `serialize_msg` because the container body was already written.
+            let sink = &mut |bytes: &[u8]| header.extend_from_slice(bytes);
+            let Some((id, sequence)) = self.outgoing_header(false) else {
+                return false;
+            };
+            self.packet_headers.push((MsgId(id), sequence));
+            id.serialize(sink);
+            sequence.serialize(sink);
+
+            len.serialize(sink);
+
+            manual_tl::MessageContainer::CONSTRUCTOR_ID.serialize(sink);
+            (self.msg_count as i32).serialize(sink);
+            buffer.extend_front(&header.into_inner());
+        }
+
+        {
+            // Prepend the message header
+            let mut header = StackBuffer::<PLAIN_PACKET_HEADER_LEN>::new();
+            let sink = &mut |bytes: &[u8]| header.extend_from_slice(bytes);
+            self.get_current_salt().serialize(sink); // 8 bytes
+
+            self.session_id.serialize(sink); // 8 bytes
+            buffer.extend_front(&header.into_inner());
+        }
+
+        self.msg_count = 0;
+        true
+    }
+
+    fn process_plaintext(&mut self, plaintext: &[u8]) -> Result<(), DeserializeError> {
+        let mut buffer = Cursor::from_slice(plaintext);
+        let _salt = i64::deserialize(&mut buffer)?;
+        let session_id = i64::deserialize(&mut buffer)?;
+        if session_id != self.session_id {
+            return Err(DeserializeError::UnexpectedSession);
+        }
+
+        self.expansion_used = 0;
+        self.nesting = 0;
+        self.deserialization.clear();
+        self.process_message(manual_tl::Message::deserialize(&mut buffer)?)
+    }
+
+    fn process_message(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+        if self.nesting >= self.nesting_limit {
+            return Err(DeserializeError::LimitExceeded);
+        }
+        let constructor = message.constructor_id()?;
+        if !matches!(
+            constructor,
+            manual_tl::RpcResult::CONSTRUCTOR_ID
+                | manual_tl::MessageContainer::CONSTRUCTOR_ID
+                | manual_tl::MessageCopy::CONSTRUCTOR_ID
+                | manual_tl::GzipPacked::CONSTRUCTOR_ID
+        ) && message.body.len() > self.rpc_response_limit
+        {
+            return Err(DeserializeError::LimitExceeded);
+        }
+        // A container is accepted or rejected as a whole. Preserve receive-side
+        // state once at the outer boundary, including effects of valid children
+        // preceding an invalid child. Do not replenish the inflation budget.
+        let results_before = self.deserialization.len();
+        let rollback = (self.nesting == 0).then(|| {
+            (
+                self.time_offset,
+                self.current_salt,
+                self.salts.clone(),
+                self.start_salt_time,
+                self.salt_request_msg_id,
+                self.sequence,
+                self.last_new_session,
+                self.acknowledgements.pending.len(),
+            )
+        });
+        self.nesting += 1;
+        let result = self.process_message_inner(message);
+        self.nesting -= 1;
+        if result.is_err()
+            && let Some((offset, current, salts, salt_time, salt_request, sequence, session, acks)) =
+                rollback
+        {
+            self.time_offset = offset;
+            self.current_salt = current;
+            self.salts = salts;
+            self.start_salt_time = salt_time;
+            self.salt_request_msg_id = salt_request;
+            self.sequence = sequence;
+            self.last_new_session = session;
+            for index in self.applied_rejections.drain(..) {
+                self.sent_history.get_mut(index).rejected = false;
+            }
+            self.acknowledgements.rollback(acks);
+            self.deserialization.truncate(results_before);
+        }
+        if self.nesting == 0 {
+            self.applied_rejections.clear();
+            let salt_reply = self.pending_salt_reply.take();
+            if result.is_ok()
+                && let Some(reply) = salt_reply
+                && self.salt_request_msg_id == Some(MsgId(reply.req_msg_id))
+            {
+                self.install_salt_schedule(reply);
+            }
+            if result.is_ok() {
+                self.commit_response_recovery(results_before);
+            } else {
+                self.recoveries.discard_frame();
+            }
+        }
+        result
+    }
+
+    fn commit_response_recovery(&mut self, results_before: usize) {
+        let mut session_recreated = false;
+        for result in &self.deserialization[results_before..] {
+            let (id, valid_reply) = match result {
+                Deserialization::RpcResult(result) => (result.msg_id, true),
+                Deserialization::RpcError(result) => (result.msg_id, true),
+                Deserialization::Failure(result) => (result.msg_id, false),
+                Deserialization::SessionRecreated => {
+                    session_recreated = true;
+                    continue;
+                }
+                _ => continue,
+            };
+            if let Some(index) = self.sent_history.find(id) {
+                let header = self.sent_history.get_mut(index);
+                header.answered = true;
+                if self.salt_request_msg_id == Some(id) {
+                    // A direct, valid FutureSalts installs the schedule above.
+                    // An RPC result or per-RPC failure still ends this waiter.
+                    self.salt_request_msg_id = None;
+                }
+                self.session_established |= valid_reply && header.sequence % 2 == 1;
+            }
+        }
+        self.recoveries.commit_frame(
+            |answer| {
+                self.acknowledgements.pending_ids.contains(&answer)
+                    || self.acknowledgements.written_ids.contains(&answer)
+            },
+            |request| {
+                self.sent_history
+                    .find(request)
+                    .is_some_and(|index| self.sent_history.get(index).answered)
+            },
+            session_recreated,
+            &mut self.deserialization,
+        );
+        if Self::salt_recovery_failed(
+            self.salt_request_msg_id,
+            &self.deserialization[results_before..],
+        ) {
+            self.salt_request_msg_id = None;
+        }
+    }
+
+    fn salt_recovery_failed(salt: Option<MsgId>, results: &[Deserialization]) -> bool {
+        salt.is_some()
+            && results.iter().any(|result| {
+                matches!(result, Deserialization::ResponseUnavailable {
+                target: RecoveryTarget::SaltRefresh(id)
+            } if Some(*id) == salt)
+            })
+    }
+
+    fn process_message_inner(
+        &mut self,
+        message: manual_tl::Message,
+    ) -> Result<(), DeserializeError> {
+        if message.requires_ack() {
+            self.acknowledgements.enqueue(message.msg_id)?;
+        }
+
+        // Handle all the possible Service Messages:
+        // * https://core.telegram.org/mtproto/service_messages
+        // * https://core.telegram.org/mtproto/service_messages_about_messages
+        //
+        // The order of the `match` here is the same as the order in which the
+        // items appear in the documentation (to make it easier to review).
+        // TODO verify what needs ack and what doesn't
+        match message.constructor_id()? {
+            // Response to an RPC query
+            manual_tl::RpcResult::CONSTRUCTOR_ID => self.handle_rpc_result(message),
+
+            // Service Messages about Messages
+            // Acknowledgment of Receipt
+            tl::types::MsgsAck::CONSTRUCTOR_ID => self.handle_ack(message),
+            // Notice of Ignored Error Message
+            tl::types::BadMsgNotification::CONSTRUCTOR_ID
+            | tl::types::BadServerSalt::CONSTRUCTOR_ID => self.handle_bad_notification(message),
+            // Request for Message Status Information
+            tl::types::MsgsStateReq::CONSTRUCTOR_ID => self.handle_state_req(message),
+            // Informational Message regarding Status of Messages
+            tl::types::MsgsStateInfo::CONSTRUCTOR_ID => self.handle_state_info(message),
+            // Voluntary Communication of Status of Messages
+            tl::types::MsgsAllInfo::CONSTRUCTOR_ID => self.handle_msg_all(message),
+            // Extended Voluntary Communication of Status of One Message
+            tl::types::MsgDetailedInfo::CONSTRUCTOR_ID
+            | tl::types::MsgNewDetailedInfo::CONSTRUCTOR_ID => self.handle_detailed_info(message),
+            // Explicit Request to Re-Send Messages & Explicit Request to Re-Send Answers
+            tl::types::MsgResendReq::CONSTRUCTOR_ID
+            | tl::types::MsgResendAnsReq::CONSTRUCTOR_ID => self.handle_msg_resend(message),
+
+            // Request for several future salts
+            tl::types::FutureSalt::CONSTRUCTOR_ID => self.handle_future_salt(message),
+            tl::types::FutureSalts::CONSTRUCTOR_ID => self.handle_future_salts(message),
+            // Ping Messages (PING/PONG)
+            tl::types::Pong::CONSTRUCTOR_ID => self.handle_pong(message),
+            // Request to Destroy Session
+            tl::types::DestroySessionOk::CONSTRUCTOR_ID
+            | tl::types::DestroySessionNone::CONSTRUCTOR_ID => self.handle_destroy_session(message),
+            // New Session Creation Notification
+            tl::types::NewSessionCreated::CONSTRUCTOR_ID => {
+                self.handle_new_session_created(message)
+            }
+            // Containers (Simple Container)
+            manual_tl::MessageContainer::CONSTRUCTOR_ID => self.handle_container(message),
+            // Message Copies
+            manual_tl::MessageCopy::CONSTRUCTOR_ID => self.handle_msg_copy(message),
+            // Packed Object
+            manual_tl::GzipPacked::CONSTRUCTOR_ID => self.handle_gzip_packed(message),
+            // HTTP Wait/Long Poll
+            tl::types::HttpWait::CONSTRUCTOR_ID => self.handle_http_wait(message),
+            _ => self.handle_update(message),
+        }
+    }
+
+    /// **[Response to an RPC query]**
+    ///
+    /// A response to an RPC query is normally wrapped as follows:
+    ///
+    /// ```tl
+    /// rpc_result#f35c6d01 req_msg_id:long result:Object = RpcResult;
+    /// ```
+    ///
+    /// Here `req_msg_id` is the identifier of the message sent by the other
+    /// party and containing an RPC query. This way, the recipient knows that
+    /// the result is a response to the specific RPC query in question.
+    ///
+    /// At the same time, this response serves as acknowledgment of the other
+    /// party's receipt of the `req_msg_id` message.
+    ///
+    /// Note that the response to an RPC query must also be acknowledged. Most
+    /// frequently, this coincides with the transmission of the next message
+    /// (which may have a container attached to it carrying a service message
+    /// with the acknowledgment).
+    ///
+    /// **[RPC Error]**
+    ///
+    /// The result field returned in response to any RPC query may also
+    /// contain an error message in the following format:
+    ///
+    /// ```tl
+    /// rpc_result#f35c6d01 req_msg_id:long result:Object = RpcResult;
+    /// ```
+    ///
+    /// **[Cancellation of an RPC Query]**
+    ///
+    /// In certain situations, the client does not want to receive a response
+    /// to an already transmitted RPC query, for example because the response
+    /// turns out to be long and the client has decided to do without it
+    /// because of insufficient link capacity. Simply interrupting the TCP
+    /// connection will not have any effect because the server would re-send
+    /// the missing response at the first opportunity. Therefore, the client
+    /// needs a way to cancel receipt of the RPC response message, actually
+    /// acknowledging its receipt prior to it being in fact received, which
+    /// will settle the server down and prevent it from re-sending the response.
+    /// However, the client does not know the RPC response's msg_id prior to
+    /// receiving the response; the only thing it knows is the req_msg_id.
+    /// i.e. the msg_id of the relevant RPC query. Therefore, a special query
+    /// is used:
+    ///
+    /// ```tl
+    /// rpc_drop_answer#58e4a740 req_msg_id:long = RpcDropAnswer;
+    /// ```
+    ///
+    /// The response to this query returns as one of the following messages
+    /// wrapped in `rpc_result` and requiring an acknowledgment:
+    ///
+    /// ```tl
+    /// rpc_answer_unknown#5e2ad36e = RpcDropAnswer;
+    /// rpc_answer_dropped_running#cd78e586 = RpcDropAnswer;
+    /// rpc_answer_dropped#a43ad8b7 msg_id:long seq_no:int bytes:int = RpcDropAnswer;
+    /// ```
+    ///
+    /// The first version of the response is used if the server remembers
+    /// nothing of the incoming req_msg_id (if it has already been responded
+    /// to, for example). The second version is used if the response was
+    /// canceled while the RPC query was being processed (where the RPC query
+    /// itself was still fully processed); in this case, the same
+    /// `rpc_answer_dropped_running` is also returned in response to the
+    /// original query, and both of these responses require an acknowledgment
+    /// from the client. The final version means that the RPC response was
+    /// removed from the server's outgoing queue, and its `msg_id`, `seq_no`,
+    /// and length in `bytes` are transmitted to the client.
+    ///
+    /// Note that `rpc_answer_dropped_running` and `rpc_answer_dropped` serve
+    /// as acknowledgments of the server's receipt of the original query (the
+    /// same one, the response to which we wish to forget). In addition, same
+    /// as for any RPC queries, any response to `rpc_drop_answer` is an
+    /// acknowledgment for `rpc_drop_answer` itself.
+    ///
+    /// As an alternative to using `rpc_drop_answer`, a new session may be
+    /// created after the connection is reset and the old session is removed
+    /// through `destroy_session`.
+    ///
+    /// [Response to an RPC query]: https://core.telegram.org/mtproto/service_messages#response-to-an-rpc-query
+    /// [RPC Error]: https://core.telegram.org/mtproto/service_messages#rpc-error
+    /// [Cancellation of an RPC Query]: https://core.telegram.org/mtproto/service_messages#cancellation-of-an-rpc-query
+    fn handle_rpc_result(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+        let rpc_result = decode_exact::<manual_tl::RpcResult>(&message.body)?;
+        let msg_id = MsgId(rpc_result.req_msg_id);
+        if let Err(error) = self.process_rpc_body(msg_id, rpc_result.result) {
+            self.deserialization
+                .push(Deserialization::Failure(DeserializationFailure {
+                    msg_id,
+                    error,
+                }));
+        }
+        Ok(())
+    }
+
+    fn process_rpc_body(
+        &mut self,
+        msg_id: MsgId,
+        mut body: Vec<u8>,
+    ) -> Result<(), DeserializeError> {
+        let mut depth = self.nesting;
+        loop {
+            if depth >= self.nesting_limit {
+                return Err(DeserializeError::LimitExceeded);
+            }
+            let constructor = u32::from_bytes(&body)?;
+            if constructor == manual_tl::GzipPacked::CONSTRUCTOR_ID {
+                let packed = decode_exact::<manual_tl::GzipPacked>(&body)?;
+                body = self.inflate(&packed, self.rpc_response_limit)?;
+                depth += 1;
+                continue;
+            }
+            if body.len() > self.rpc_response_limit {
+                return Err(DeserializeError::LimitExceeded);
+            }
+            match constructor {
+                tl::types::RpcError::CONSTRUCTOR_ID => {
+                    let tl::enums::RpcError::Error(error) =
+                        decode_exact::<tl::enums::RpcError>(&body)?;
+                    self.deserialization
+                        .push(Deserialization::RpcError(RpcResultError { msg_id, error }));
+                }
+                tl::types::RpcAnswerUnknown::CONSTRUCTOR_ID
+                | tl::types::RpcAnswerDroppedRunning::CONSTRUCTOR_ID
+                | tl::types::RpcAnswerDropped::CONSTRUCTOR_ID => {
+                    let _ = decode_exact::<tl::enums::RpcDropAnswer>(&body)?;
+                }
+                _ => {
+                    self.store_own_updates(msg_id, &body);
+                    self.deserialization
+                        .push(Deserialization::RpcResult(RpcResult { msg_id, body }));
+                }
+            }
+            return Ok(());
+        }
+    }
+
+    /// Updates produced by `rpc_result` must be considered as any other updates, since they can
+    /// change the `pts`. If this wasn't done, eventually higher levels would find gaps.
+    ///
+    /// Users may also be interested in handling updates produced by the client as if they were
+    /// like any other.
+    ///
+    /// This MUST be done before storing the [`Deserialization::RpcResult`],
+    /// because the stored update might need to reference the request, which
+    /// must not have been dropped yet.
+    fn store_own_updates(&mut self, msg_id: MsgId, body: &[u8]) {
+        match u32::from_bytes(body) {
+            Ok(body_id) => {
+                if UPDATE_IDS.contains(&body_id) {
+                    self.deserialization.push(Deserialization::OwnUpdate {
+                        msg_id,
+                        update: body.to_vec(),
+                    });
+                }
+            }
+            Err(_err) => {
+                // Failing is fine, it likely means the update was bad and eventually there will
+                // be a gap to fill.
+            }
+        }
+    }
+
+    /// **[Acknowledgment of Receipt]**
+    ///
+    /// Receipt of virtually all messages (with the exception of some purely
+    /// service ones as well as the plain-text messages used in the protocol
+    /// for creating an Authorization Key) must be acknowledged.
+    ///
+    /// This requires the use of the following service message (not requiring
+    /// an acknowledgment):
+    ///
+    /// ```tl
+    /// msgs_ack#62d6b459 msg_ids:Vector long = MsgsAck;
+    /// ```
+    ///
+    /// A server usually acknowledges the receipt of a message from a client
+    /// (normally, an RPC query) using an RPC response. If a response is a
+    /// long time coming, a server may first send a receipt acknowledgment,
+    /// and somewhat later, the RPC response itself.
+    ///
+    /// A client normally acknowledges the receipt of a message from a server
+    /// (usually, an RPC response) by adding an acknowledgment to the next RPC
+    /// query if it is not transmitted too late (if it is generated, say,
+    /// 60-120 seconds following the receipt of a message from the server).
+    /// However, if for a long period of time there is no reason to send
+    /// messages to the server or if there is a large number of
+    /// unacknowledged messages from the server (say, over 16), the client
+    /// transmits a stand-alone acknowledgment.
+    ///
+    /// [Acknowledgment of Receipt]: https://core.telegram.org/mtproto/service_messages_about_messages#acknowledgment-of-receipt
+    fn handle_ack(&self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+        // TODO notify about this somehow
+        let _ack = decode_exact::<tl::enums::MsgsAck>(&message.body)?;
+        Ok(())
+    }
+
+    /// **[Notice of Ignored Error Message]**
+    ///
+    /// In certain cases, a server may notify a client that its incoming
+    /// message was ignored for whatever reason. Note that such a notification
+    /// cannot be generated unless a message is correctly decoded by the
+    /// server.
+    ///
+    /// ```tl
+    /// bad_msg_notification#a7eff811 bad_msg_id:long bad_msg_seqno:int error_code:int = BadMsgNotification;
+    /// bad_server_salt#edab447b bad_msg_id:long bad_msg_seqno:int error_code:int new_server_salt:long = BadMsgNotification;
+    /// ```
+    ///
+    /// Here, `error_code` can also take on the following values:
+    ///
+    /// * 16: `msg_id` too low (most likely, client time is wrong; it would
+    ///   be worthwhile to synchronize it using msg_id notifications and re-
+    ///   send the original message with the “correct” msg_id or wrap it in a
+    ///   container with a new msg_id if the original message had waited too
+    ///   long on the client to be transmitted)
+    /// * 17: `msg_id` too high (similar to the previous case, the client time
+    ///   has to be synchronized, and the message re-sent with the correct
+    ///   `msg_id`)
+    /// * 18: incorrect two lower order `msg_id` bits (the server expects
+    ///   client message `msg_id` to be divisible by 4)
+    /// * 19: container `msg_id` is the same as `msg_id` of a previously
+    ///   received message (this must never happen)
+    /// * 20: message too old, and it cannot be verified whether the server
+    ///   has received a message with this `msg_id` or not
+    /// * 32: `msg_seqno` too low (the server has already received a message
+    ///   with a lower `msg_id` but with either a higher or an equal and odd
+    ///   `seqno`)
+    /// * 33: `msg_seqno` too high (similarly, there is a message with a
+    ///   higher `msg_id` but with either a lower or an equal and odd `seqno`)
+    /// * 34: an even `msg_seqno` expected (irrelevant message), but odd
+    ///   received
+    /// * 35: odd `msg_seqno` expected (relevant message), but even received
+    /// * 48: incorrect server salt (in this case, the `bad_server_salt`
+    ///   response is received with the correct salt, and the message is to be
+    ///   re-sent with it)
+    /// * 64: invalid container.
+    ///
+    /// The intention is that `error_code` values are grouped
+    /// (`error_code >> 4`): for example, the codes `0x40 - 0x4f` correspond
+    /// to errors in container decomposition.
+    ///
+    /// Notifications of an ignored message do not require acknowledgment
+    /// (i.e., are irrelevant).
+    ///
+    /// **Important**: if `server_salt` has changed on the server or if client
+    /// time is incorrect, any query will result in a notification in the
+    /// above format. The client must check that it has, in fact, recently
+    /// sent a message with the specified msg_id, and if that is the case,
+    /// update its time correction value (the difference between the client's
+    /// and the server's clocks) and the server salt based on msg_id and the
+    /// `server_salt` notification, so as to use these to (re)send future
+    /// messages. In the meantime, the original message (the one that caused
+    /// the error message to be returned) must also be re-sent with a better
+    /// `msg_id` and/or `server_salt`.
+    ///
+    /// In addition, the client can update the `server_salt` value used to
+    /// send messages to the server, based on the values of RPC responses or
+    /// containers carrying an RPC response, provided that this RPC response
+    /// is actually a match for the query sent recently. (If there is doubt,
+    /// it is best not to update since there is risk of a replay attack).
+    ///
+    /// [Notice of Ignored Error Message]: https://core.telegram.org/mtproto/service_messages_about_messages#notice-of-ignored-error-message
+    fn handle_bad_notification(
+        &mut self,
+        message: manual_tl::Message,
+    ) -> Result<(), DeserializeError> {
+        let bad_msg = decode_exact::<tl::enums::BadMsgNotification>(&message.body)?;
+        let msg_id = MsgId(bad_msg.bad_msg_id());
+        let internal = self.salt_request_msg_id == Some(msg_id);
+        let Some(index) = self.sent_history.find(msg_id) else {
+            return Ok(());
+        };
+        let sent = self.sent_history.get_mut(index);
+        if sent.rejected
+            || sent.sequence != bad_msg.bad_msg_seqno()
+            || ((bad_msg.error_code() == 48)
+                != matches!(bad_msg, tl::enums::BadMsgNotification::BadServerSalt(_)))
+        {
+            return Ok(());
+        }
+        if sent.sent_at.elapsed() > SENT_HISTORY_AGE {
+            if internal {
+                // Release the waiter without authorizing a stale state correction.
+                self.salt_request_msg_id = None;
+            }
+            return Ok(());
+        }
+        sent.rejected = true;
+        self.applied_rejections.push(index);
+
+        if internal {
+            // Response to internal request, do not propagate.
+            self.salt_request_msg_id = None;
+        } else if self.recoveries.is_sent_query(msg_id) {
+            self.recoveries.refuse_query(msg_id);
+        } else {
+            self.deserialization
+                .push(Deserialization::BadMessage(super::BadMessage {
+                    msg_id,
+                    code: bad_msg.error_code(),
+                }));
+        }
+
+        let bad_msg = match bad_msg {
+            tl::enums::BadMsgNotification::Notification(x) => x,
+            tl::enums::BadMsgNotification::BadServerSalt(x) => {
+                self.current_salt = x.new_server_salt;
+                self.salts.clear();
+                // The correction supersedes schedules requested under the old salt.
+                self.salt_request_msg_id = None;
+                self.start_salt_time = None;
+
+                info!("got bad salt; salts have been reset down to a single one");
+                return Ok(());
+            }
+        };
+
+        match bad_msg.error_code {
+            16 | 17 => self.correct_time_offset(message.msg_id)?,
+            // These adjustments retain the backend's correction policy.
+            32 => self.correct_sequence(64)?,
+            33 => self.correct_sequence(-16)?,
+            _ => {
+                // Just notify about it.
+            }
+        }
+
+        Ok(())
+    }
+
+    /// **[Request for Message Status Information]**
+    ///
+    /// If either party has not received information on the status of its
+    /// outgoing messages for a while, it may explicitly request it from the
+    /// other party:
+    ///
+    /// ```tl
+    /// msgs_state_req#da69fb52 msg_ids:Vector long = MsgsStateReq;
+    /// ```
+    ///
+    /// [Request for Message Status Information]: https://core.telegram.org/mtproto/service_messages_about_messages#request-for-message-status-information
+    fn handle_state_req(&self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+        let _ = decode_exact::<tl::enums::MsgsStateReq>(&message.body)?;
+        // TODO implement
+        Ok(())
+    }
+
+    /// **[Informational Message regarding Status of Messages]**
+    ///
+    /// ```tl
+    /// msgs_state_info#04deb57d req_msg_id:long info:string = MsgsStateInfo;
+    /// ```
+    ///
+    /// Here, `info` is a string that contains exactly one byte of message
+    /// status for each message from the incoming `msg_ids` list:
+    ///
+    /// * 1 = nothing is known about the message (`msg_id` too low, the other
+    ///   party may have forgotten it)
+    /// * 2 = message not received (`msg_id` falls within the range of stored
+    ///   identifiers; however, the other party has certainly not received a
+    ///   message like that)
+    /// * 3 = message not received (`msg_id` too high; however, the other
+    ///   party has certainly not received it yet)
+    /// * 4 = message received (note that this response is also at the same
+    ///   time a receipt acknowledgment)
+    /// * +8 = message already acknowledged
+    /// * +16 = message not requiring acknowledgment
+    /// * +32 = RPC query contained in message being processed or processing
+    ///   already complete
+    /// * +64 = content-related response to message already generated
+    /// * +128 = other party knows for a fact that message is already received
+    ///
+    /// This response does not require an acknowledgment. It is an
+    /// acknowledgment of the relevant `msgs_state_req`, in and of itself.
+    ///
+    /// Note that if it turns out suddenly that the other party does not have
+    /// a message that looks like it has been sent to it, the message can
+    /// simply be re-sent. Even if the other party should receive two copies
+    /// of the message at the same time, the duplicate will be ignored.
+    /// (If too much time has passed, and the original `msg_id` is not longer
+    /// valid, the message is to be wrapped in `msg_copy`).
+    ///
+    /// [Informational Message regarding Status of Messages]: https://core.telegram.org/mtproto/service_messages_about_messages#informational-message-regarding-status-of-messages
+    fn handle_state_info(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+        let tl::enums::MsgsStateInfo::Info(state) =
+            decode_exact::<tl::enums::MsgsStateInfo>(&message.body)?;
+        let query = MsgId(state.req_msg_id);
+        if self.recoveries.is_sent_query(query) {
+            let [status] = state.info.as_slice() else {
+                return Err(DeserializeError::InvalidEncoding);
+            };
+            match status & 7 {
+                1..=3 => self.recoveries.refuse_query(query),
+                4 => {} // The peer still knows the body. Keep waiting for its delivery.
+                _ => return Err(DeserializeError::InvalidEncoding),
+            }
+        }
+        Ok(())
+    }
+
+    /// **[Voluntary Communication of Status of Messages]**
+    ///
+    /// Either party may voluntarily inform the other party of the status of
+    /// the messages transmitted by the other party.
+    ///
+    /// ```tl
+    /// msgs_all_info#8cc0d131 msg_ids:Vector long info:string = MsgsAllInfo;
+    /// ```
+    ///
+    /// All message codes known to this party are enumerated, with the
+    /// exception of those for which the +128 and the +16 flags are set.
+    /// However, if the +32 flag is set but not +64, then the message status
+    /// will still be communicated.
+    ///
+    /// This message does not require an acknowledgment.
+    ///
+    /// [Voluntary Communication of Status of Messages]: https://core.telegram.org/mtproto/service_messages_about_messages#voluntary-communication-of-status-of-messages
+    fn handle_msg_all(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+        let _ = decode_exact::<tl::enums::MsgsAllInfo>(&message.body)?;
+        // TODO implement
+        Ok(())
+    }
+
+    /// **[Extended Voluntary Communication of Status of One Message]**
+    ///
+    /// Normally used by the server to respond to the receipt of a duplicate
+    /// `msg_id`, especially if a response to the message has already been
+    /// generated and the response is large. If the response is small, the
+    /// server may re-send the answer itself instead. This message can also
+    /// be used as a notification instead of resending a large message.
+    ///
+    /// ```tl
+    /// msg_detailed_info#276d3ec6 msg_id:long answer_msg_id:long bytes:int status:int = MsgDetailedInfo;
+    /// msg_new_detailed_info#809db6df answer_msg_id:long bytes:int status:int = MsgDetailedInfo;
+    /// ```
+    ///
+    /// The second version is used to notify of messages that were created on
+    /// the server not in response to an RPC query (such as notifications of
+    /// new messages) and were transmitted to the client some time ago, but
+    /// not acknowledged.
+    ///
+    /// Currently, `status` is always zero. This may change in future.
+    ///
+    /// This message does not require an acknowledgment.
+    ///
+    /// [Extended Voluntary Communication of Status of One Message]: https://core.telegram.org/mtproto/service_messages_about_messages#extended-voluntary-communication-of-status-of-one-message
+    fn handle_detailed_info(
+        &mut self,
+        message: manual_tl::Message,
+    ) -> Result<(), DeserializeError> {
+        let info = decode_exact::<tl::enums::MsgDetailedInfo>(&message.body)?;
+        let (answer, request, bytes, status) = match info {
+            tl::enums::MsgDetailedInfo::Info(value) => (
+                value.answer_msg_id,
+                Some(MsgId(value.msg_id)),
+                value.bytes,
+                value.status,
+            ),
+            tl::enums::MsgDetailedInfo::MsgNewDetailedInfo(value) => {
+                (value.answer_msg_id, None, value.bytes, value.status)
+            }
+        };
+        // A pending receipt is already scheduled. Repeat a written receipt only
+        // for a body that this session has actually accepted.
+        if self.acknowledgements.written_ids.contains(&answer) {
+            self.acknowledgements.enqueue(answer)?;
+        }
+        if (request.is_none() && self.acknowledgements.pending_ids.contains(&answer))
+            || status != 0
+            || bytes <= 0
+            || bytes % 4 != 0
+            || bytes as usize > manual_tl::MAX_ENCRYPTED_DATA_SIZE
+            || !self.recent_server_answer(answer, message.msg_id, request.is_some())
+        {
+            return Ok(());
+        }
+        let target = if let Some(request) = request {
+            let Some(index) = self.sent_history.find(request) else {
+                return Ok(());
+            };
+            let header = self.sent_history.get(index);
+            if header.sequence % 2 != 1
+                || header.rejected
+                || header.answered
+                || header.sent_at.elapsed() > SENT_HISTORY_AGE
+            {
+                return Ok(());
+            }
+            if header.is_salt_refresh {
+                RecoveryTarget::SaltRefresh(request)
+            } else {
+                RecoveryTarget::Request(request)
+            }
+        } else {
+            RecoveryTarget::Unsolicited
+        };
+        self.recoveries.notice(MissingResponse { answer, target });
+        Ok(())
+    }
+
+    fn recent_server_answer(&self, answer: i64, advisory: i64, is_reply: bool) -> bool {
+        let answer = answer as u64;
+        let advisory = advisory as u64;
+        let parity = if is_reply { 1 } else { 3 };
+        if answer % 4 != parity || answer >= advisory {
+            return false;
+        }
+        let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
+            return false;
+        };
+        let server_time = i128::from(now.as_secs()) + i128::from(self.time_offset);
+        let answer_time = i128::from(answer >> 32);
+        (server_time - 300..=server_time + 30).contains(&answer_time)
+    }
+
+    /// **[Explicit Request to Re-Send Messages]**
+    ///
+    /// ```tl
+    /// msg_resend_req#7d861a08 msg_ids:Vector long = MsgResendReq;
+    /// ```
+    ///
+    /// The remote party immediately responds by re-sending the requested
+    /// messages, normally using the same connection that was used to transmit
+    /// the query. If at least one message with requested msg_id does not
+    /// exist or has already been forgotten, or has been sent by the
+    /// requesting party (known from parity), `MsgsStateInfo` is returned for
+    /// all messages requested as if the `MsgResendReq` query had been a
+    /// `MsgsStateReq` query as well.
+    ///
+    /// **[Explicit Request to Re-Send Answers]**
+    ///
+    /// ```tl
+    /// msg_resend_ans_req#8610baeb msg_ids:Vector long = MsgResendReq;
+    /// ```
+    ///
+    /// The remote party immediately responds by re-sending answers to the
+    /// requested messages, normally using the same connection that was used
+    /// to transmit the query. `MsgsStateInfo` is returned for all messages
+    /// requested as if the `MsgResendReq` query had been a MsgsStateReq query
+    /// as well.
+    ///
+    /// [Explicit Request to Re-Send Answers]: https://core.telegram.org/mtproto/service_messages_about_messages#explicit-request-to-re-send-answers
+    /// [Explicit Request to Re-Send Messages]: https://core.telegram.org/mtproto/service_messages_about_messages#explicit-request-to-re-send-messages
+    fn handle_msg_resend(&self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+        let _ = decode_exact::<tl::enums::MsgResendReq>(&message.body)?;
+        // TODO implement
+        // `msg_resend_ans_req` seems to never occur (it was even missing from `mtproto.tl`)
+        Ok(())
+    }
+
+    /// **[Request for several future salts]**
+    ///
+    /// The client may at any time request from the server several (between
+    /// 1 and 64) future server salts together with their validity periods.
+    /// Having stored them in persistent memory, the client may use them to
+    /// send messages in the future even if he changes sessions (a server
+    /// salt is attached to the Authorization Key rather than being
+    /// session-specific).
+    ///
+    /// ```tl
+    /// get_future_salts#b921bd04 num:int = FutureSalts;
+    /// future_salt#0949d9dc valid_since:int valid_until:int salt:long = FutureSalt;
+    /// future_salts#ae500895 req_msg_id:long now:int salts:vector future_salt = FutureSalts;
+    /// ```
+    ///
+    /// The client must check to see that the response's `req_msg_id` in fact
+    /// coincides with `msg_id` of the query for `get_future_salts`. The
+    /// server returns a maximum of `num` future server salts (may return
+    /// fewer). The response serves as the acknowledgment of the query and
+    /// does not require an acknowledgment itself.
+    ///
+    /// [Request for several future salts]: https://core.telegram.org/mtproto/service_messages#request-for-several-future-salts
+    fn handle_future_salts(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+        let tl::enums::FutureSalts::Salts(salts) =
+            decode_exact::<tl::enums::FutureSalts>(&message.body)?;
+
+        let msg_id = MsgId(salts.req_msg_id);
+        if self.salt_request_msg_id == Some(msg_id) {
+            if self.pending_salt_reply.is_some() || self.sent_history.find(msg_id).is_none() {
+                return Ok(());
+            }
+            // Response to internal request, do not propagate.
+            if salts.now < 0
+                || salts.salts.0.len() > NUM_FUTURE_SALTS as usize
+                || salts
+                    .salts
+                    .0
+                    .iter()
+                    .any(|salt| salt.valid_since < 0 || salt.valid_until <= salt.valid_since)
+            {
+                return Err(DeserializeError::InvalidEncoding);
+            }
+            // Process any salt correction or session recreation before committing
+            // the schedule, independent of child order in this frame.
+            self.pending_salt_reply = Some(salts);
+        } else {
+            self.deserialization
+                .push(Deserialization::RpcResult(RpcResult {
+                    msg_id,
+                    body: message.body,
+                }));
+        }
+
+        Ok(())
+    }
+
+    fn install_salt_schedule(&mut self, reply: tl::types::FutureSalts) {
+        if let Some(index) = self.sent_history.find(MsgId(reply.req_msg_id)) {
+            self.sent_history.get_mut(index).answered = true;
+        }
+        let previous = self
+            .salts
+            .iter()
+            .filter(|salt| salt.salt == self.current_salt && salt.valid_until > reply.now)
+            .max_by_key(|salt| salt.valid_since)
+            .cloned();
+        self.salt_request_msg_id = None;
+        self.start_salt_time = Some((reply.now, Instant::now()));
+        self.salts = reply.salts.0;
+        if let Some(previous) = previous
+            && !self.salts.contains(&previous)
+        {
+            // A refresh can return fewer intervals without invalidating this one.
+            self.salts.push(previous);
+        }
+        self.advance_salts(i128::from(reply.now));
+        info!("got {} usable salts", self.salts.len());
+    }
+
+    fn handle_future_salt(&mut self, _message: manual_tl::Message) -> Result<(), DeserializeError> {
+        Err(DeserializeError::UnsupportedControl)
+    }
+
+    /// **[Ping Messages (PING/PONG)]**
+    ///
+    /// ```tl
+    /// ping#7abe77ec ping_id:long = Pong;
+    /// ```
+    ///
+    /// A response is usually returned to the same connection:
+    ///
+    /// ```tl
+    /// pong#347773c5 msg_id:long ping_id:long = Pong;
+    /// ```
+    ///
+    /// These messages do not require acknowledgments. A `pong` is
+    /// transmitted only in response to a `ping` while a `ping` can be
+    /// initiated by either side.
+    ///
+    /// **[Deferred Connection Closure + PING]**
+    ///
+    /// ```tl
+    /// ping_delay_disconnect#f3427b8c ping_id:long disconnect_delay:int = Pong;
+    /// ```
+    ///
+    /// Works like `ping`. In addition, after this is received, the server
+    /// starts a timer which will close the current connection
+    /// `disconnect_delay` seconds later unless it receives a new message of
+    /// the same type which automatically resets all previous timers. If the
+    /// client sends these pings once every 60 seconds, for example, it may
+    /// set `disconnect_delay` equal to 75 seconds.
+    ///
+    /// [Ping Messages (PING/PONG)]: https://core.telegram.org/mtproto/service_messages#ping-messages-ping-pong
+    /// [Deferred Connection Closure + PING]: https://core.telegram.org/mtproto/service_messages#deferred-connection-closure-ping
+    fn handle_pong(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+        let tl::enums::Pong::Pong(pong) = decode_exact::<tl::enums::Pong>(&message.body)?;
+
+        self.deserialization
+            .push(Deserialization::RpcResult(RpcResult {
+                msg_id: MsgId(pong.msg_id),
+                body: message.body,
+            }));
+        Ok(())
+    }
+
+    /// **[Request to Destroy Session]**
+    ///
+    /// Used by the client to notify the server that it may forget the data
+    /// from a different session belonging to the same user (i.e. with the
+    /// same `auth_key_id`). The result of this being applied to the current
+    /// session is undefined.
+    ///
+    /// ```tl
+    /// destroy_session#e7512126 session_id:long = DestroySessionRes;
+    /// destroy_session_ok#e22045fc session_id:long = DestroySessionRes;
+    /// destroy_session_none#62d350c9 session_id:long = DestroySessionRes;
+    /// ```
+    ///
+    /// [Request to Destroy Session]: https://core.telegram.org/mtproto/service_messages#request-to-destroy-session
+    fn handle_destroy_session(&self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+        let _ = decode_exact::<tl::enums::DestroySessionRes>(&message.body)?;
+        // TODO implement
+        Ok(())
+    }
+
+    /// **[New Session Creation Notification]**
+    ///
+    /// The server notifies the client that a new session (from the server's
+    /// standpoint) had to be created to handle a client message. If, after
+    /// this, the server receives a message with an even smaller `msg_id`
+    /// within the same session, a similar notification will be generated for
+    /// this `msg_id` as well. No such notifications are generated for high
+    /// `msg_id` values.
+    ///
+    /// ```tl
+    /// new_session_created#9ec20908 first_msg_id:long unique_id:long server_salt:long = NewSession
+    /// ```
+    ///
+    /// The `unique_id` parameter is generated by the server every time a
+    /// session is (re-)created.
+    ///
+    /// This notification must be acknowledged by the client. It is necessary,
+    /// for instance, for the client to understand that there is, in fact, a
+    /// "gap" in the stream of long poll notifications received from the
+    /// server (the user may have failed to receive notifications during some
+    /// period of time).
+    ///
+    /// Notice that the server may unilaterally destroy (close) any existing
+    /// client sessions with all pending messages and notifications, without
+    /// sending any notifications. This happens, for example, if the session
+    /// is inactive for a long time, and the server runs out of memory. If the
+    /// client at some point decides to send new messages to the server using
+    /// the old session, already forgotten by the server, such a "new session
+    /// created" notification will be generated. The client is expected to
+    /// handle such situations gracefully.
+    ///
+    /// [New Session Creation Notification]: https://core.telegram.org/mtproto/service_messages#new-session-creation-notification
+    fn handle_new_session_created(
+        &mut self,
+        message: manual_tl::Message,
+    ) -> Result<(), DeserializeError> {
+        let tl::enums::NewSession::Created(session) =
+            decode_exact::<tl::enums::NewSession>(&message.body)?;
+        let first_id = MsgId(session.first_msg_id);
+        let Some(index) = self.sent_history.find(first_id) else {
+            return Ok(());
+        };
+        let notification = message.msg_id as u64;
+        if self.sent_history.get(index).sent_at.elapsed() > SENT_HISTORY_AGE
+            || self
+                .last_new_session
+                .is_some_and(|(_, last)| notification <= last)
+        {
+            return Ok(());
+        }
+        let previous = self
+            .last_new_session
+            .replace((session.unique_id, notification));
+        if previous.is_some_and(|(id, _)| id == session.unique_id) {
+            return Ok(());
+        }
+        self.current_salt = session.server_salt;
+        self.salts.clear();
+        self.start_salt_time = None;
+        if previous.is_some() || self.session_established {
+            if self.salt_request_msg_id != Some(first_id) {
+                self.salt_request_msg_id = None;
+            }
+            self.deserialization.push(Deserialization::SessionRecreated);
+        }
+        Ok(())
+    }
+
+    /// **[Containers]**
+    ///
+    /// *Containers* are messages containing several other messages. Used
+    /// for the ability to transmit several RPC queries and/or service
+    /// messages at the same time, using HTTP or even TCP or UDP protocol.
+    /// A container may only be accepted or rejected by the other party as
+    /// a whole.
+    ///
+    /// **[Simple Container]**
+    ///
+    /// A simple container carries several messages as follows:
+    ///
+    /// ```tl
+    /// msg_container#73f1f8dc messages:vector message = MessageContainer;
+    /// ```
+    ///
+    /// Here message refers to any message together with its length and
+    /// `msg_id`:
+    ///
+    /// ```tl
+    /// message msg_id:long seqno:int bytes:int body:Object = Message;
+    /// ```
+    ///
+    /// `bytes` is the number of bytes in the body serialization.
+    ///
+    /// All messages in a container must have `msg_id` lower than that of the
+    /// container itself. A container does not require an acknowledgment and
+    /// may not carry other simple containers. When messages are re-sent,
+    /// they may be combined into a container in a different manner or sent
+    /// individually.
+    ///
+    /// Empty containers are also allowed. They are used by the server,
+    /// for example, to respond to an HTTP request when the timeout specified
+    /// in `http_wait` expires, and there are no messages to transmit.
+    ///
+    /// [Containers]: https://core.telegram.org/mtproto/service_messages#containers
+    /// [Simple Container]: https://core.telegram.org/mtproto/service_messages#simple-container
+    fn handle_container(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+        let container = decode_exact::<manual_tl::MessageContainer>(&message.body)?;
+        for inner_message in container.messages {
+            self.process_message(inner_message)?;
+        }
+
+        Ok(())
+    }
+
+    /// **[Message Copies]**
+    ///
+    /// In some situations, an old message with a `msg_id` that is no longer
+    /// valid needs to be re-sent. Then, it is wrapped in a copy container:
+    ///
+    /// ```tl
+    /// msg_copy#e06046b2 orig_message:Message = MessageCopy;
+    /// ```
+    ///
+    /// Once received, the message is processed as if the wrapper were not
+    /// there. However, if it is known for certain that the message
+    /// `orig_message.msg_id` was received, then the new message is not
+    /// processed (while at the same time, it and `orig_message.msg_id`
+    /// are acknowledged). The value of `orig_message.msg_id` must be lower
+    /// than the container's `msg_id`.
+    ///
+    /// This is not used at this time, because an old message can be wrapped
+    /// in a simple container with the same result.
+    ///
+    /// [Message Copies]: https://core.telegram.org/mtproto/service_messages#message-copies
+    fn handle_msg_copy(&self, _message: manual_tl::Message) -> Result<(), DeserializeError> {
+        Err(DeserializeError::UnsupportedControl)
+    }
+
+    /// **[Packed Object]**
+    ///
+    /// Used to replace any other object (or rather, a serialization thereof)
+    /// with its archived (gzipped) representation:
+    ///
+    /// ```tl
+    /// gzip_packed#3072cfa1 packed_data:string = Object;
+    /// ```
+    ///
+    /// At the present time, it is supported in the body of an RPC response
+    /// (i.e., as result in rpc_result) and generated by the server for a
+    /// limited number of high-level queries. In addition, in the future it
+    /// may be used to transmit non-service messages (i.e. RPC queries) from
+    /// client to server.
+    ///
+    /// [Packed Object]: https://core.telegram.org/mtproto/service_messages#packed-object
+    fn handle_gzip_packed(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+        let container = decode_exact::<manual_tl::GzipPacked>(&message.body)?;
+        let body = self.inflate(&container, self.expansion_limit)?;
+        self.process_message(manual_tl::Message { body, ..message })
+            .map(|_| ())
+    }
+
+    /// **[HTTP Wait/Long Poll]**
+    ///
+    /// The following special service query not requiring an acknowledgement
+    /// (which must be transmitted only through an HTTP connection) is used to
+    /// enable the server to send messages in the future to the client using
+    /// HTTP protocol:
+    ///
+    /// ```tl
+    /// http_wait#9299359f max_delay:int wait_after:int max_wait:int = HttpWait;
+    /// ```
+    ///
+    /// When such a message (or a container carrying such a message) is
+    /// received, the server either waits `max_delay` milliseconds, whereupon
+    /// it forwards all the messages that it is holding on to the client if
+    /// there is at least one message queued in session (if needed, by placing
+    /// them into a container to which acknowledgments may also be added); or
+    /// else waits no more than `max_wait` milliseconds until such a message
+    /// is available. If a message never appears, an empty container is
+    /// transmitted.
+    ///
+    /// The `max_delay` parameter denotes the maximum number of milliseconds
+    /// that has elapsed between the first message for this session and the
+    /// transmission of an HTTP response. The wait_after parameter works as
+    /// follows: after the receipt of the latest message for a particular
+    /// session, the server waits another wait_after milliseconds in case
+    /// there are more messages. If there are no additional messages, the
+    /// result is transmitted (a container with all the messages). If more
+    /// messages appear, the `wait_after` timer is reset.
+    ///
+    /// At the same time, the max_delay parameter has higher priority than
+    /// `wait_after`, and `max_wait` has higher priority than `max_delay`.
+    ///
+    /// This message does not require a response or an acknowledgement. If
+    /// the container transmitted over HTTP carries several such messages,
+    /// the behavior is undefined (in fact, the latest parameter will be
+    /// used).
+    ///
+    /// If no `http_wait` is present in container, default values
+    /// `max_delay=0` (milliseconds), `wait_after=0` (milliseconds), and
+    /// `max_wait=25000` (milliseconds) are used.
+    ///
+    /// If the client's ping of the server takes a long time, it may make
+    /// sense to set `max_delay` to a value that is comparable in magnitude
+    /// to ping time.
+    ///
+    /// [HTTP Wait/Long Poll]: https://core.telegram.org/mtproto/service_messages#http-wait-long-poll
+    fn handle_http_wait(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+        let _ = decode_exact::<tl::enums::HttpWait>(&message.body)?;
+        // TODO implement
+        Ok(())
+    }
+
+    /// Anything else that's not Service Message will be `Updates`.
+    ///
+    /// Since we handle all the possible service messages, we can
+    /// safely treat whatever message body we received as `Updates`.
+    fn handle_update(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
+        // TODO if this `Updates` cannot be deserialized, `getDifference` should be used
+        self.deserialization
+            .push(Deserialization::Update(message.body));
+        Ok(())
+    }
+}
+
+/// The maximum header length used by any available transport.
+///
+/// The largest transport is `Full`, needing 4 bytes for each of `len` and `seq`.
+///
+/// The `crc32` is appended at the end, so it is not part of the leading header.
+pub const MAX_TRANSPORT_HEADER_LEN: usize = 4 + 4;
+
+/// Amount of bytes used by the [Encrypted Message](https://core.telegram.org/mtproto/description#encrypted-message).
+///
+/// This accounts for both the `auth_key_id` (8 bytes) and `msg_key` (16 bytes).
+pub const ENCRYPTED_PACKET_HEADER_LEN: usize = 8 + 16;
+
+/// Amount of bytes used by the [`encrypted_data`](https://core.telegram.org/mtproto/description#encrypted-message-encrypted-data).
+///
+/// This accounts for both `salt` (8 bytes) and `session_id` (8 bytes).
+///
+/// The `message_id`, `seq_no` and `message_data_length` are not included
+/// because those will have been appended at the current buffer position.
+pub const PLAIN_PACKET_HEADER_LEN: usize = 8 + 8;
+
+/// Amount of bytes used by a `msg_container`.
+///
+/// The message header for the container occupies the size of the message header
+/// (`msg_id`, `seq_no` and `size`) followed by the container header (`constructor`, `len`).
+pub const MESSAGE_CONTAINER_HEADER_LEN: usize = (8 + 4 + 4) + (4 + 4);
+
+impl Mtp for Encrypted {
+    fn poll_recovery(
+        &mut self,
+        now: Instant,
+        results: &mut Vec<Deserialization>,
+    ) -> Option<Instant> {
+        let start = results.len();
+        let deadline = self.recoveries.poll_timeouts(now, results);
+        if Self::salt_recovery_failed(self.salt_request_msg_id, &results[start..]) {
+            self.salt_request_msg_id = None;
+        }
+        deadline
+    }
+
+    fn serialize_error(&self) -> Option<SerializeError> {
+        self.serialize_error
+    }
+
+    /// Pushes a request into the internal buffer.
+    ///
+    /// Multiple requests will be buffered and sent as a single container to reduce roundtrips.
+    /// If the buffer is full (request does not fit in the container), returns `None`.
+    ///
+    /// [MTProto 2.0 guidelines]: https://core.telegram.org/mtproto/description.
+    fn push(&mut self, buffer: &mut DequeBuffer<u8>, request: &[u8]) -> Option<MsgId> {
+        if !self.prepare_outgoing_buffer(buffer) {
+            return None;
+        }
+        // TODO rather than taking in bytes, take requests, serialize them in place, and if too large drop the last part of the buffer
+
+        self.try_request_salts(buffer);
+        if self.salt_request_msg_id.is_some() || self.serialize_error.is_some() {
+            // Application requests wait for the refresh. Finalize can still
+            // send a receipt packet after the salt request has been written.
+            return None;
+        }
+
+        if self.msg_count == 0
+            && !self.recoveries.previous_packet_was_recovery
+            && !self.acknowledgements.previous_packet_was_standalone_ack
+            && self.recoveries.pending_answer().is_some()
+        {
+            return None;
+        }
+
+        if !self.acknowledgements.previous_packet_carried_ack {
+            // If a large RPC needs the whole packet, alternate priority so
+            // neither direction can keep the other waiting indefinitely.
+            self.buffer_acknowledgements(buffer)?;
+        }
+
+        // Requests that are too large would cause Telegram to close the
+        // connection but are so uncommon it's not worth returning `Err`.
+        // Without this, failing to serialize would repeatedly return `None`,
+        // leading to an infinite loop as well.
+        assert!(request.len() <= manual_tl::Message::MAX_BODY_SIZE);
+
+        // Serialized requests will always be correctly padded.
+        assert!(request.len().is_multiple_of(4));
+
+        // Payload provided by the user is always considered to be
+        // content-related, which means we can apply compression.
+        let mut body = request;
+        let compressed;
+        if let Some(threshold) = self.compression_threshold
+            && request.len() >= threshold
+        {
+            compressed = manual_tl::GzipPacked::new(request).to_bytes();
+            if compressed.len() < request.len() {
+                body = &compressed;
+            }
+        }
+
+        self.try_serialize_msg(buffer, body, true)
+    }
+
+    fn finalize(&mut self, buffer: &mut DequeBuffer<u8>) -> Option<MsgId> {
+        if !self.prepare_outgoing_buffer(buffer) {
+            return None;
+        }
+        if !self.acknowledgements.pending.is_empty() {
+            self.try_request_salts(buffer);
+        }
+        if self.msg_count == 0
+            && (!self.recoveries.previous_packet_was_recovery
+                || self.acknowledgements.pending.is_empty())
+        {
+            self.buffer_recovery(buffer);
+        }
+        // If the current packet has no room, retain receipts for the next one.
+        // A terminal serializer error still prevents the whole packet going out.
+        let _ = self.buffer_acknowledgements(buffer);
+        if !self.finalize_plain(buffer) || buffer.is_empty() {
+            None
+        } else {
+            let (padding, padding_len) = get_padding_data_v2(buffer.len());
+            buffer.extend_back(&padding[..padding_len]);
+
+            let msg_key = encrypt_data_v2(&mut buffer[..], &self.auth_key);
+
+            buffer.extend_front(&msg_key);
+            buffer.extend_front(&self.auth_key.key_id());
+            self.packet_finalized = true;
+
+            Some(MsgId(self.last_msg_id))
+        }
+    }
+
+    fn on_packet_sent(&mut self) {
+        if !mem::take(&mut self.packet_finalized) {
+            return;
+        }
+        let salt_refresh = self.salt_query_in_packet.take();
+        let standalone_control = self.packet_headers.len() == 1
+            && (self.acknowledgements.in_packet != 0 || self.recoveries.packet_is_staged());
+        self.sent_history
+            .record_packet(&mut self.packet_headers, standalone_control, salt_refresh);
+        self.acknowledgements.packet_written(standalone_control);
+        self.recoveries.packet_written();
+    }
+
+    /// Processes an encrypted response from the server.
+    fn deserialize(
+        &mut self,
+        payload: &mut [u8],
+    ) -> Result<Vec<Deserialization>, DeserializeError> {
+        crate::utils::check_message_buffer(payload)?;
+
+        let plaintext = decrypt_data_v2(payload, &self.auth_key)?;
+        self.process_plaintext(plaintext)?;
+
+        // For simplicity, and to avoid passing too much stuff around (RPC results, updates),
+        // the processing result is stored in self. After processing is done, that temporary
+        // state is cleaned and returned with `mem::take`.
+        Ok(mem::take(&mut self.deserialization))
+    }
+}
+
+#[cfg(test)]
+#[path = "tg_receive_tests.rs"]
+mod tg_receive_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // salt + session_id
+    const MESSAGE_PREFIX_LEN: usize = 8 + 8;
+
+    // gzip_packed#3072cfa1 packed_data:string = Object;
+    const GZIP_PACKED_HEADER: [u8; 4] = [0xa1, 0xcf, 0x72, 0x30];
+
+    // msg_container#73f1f8dc messages:vector<message> = MessageContainer;
+    const MSG_CONTAINER_HEADER: [u8; 4] = [0xdc, 0xf8, 0xf1, 0x73];
+
+    const REQUEST: &[u8] = b"Hey!";
+    const REQUEST_B: &[u8] = b"Bye!";
+
+    fn auth_key() -> [u8; 256] {
+        [0; 256]
+    }
+
+    fn ensure_buffer_is_message(buffer: &[u8], body: &[u8], seq_no: u8) {
+        // buffer[0..8] is the msg_id, based on `SystemTime::now()`
+        assert_ne!(&buffer[0..8], [0, 0, 0, 0, 0, 0, 0, 0]);
+        // buffer[8..12] is the seq_no, ever-increasing odd number (little endian)
+        assert_eq!(&buffer[8..12], [seq_no, 0, 0, 0]);
+        // buffer[12..16] is the bytes, the len of the body (little endian)
+        assert_eq!(&buffer[12..16], [body.len() as u8, 0, 0, 0]);
+        // buffer[16..] is the body, which is padded to 4 bytes
+        assert_eq!(&buffer[16..], body);
+    }
+
+    #[test]
+    fn ensure_serialization_has_salt_session_id() {
+        let mut buffer = DequeBuffer::with_capacity(0, 0);
+        let mut mtproto = Encrypted::build().finish(auth_key());
+
+        mtproto.push(&mut buffer, REQUEST);
+        mtproto.finalize_plain(&mut buffer);
+
+        // salt comes first, it's zero by default.
+        assert_eq!(&buffer[0..8], [0, 0, 0, 0, 0, 0, 0, 0]);
+
+        // session_id should be random.
+        assert_ne!(&buffer[8..16], [0, 0, 0, 0, 0, 0, 0, 0]);
+
+        // Only one message should remain.
+        ensure_buffer_is_message(&buffer[MESSAGE_PREFIX_LEN..], REQUEST, 1);
+    }
+
+    #[test]
+    fn ensure_correct_single_serialization() {
+        let mut buffer = DequeBuffer::with_capacity(0, 0);
+        let mut mtproto = Encrypted::build().finish(auth_key());
+
+        assert!(mtproto.push(&mut buffer, REQUEST).is_some());
+        mtproto.finalize_plain(&mut buffer);
+
+        let buffer = &buffer[MESSAGE_PREFIX_LEN..];
+        ensure_buffer_is_message(buffer, REQUEST, 1);
+    }
+
+    #[test]
+    fn ensure_correct_multi_serialization() {
+        let mut buffer = DequeBuffer::with_capacity(0, 0);
+        let mut mtproto = Encrypted::build()
+            .compression_threshold(None)
+            .finish(auth_key());
+
+        assert!(mtproto.push(&mut buffer, REQUEST).is_some());
+        assert!(mtproto.push(&mut buffer, REQUEST_B).is_some());
+        mtproto.finalize_plain(&mut buffer);
+        let buffer = &buffer[MESSAGE_PREFIX_LEN..];
+
+        // buffer[0..8] is the msg_id for the container
+        assert_ne!(&buffer[0..8], [0, 0, 0, 0, 0, 0, 0, 0]);
+        // buffer[8..12] is the seq_no, maybe-increasing even number.
+        // after two messages (1, 3) the next non-content related is 4.
+        assert_eq!(&buffer[8..12], [4, 0, 0, 0]);
+        // buffer[12..16] is the bytes, the len of the body
+        assert_eq!(&buffer[12..16], [48, 0, 0, 0]);
+
+        // buffer[16..20] is the constructor id of the container
+        assert_eq!(&buffer[16..20], MSG_CONTAINER_HEADER);
+        // buffer[20..24] is how many messages are included
+        assert_eq!(&buffer[20..24], [2, 0, 0, 0]);
+
+        // buffer[24..44] is an inner message
+        ensure_buffer_is_message(&buffer[24..44], REQUEST, 1);
+
+        // buffer[44..] is the other inner message
+        ensure_buffer_is_message(&buffer[44..], REQUEST_B, 3);
+    }
+
+    #[test]
+    fn ensure_correct_single_large_serialization() {
+        let mut buffer = DequeBuffer::with_capacity(0, 0);
+        let mut mtproto = Encrypted::build()
+            .compression_threshold(None)
+            .finish(auth_key());
+        let data = vec![0x7f; 768 * 1024];
+
+        assert!(mtproto.push(&mut buffer, &data).is_some());
+        mtproto.finalize_plain(&mut buffer);
+
+        let buffer = &buffer[MESSAGE_PREFIX_LEN..];
+        assert_eq!(buffer.len(), 16 + data.len());
+    }
+
+    #[test]
+    fn ensure_correct_multi_large_serialization() {
+        let mut buffer = DequeBuffer::with_capacity(0, 0);
+        let mut mtproto = Encrypted::build()
+            .compression_threshold(None)
+            .finish(auth_key());
+        let data = vec![0x7f; 768 * 1024];
+
+        assert!(mtproto.push(&mut buffer, &data).is_some());
+        assert!(mtproto.push(&mut buffer, &data).is_none());
+
+        // No container should be used, only the `salt` + `session_id` (16 bytes) should count.
+        mtproto.finalize_plain(&mut buffer);
+        let buffer = &buffer[MESSAGE_PREFIX_LEN..];
+        assert_eq!(buffer.len(), 16 + data.len());
+    }
+
+    #[test]
+    #[should_panic]
+    fn ensure_large_payload_panics() {
+        let mut buffer = DequeBuffer::with_capacity(0, 0);
+        let mut mtproto = Encrypted::build().finish(auth_key());
+
+        mtproto.push(&mut buffer, &vec![0; 2 * 1024 * 1024]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn ensure_non_padded_payload_panics() {
+        let mut buffer = DequeBuffer::with_capacity(0, 0);
+        let mut mtproto = Encrypted::build().finish(auth_key());
+
+        mtproto.push(&mut buffer, &[1, 2, 3]);
+    }
+
+    #[test]
+    fn ensure_no_compression_is_honored() {
+        // A large vector of null bytes should compress
+        let mut buffer = DequeBuffer::with_capacity(0, 0);
+        let mut mtproto = Encrypted::build()
+            .compression_threshold(None)
+            .finish(auth_key());
+
+        mtproto.push(&mut buffer, &vec![0; 512 * 1024]);
+        mtproto.finalize_plain(&mut buffer);
+        assert!(!buffer.as_ref().windows(4).any(|w| w == GZIP_PACKED_HEADER));
+    }
+
+    #[test]
+    fn ensure_some_compression() {
+        // A large vector of null bytes should compress
+        {
+            // High threshold not reached, should not compress
+            let mut buffer = DequeBuffer::with_capacity(0, 0);
+            let mut mtproto = Encrypted::build()
+                .compression_threshold(Some(768 * 1024))
+                .finish(auth_key());
+            mtproto.push(&mut buffer, &vec![0; 512 * 1024]);
+            mtproto.finalize_plain(&mut buffer);
+            assert!(!buffer.as_ref().windows(4).any(|w| w == GZIP_PACKED_HEADER));
+        }
+        {
+            // Low threshold is exceeded, should compress
+            let mut buffer = DequeBuffer::with_capacity(0, 0);
+            let mut mtproto = Encrypted::build()
+                .compression_threshold(Some(256 * 1024))
+                .finish(auth_key());
+            mtproto.push(&mut buffer, &vec![0; 512 * 1024]);
+            mtproto.finalize_plain(&mut buffer);
+            assert!(buffer.as_ref().windows(4).any(|w| w == GZIP_PACKED_HEADER));
+        }
+        {
+            // The default should compress
+            let mut buffer = DequeBuffer::with_capacity(0, 0);
+            let mut mtproto = Encrypted::build().finish(auth_key());
+            mtproto.push(&mut buffer, &vec![0; 512 * 1024]);
+            mtproto.finalize_plain(&mut buffer);
+            assert!(buffer.as_ref().windows(4).any(|w| w == GZIP_PACKED_HEADER));
+        }
+    }
+}
