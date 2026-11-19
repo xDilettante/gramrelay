@@ -1,9 +1,10 @@
 # GramRelay
 
-![Обложка GramRelay — Telegram SDK for Rust](docs/images/gramrelay-cover-signal.jpg)
+![Обложка GramRelay — Rust SDK for Telegram](docs/images/gramrelay-cover-telegram.jpg)
 
-GramRelay — SDK для Telegram на Rust. Чтобы написать бота, начните с
+GramRelay — независимый SDK для Telegram на Rust. Чтобы написать бота, начните с
 типизированного клиента Bot API в крейте `tg`.
+[Документация Telegram Bot API](https://core.telegram.org/bots/api)
 
 Исходники доступны для ознакомления. На собственный код GramRelay
 распространяется уведомление «все права защищены». [Условия](LICENSE)
