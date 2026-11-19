@@ -5,6 +5,142 @@ fn receiver() -> Encrypted {
     Encrypted::build().finish([7; 256])
 }
 
+fn record_sent_header(state: &mut Encrypted, id: i64, sequence: i32) {
+    state.sent_headers.push_back(SentHeader {
+        id: MsgId(id),
+        sequence,
+        sent_at: Instant::now(),
+        rejected: false,
+    });
+}
+
+fn bad_sequence(id: MsgId, sequence: i32) -> manual_tl::Message {
+    message(
+        tl::enums::BadMsgNotification::Notification(tl::types::BadMsgNotification {
+            bad_msg_id: id.0,
+            bad_msg_seqno: sequence,
+            error_code: 32,
+        })
+        .to_bytes(),
+    )
+}
+
+fn new_session(first_id: i64, notification_id: i64, unique_id: i64) -> manual_tl::Message {
+    let mut session = message(
+        tl::enums::NewSession::Created(tl::types::NewSessionCreated {
+            first_msg_id: first_id,
+            unique_id,
+            server_salt: unique_id + 100,
+        })
+        .to_bytes(),
+    );
+    session.msg_id = notification_id;
+    session
+}
+
+#[test]
+fn only_completed_transport_writes_record_container_and_message_headers() {
+    let mut connection = crate::connection::State::new(crate::transport::Full::new(), receiver());
+    let ping = tl::functions::Ping { ping_id: 1 }.to_bytes();
+    let first = connection.buffer_request(&ping).unwrap();
+    let second = connection.buffer_request(&ping).unwrap();
+    let container = connection.pack_outgoing_buffer().unwrap();
+    let length = connection.io_buffers().1.len();
+    assert!(connection.mtp.sent_headers.is_empty());
+    assert!(!connection.handle_net_write(length - 1));
+    assert!(connection.mtp.sent_headers.is_empty());
+    assert!(connection.handle_net_write(1));
+    let headers = connection
+        .mtp
+        .sent_headers
+        .iter()
+        .map(|header| (header.id, header.sequence))
+        .collect::<Vec<_>>();
+    assert_eq!(headers, [(first, 1), (second, 3), (container, 4)]);
+}
+
+#[test]
+fn a_sequence_notice_matches_a_recent_written_header_only_once() {
+    let mut state = receiver();
+    let id = MsgId(4);
+    state.process_message(bad_sequence(id, 1)).unwrap();
+    assert_eq!(state.sequence, 0);
+    record_sent_header(&mut state, id.0, 1);
+    state.process_message(bad_sequence(id, 3)).unwrap();
+    assert_eq!(state.sequence, 0);
+    state.process_message(bad_sequence(id, 1)).unwrap();
+    state.process_message(bad_sequence(id, 1)).unwrap();
+    assert_eq!(state.sequence, 64);
+    assert!(
+        matches!(&state.deserialization[..], [Deserialization::BadMessage(item)] if item.msg_id == id)
+    );
+}
+
+#[test]
+fn session_recreation_reports_a_gap_only_for_a_fresh_matching_notification() {
+    let mut state = receiver();
+    state.process_message(new_session(4, 5, 1)).unwrap();
+    assert_eq!(state.current_salt, 0);
+    record_sent_header(&mut state, 4, 1);
+    state.process_message(new_session(4, 5, 1)).unwrap();
+    assert_eq!(state.current_salt, 101);
+    assert!(state.deserialization.is_empty());
+    state.process_message(new_session(4, 9, 2)).unwrap();
+    state.process_message(new_session(4, 13, 2)).unwrap();
+    state.process_message(new_session(4, 5, 1)).unwrap();
+    assert_eq!(state.current_salt, 102);
+    assert!(matches!(
+        &state.deserialization[..],
+        [Deserialization::SessionRecreated]
+    ));
+}
+
+#[test]
+fn a_completed_reply_establishes_the_session_without_a_creation_notice() {
+    let mut unconfirmed = receiver();
+    record_sent_header(&mut unconfirmed, 42, 0);
+    unconfirmed.process_message(rpc(rpc_error())).unwrap();
+    assert!(!unconfirmed.session_established);
+
+    let mut state = receiver();
+    record_sent_header(&mut state, 42, 1);
+    state.process_message(rpc(rpc_error())).unwrap();
+    assert!(state.session_established);
+    state.process_message(new_session(42, 5, 1)).unwrap();
+    assert!(matches!(
+        state.deserialization.last(),
+        Some(Deserialization::SessionRecreated)
+    ));
+}
+
+#[test]
+fn an_aged_internal_rejection_releases_refresh_without_correcting_state() {
+    let mut state = receiver();
+    let id = MsgId(4);
+    record_sent_header(&mut state, id.0, 1);
+    state.sent_headers[0].sent_at -= SENT_HISTORY_AGE + Duration::from_secs(1);
+    state.salt_request_msg_id = Some(id);
+    state.process_message(bad_sequence(id, 1)).unwrap();
+    assert_eq!(state.sequence, 0);
+    assert!(state.salt_request_msg_id.is_none());
+    assert!(state.deserialization.is_empty());
+}
+
+#[test]
+fn a_discarded_finalized_packet_does_not_enter_sent_history() {
+    let mut state = receiver();
+    let mut buffer = DequeBuffer::with_capacity(512, 128);
+    let ping = tl::functions::Ping { ping_id: 1 }.to_bytes();
+    let discarded = state.push(&mut buffer, &ping).unwrap();
+    state.finalize(&mut buffer).unwrap();
+    buffer.clear();
+    let sent = state.push(&mut buffer, &ping).unwrap();
+    state.finalize(&mut buffer).unwrap();
+    state.on_packet_sent();
+    assert!(state.sent_header_index(discarded).is_none());
+    assert!(state.sent_header_index(sent).is_some());
+}
+
 #[test]
 fn clock_correction_handles_the_entire_wire_timestamp_without_wrapping() {
     let far_timestamp = (u64::from(u32::MAX) << 32 | 1) as i64;
@@ -126,6 +262,16 @@ fn message(body: Vec<u8>) -> manual_tl::Message {
         body,
     }
 }
+fn container(children: &[&manual_tl::Message]) -> manual_tl::Message {
+    let mut body = manual_tl::MessageContainer::CONSTRUCTOR_ID
+        .to_le_bytes()
+        .to_vec();
+    body.extend_from_slice(&(children.len() as i32).to_le_bytes());
+    for child in children {
+        body.extend_from_slice(&child.to_bytes());
+    }
+    message(body)
+}
 fn rpc(body: Vec<u8>) -> manual_tl::Message {
     let mut bytes = manual_tl::RpcResult::CONSTRUCTOR_ID.to_le_bytes().to_vec();
     bytes.extend_from_slice(&42i64.to_le_bytes());
@@ -244,6 +390,12 @@ fn only_a_matching_internal_reply_replaces_the_salt_schedule() {
     assert_eq!(state.salt_request_msg_id, Some(MsgId(42)));
     assert!(matches!(&state.deserialization[..],
         [Deserialization::RpcResult(result)] if result.msg_id == MsgId(41)));
+    state
+        .process_message(reply(42, vec![salt(10, 110, 2)]))
+        .unwrap();
+    assert_eq!(state.salts, original);
+    assert_eq!(state.salt_request_msg_id, Some(MsgId(42)));
+    record_sent_header(&mut state, 42, 1);
     assert_eq!(
         state.process_message(reply(42, vec![salt(100, 100, 2)])),
         Err(DeserializeError::InvalidEncoding)
@@ -297,6 +449,7 @@ fn an_older_active_interval_can_outlive_a_newer_salt() {
     }];
     state.current_salt = 1;
     state.salt_request_msg_id = Some(MsgId(42));
+    record_sent_header(&mut state, 42, 1);
     state
         .process_message(message(
             tl::enums::FutureSalts::Salts(tl::types::FutureSalts {
@@ -321,6 +474,8 @@ fn an_older_active_interval_can_outlive_a_newer_salt() {
 fn empty_internal_salt_reply_retains_current_salt_and_allows_requests() {
     let mut state = Encrypted::build().first_salt(123).finish([7; 256]);
     state.salt_request_msg_id = Some(MsgId(42));
+    record_sent_header(&mut state, 42, 1);
+    state.sent_headers[0].sent_at -= SENT_HISTORY_AGE + Duration::from_secs(1);
     state
         .process_message(message(
             tl::enums::FutureSalts::Salts(tl::types::FutureSalts {
@@ -339,6 +494,36 @@ fn empty_internal_salt_reply_retains_current_salt_and_allows_requests() {
     );
     assert_eq!(state.get_current_salt(), 123);
     assert!(state.salt_request_msg_id.is_none());
+}
+
+#[test]
+fn recreation_preserves_a_refresh_that_belongs_to_the_new_generation() {
+    let session = new_session(4, 5, 1);
+    let reply = message(
+        tl::enums::FutureSalts::Salts(tl::types::FutureSalts {
+            req_msg_id: 4,
+            now: 100,
+            salts: tl::RawVec(vec![tl::types::FutureSalt {
+                valid_since: 70,
+                valid_until: 200,
+                salt: 123,
+            }]),
+        })
+        .to_bytes(),
+    );
+    for children in [[&session, &reply], [&reply, &session]] {
+        let mut state = receiver();
+        state.session_established = true;
+        record_sent_header(&mut state, 4, 1);
+        state.salt_request_msg_id = Some(MsgId(4));
+        state.process_message(container(&children)).unwrap();
+        assert_eq!(state.current_salt, 123);
+        assert!(state.salt_request_msg_id.is_none());
+        assert!(matches!(
+            &state.deserialization[..],
+            [Deserialization::SessionRecreated]
+        ));
+    }
 }
 
 #[test]
@@ -567,28 +752,26 @@ fn a_rejected_container_rolls_back_the_effects_of_a_valid_prefix() {
     let salts = state.salts.clone();
     let current = state.get_current_salt();
     state.pending_ack.push(99);
-    let first = message(
-        tl::enums::NewSession::Created(tl::types::NewSessionCreated {
-            first_msg_id: 1,
-            unique_id: 42,
-            server_salt: 123,
-        })
-        .to_bytes(),
-    );
+    record_sent_header(&mut state, 4, 1);
+    let first = new_session(4, 5, 23);
+    let rejection = bad_sequence(MsgId(4), 1);
     let second = message(
         tl::types::DestroySessionOk::CONSTRUCTOR_ID
             .to_le_bytes()
             .to_vec(),
     );
-    let mut body = manual_tl::MessageContainer::CONSTRUCTOR_ID
-        .to_le_bytes()
-        .to_vec();
-    body.extend_from_slice(&2i32.to_le_bytes());
-    body.extend_from_slice(&first.to_bytes());
-    body.extend_from_slice(&second.to_bytes());
-    assert!(state.process_message(message(body)).is_err());
+    assert!(
+        state
+            .process_message(container(&[&first, &rejection, &second]))
+            .is_err()
+    );
     assert_eq!(state.pending_ack, vec![99]);
     assert_eq!(state.salts, salts);
     assert_eq!(state.get_current_salt(), current);
+    assert_eq!(state.sequence, 0);
     assert!(state.deserialization.is_empty());
+    state.process_message(first).unwrap();
+    state.process_message(rejection).unwrap();
+    assert_eq!(state.get_current_salt(), 123);
+    assert_eq!(state.sequence, 64);
 }

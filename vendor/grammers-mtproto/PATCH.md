@@ -7,7 +7,7 @@ Published VCS commit `e61cf8585e1e9969ab81eda9fb4725a1500e2d86`.
 Original copyright headers retained; distributed under Apache-2.0.
 
 The local patch covers the manifest, authentication clock calculation,
-manual_tl.rs, mtp/encrypted.rs and mtp/mod.rs.
+connection.rs, manual_tl.rs, mtp/encrypted.rs and mtp/mod.rs.
 
 The manifest directly binds the sibling hardened TL package, without a registry
 fallback or root override requirement. This private source package is not a
@@ -32,13 +32,24 @@ The sender observes a typed terminal failure and closes that session.
 The authorization exchange checks the signed server timestamp and the
 representability of the offset before computing Diffie-Hellman results.
 
-An internal salt refresh occupies its own packet. Only its matching reply
-can replace the schedule. The receiver validates intervals, stores at most
+An internal salt refresh occupies its own packet. Only a reply matching its
+completed write can replace the schedule. The receiver validates intervals, stores at most
 64 received records and one still-valid carried interval, and checks the
 server clock and expiry before choosing an active salt. Expired entries
 are removed. An empty reply leaves the last usable salt available during
 the refresh cooldown. See the [message identifier rules][message-id] and
 [future salt request specification][future-salts].
+
+Completed transport writes record up to 2048 recent child and container
+headers for the current session. A rejection can adjust state once for that
+header with the original sequence number and a write age of at most five
+minutes. A matching aged rejection releases a pending internal refresh
+without applying a correction. Its direct future-salt reply can still finish
+the exact outstanding refresh. A valid salt correction or session recreation
+supersedes the previous schedule. The recreation preserves an outstanding
+refresh if the notice identifies that request as part of the new generation.
+Rejected frames roll back applied notice effects, including rejection marks.
+Fresh recreation of an established session reports a catch-up signal.
 
 [message-id]: https://core.telegram.org/mtproto/description#message-identifier-msg-id
 [future-salts]: https://core.telegram.org/mtproto/service_messages#request-for-several-future-salts

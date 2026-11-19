@@ -20,7 +20,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::TryRecvError;
 use tokio::time::{Instant, sleep_until};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::RpcError;
 use crate::errors::{InvocationError, ReadError};
@@ -116,6 +116,7 @@ struct Request {
     body: Vec<u8>,
     state: RequestState,
     result: oneshot::Sender<Result<Vec<u8>, InvocationError>>,
+    remaining_setup_repairs: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -170,13 +171,31 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
         &mut self,
         request: &R,
     ) -> Result<R::Return, InvocationError> {
+        self.invoke_with_setup_repairs(request, 0).await
+    }
+
+    pub(crate) async fn invoke_connection_setup(
+        &mut self,
+        request: &tl::functions::InvokeWithLayer<
+            tl::functions::InitConnection<tl::functions::help::GetConfig>,
+        >,
+    ) -> Result<tl::enums::Config, InvocationError> {
+        // The read-only setup can need both clock and salt repair.
+        self.invoke_with_setup_repairs(request, 2).await
+    }
+
+    async fn invoke_with_setup_repairs<R: RemoteCall>(
+        &mut self,
+        request: &R,
+        remaining_setup_repairs: u8,
+    ) -> Result<R::Return, InvocationError> {
         let body = request.to_bytes();
         if body.len() > MAX_REQUEST_SIZE {
             return Err(InvocationError::Dropped("request body is too large"));
         }
 
         let (tx, rx) = oneshot::channel();
-        self.enqueue_body(body, tx);
+        self.enqueue(body, tx, remaining_setup_repairs);
         self.step_until_receive(rx).await.and_then(|vec| {
             decode_response::<R::Return>(&vec, self.incoming_response_limit).map_err(Into::into)
         })
@@ -191,6 +210,15 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
         body: Vec<u8>,
         tx: oneshot::Sender<Result<Vec<u8>, InvocationError>>,
     ) {
+        self.enqueue(body, tx, 0);
+    }
+
+    fn enqueue(
+        &mut self,
+        body: Vec<u8>,
+        tx: oneshot::Sender<Result<Vec<u8>, InvocationError>>,
+        remaining_setup_repairs: u8,
+    ) {
         assert!(body.len() >= 4);
         let req_id = u32::from_le_bytes([body[0], body[1], body[2], body[3]]);
         debug!(
@@ -202,6 +230,7 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
             body,
             state: RequestState::NotSerialized,
             result: tx,
+            remaining_setup_repairs,
         });
     }
 
@@ -385,6 +414,7 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
         results: Vec<mtp::Deserialization>,
         updates: &mut Vec<UpdatesLike>,
     ) {
+        let mut rejections = Vec::new();
         for result in results {
             match result {
                 mtp::Deserialization::OwnUpdate { msg_id, update } => {
@@ -393,11 +423,19 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
                 mtp::Deserialization::Update(update) => self.process_update(updates, update),
                 mtp::Deserialization::RpcResult(result) => self.process_result(result),
                 mtp::Deserialization::RpcError(error) => self.process_error(error),
-                mtp::Deserialization::BadMessage(bad_msg) => self.process_bad_message(bad_msg),
+                mtp::Deserialization::BadMessage(bad_msg) => rejections.push(bad_msg),
+                mtp::Deserialization::SessionRecreated => {
+                    updates.push(UpdatesLike::ConnectionClosed)
+                }
                 mtp::Deserialization::Failure(failure) => {
                     self.process_deserialize_error(failure, updates);
                 }
             }
+        }
+        // A matching reply in this frame resolves its request before a
+        // notification referring to the whole outgoing container can interrupt it.
+        for rejection in rejections {
+            self.process_bad_message(rejection);
         }
     }
 
@@ -515,41 +553,21 @@ impl<T: Transport, M: mtp::Mtp> Sender<T, M> {
 
     fn process_bad_message(&mut self, bad_msg: mtp::BadMessage) {
         for i in (0..self.requests.len()).rev() {
-            match &self.requests[i].state {
-                RequestState::Sent(pair)
-                    if pair.msg_id == bad_msg.msg_id || pair.container_msg_id == bad_msg.msg_id =>
-                {
-                    // TODO add a test to make sure we resend the request
-                    if bad_msg.retryable() {
-                        info!(
-                            request = ?pair.msg_id,
-                            "{}; re-sending request",
-                            bad_msg.description(),
-                        );
-
-                        // TODO check if actually retryable first!
-                        self.requests[i].state = RequestState::NotSerialized;
-                    } else {
-                        if bad_msg.fatal() {
-                            error!(
-                                request = ?pair.msg_id,
-                                "{}; cannot retry request",
-                                bad_msg.description(),
-                            );
-                        } else {
-                            warn!(
-                                request = ?pair.msg_id,
-                                "{}; cannot retry request",
-                                bad_msg.description(),
-                            );
-                        }
-                        let req = self.requests.swap_remove(i);
-                        drop(req.result.send(Err(InvocationError::Dropped(
-                            "response was non-retryable bad msg",
-                        ))));
-                    }
-                }
-                _ => {}
+            let request = &mut self.requests[i];
+            if !matches!(&request.state, RequestState::Sent(pair) if pair.msg_id == bad_msg.msg_id || pair.container_msg_id == bad_msg.msg_id)
+            {
+                continue;
+            }
+            if bad_msg.retryable() && request.remaining_setup_repairs > 0 {
+                request.remaining_setup_repairs -= 1;
+                request.state = RequestState::NotSerialized;
+            } else {
+                // An RPC result can still follow this notice. Preserve uncertainty
+                // without replaying the request or reporting a confirmed refusal.
+                let request = self.requests.swap_remove(i);
+                drop(request.result.send(Err(InvocationError::Dropped(
+                    "request interrupted by a protocol rejection",
+                ))));
             }
         }
     }

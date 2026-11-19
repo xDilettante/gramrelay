@@ -165,6 +165,9 @@ impl<T: Transport, M: Mtp> State<T, M> {
             return false;
         }
 
+        if self.write_ready {
+            self.mtp.on_packet_sent();
+        }
         self.write_buffer.clear();
         self.write_head = 0;
         self.write_ready = false;

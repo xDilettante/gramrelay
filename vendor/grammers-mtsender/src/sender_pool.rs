@@ -549,23 +549,24 @@ impl SenderPoolRunner {
             self.connection_params.max_incoming_nesting,
         );
 
-        let enums::Config::Config(remote_config) = match sender.invoke(&init_connection).await {
-            Ok(config) => config,
-            Err(InvocationError::Transport(transport::Error::BadStatus { status: 404 })) => {
-                let mut plain = Sender::connect(transport(), mtp::Plain::new(), addr())
-                    .await
-                    .map_err(InvocationError::Io)?;
-                plain.set_response_limit(self.connection_params.max_response_bytes);
-                sender = crate::generate_auth_key(plain).await?;
-                sender.set_incoming_limits(
-                    self.connection_params.max_response_bytes,
-                    self.connection_params.max_expanded_bytes,
-                    self.connection_params.max_incoming_nesting,
-                );
-                sender.invoke(&init_connection).await?
-            }
-            Err(e) => return Err(e),
-        };
+        let enums::Config::Config(remote_config) =
+            match sender.invoke_connection_setup(&init_connection).await {
+                Ok(config) => config,
+                Err(InvocationError::Transport(transport::Error::BadStatus { status: 404 })) => {
+                    let mut plain = Sender::connect(transport(), mtp::Plain::new(), addr())
+                        .await
+                        .map_err(InvocationError::Io)?;
+                    plain.set_response_limit(self.connection_params.max_response_bytes);
+                    sender = crate::generate_auth_key(plain).await?;
+                    sender.set_incoming_limits(
+                        self.connection_params.max_response_bytes,
+                        self.connection_params.max_expanded_bytes,
+                        self.connection_params.max_incoming_nesting,
+                    );
+                    sender.invoke_connection_setup(&init_connection).await?
+                }
+                Err(e) => return Err(e),
+            };
 
         self.update_config(remote_config).await?;
 
@@ -644,6 +645,9 @@ async fn run_sender(
                         continue;
                     }
                     for new_updates in all_new_updates {
+                        if !home_sender && matches!(new_updates, UpdatesLike::ConnectionClosed) {
+                            continue;
+                        }
                         if let Err(e) = forward_update(&updates, &update_loss, new_updates) {
                             match e {
                                 ForwardError::Full => {

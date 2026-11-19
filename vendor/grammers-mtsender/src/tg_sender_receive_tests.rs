@@ -105,6 +105,7 @@ async fn local_serialization_failure_drains_requests_without_writing() {
         body: tl::functions::Ping { ping_id: 2 }.to_bytes(),
         state: RequestState::Sent(MsgIdPair::new(id)),
         result: sent_reply,
+        remaining_setup_repairs: 0,
     });
 
     let failure = tokio::time::timeout(std::time::Duration::from_secs(2), sender.step())
@@ -268,7 +269,14 @@ async fn rpc_responses_and_own_updates_require_a_sent_request() {
     ));
 
     sender.process_mtp_buffer(
-        vec![failed_reply(other_msg_id), failed_reply(other_msg_id)],
+        vec![
+            BadMessage(mtp::BadMessage {
+                msg_id: container_msg_id,
+                code: 48,
+            }),
+            failed_reply(other_msg_id),
+            failed_reply(other_msg_id),
+        ],
         &mut updates,
     );
     assert!(matches!(
@@ -283,6 +291,58 @@ async fn rpc_responses_and_own_updates_require_a_sent_request() {
         Err(InvocationError::Deserialize(
             mtp::DeserializeError::LimitExceeded
         ))
+    ));
+    assert!(sender.requests.is_empty());
+}
+
+#[tokio::test]
+async fn protocol_rejection_repairs_are_reserved_for_setup_and_bounded() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut sender = Sender::connect(
+        grammers_mtproto::transport::Full::new(),
+        mtp::Plain::new(),
+        ServerAddr::Tcp {
+            address: listener.local_addr().unwrap(),
+        },
+    )
+    .await
+    .unwrap();
+    let (_socket, _) = listener.accept().await.unwrap();
+    let ping = tl::functions::Ping { ping_id: 1 }.to_bytes();
+    let msg_id = mtp::Mtp::push(
+        &mut mtp::Plain::new(),
+        &mut grammers_mtproto::DequeBuffer::with_capacity(64, 64),
+        &ping,
+    )
+    .unwrap();
+
+    let (application_reply, mut application_result) = oneshot::channel();
+    let (setup_reply, mut setup_result) = oneshot::channel();
+    sender.enqueue_body(ping.clone(), application_reply);
+    sender.enqueue(ping, setup_reply, 2);
+
+    for remaining in (0..=2).rev() {
+        for request in &mut sender.requests {
+            request.state = RequestState::Sent(MsgIdPair::new(msg_id));
+        }
+        sender.process_bad_message(mtp::BadMessage { msg_id, code: 48 });
+        if remaining > 0 {
+            assert_eq!(sender.requests.len(), 1);
+            assert!(matches!(
+                sender.requests[0].state,
+                RequestState::NotSerialized
+            ));
+            assert_eq!(sender.requests[0].remaining_setup_repairs, remaining - 1);
+            assert!(matches!(setup_result.try_recv(), Err(TryRecvError::Empty)));
+        }
+    }
+    assert!(matches!(
+        application_result.try_recv(),
+        Ok(Err(InvocationError::Dropped(_)))
+    ));
+    assert!(matches!(
+        setup_result.try_recv(),
+        Ok(Err(InvocationError::Dropped(_)))
     ));
     assert!(sender.requests.is_empty());
 }
@@ -343,6 +403,7 @@ async fn real_sender_rpc_error_logging_discards_remote_descriptions() {
             .to_bytes(),
             state: RequestState::Sent(MsgIdPair::new(msg_id)),
             result: reply,
+            remaining_setup_repairs: 0,
         });
         let captured = Captured::default();
         tracing::subscriber::with_default(captured.clone(), || {

@@ -26,7 +26,7 @@ PACKAGES = {
     "grammers-mtsender": (SHA256, PATCHED, LOCAL, "tg-safety.patch"),
     "grammers-mtproto": (
         "fc95dd02ac37101d8121e5098706a9c9b342e855ca7d7b8b5daa91ec7b119649",
-        {"Cargo.toml", "src/authentication.rs", "src/manual_tl.rs", "src/mtp/encrypted.rs", "src/mtp/mod.rs"},
+        {"Cargo.toml", "src/authentication.rs", "src/connection.rs", "src/manual_tl.rs", "src/mtp/encrypted.rs", "src/mtp/mod.rs"},
         {"Cargo.lock", "PATCH.md", "tg-receive.patch", "LICENSE-APACHE", "src/mtp/tg_receive_tests.rs"},
         "tg-receive.patch",
     ),

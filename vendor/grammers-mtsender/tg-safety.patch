@@ -146,10 +146,17 @@
  }
 --- upstream/src/sender.rs
 +++ patched/src/sender.rs
-@@ -26,6 +26,49 @@
+@@ -20,11 +20,54 @@
+ use tokio::sync::oneshot;
+ use tokio::sync::oneshot::error::TryRecvError;
+ use tokio::time::{Instant, sleep_until};
+-use tracing::{debug, error, info, trace, warn};
++use tracing::{debug, info, trace, warn};
+ 
+ use crate::RpcError;
  use crate::errors::{InvocationError, ReadError};
  use crate::net::{NetStream, ServerAddr};
- 
++
 +pub(crate) fn decode_exact<T: Deserializable>(bytes: &[u8]) -> Result<T, mtp::DeserializeError> {
 +    let mut cursor = tl::Cursor::from_slice(bytes);
 +    let value = T::deserialize(&mut cursor)?;
@@ -192,11 +199,10 @@
 +        }
 +    }
 +}
-+
+ 
  /// Every how often are pings sent?
  const PING_DELAY: Duration = Duration::from_secs(60);
- 
-@@ -66,6 +109,7 @@
+@@ -66,12 +109,14 @@
      state: connection::State<T, M>,
      requests: Vec<Request>,
      next_ping: Instant,
@@ -204,7 +210,14 @@
  }
  
  struct Request {
-@@ -108,6 +152,7 @@
+     body: Vec<u8>,
+     state: RequestState,
+     result: oneshot::Sender<Result<Vec<u8>, InvocationError>>,
++    remaining_setup_repairs: u8,
+ }
+ 
+ #[derive(Clone, Debug)]
+@@ -108,6 +153,7 @@
              state: connection::State::new(transport, mtp),
              requests: vec![],
              next_ping: Instant::now() + PING_DELAY,
@@ -212,13 +225,39 @@
          })
      }
  
-@@ -132,9 +177,13 @@
+@@ -125,22 +171,53 @@
+         &mut self,
+         request: &R,
+     ) -> Result<R::Return, InvocationError> {
++        self.invoke_with_setup_repairs(request, 0).await
++    }
++
++    pub(crate) async fn invoke_connection_setup(
++        &mut self,
++        request: &tl::functions::InvokeWithLayer<
++            tl::functions::InitConnection<tl::functions::help::GetConfig>,
++        >,
++    ) -> Result<tl::enums::Config, InvocationError> {
++        // The read-only setup can need both clock and salt repair.
++        self.invoke_with_setup_repairs(request, 2).await
++    }
++
++    async fn invoke_with_setup_repairs<R: RemoteCall>(
++        &mut self,
++        request: &R,
++        remaining_setup_repairs: u8,
++    ) -> Result<R::Return, InvocationError> {
+         let body = request.to_bytes();
+         if body.len() > MAX_REQUEST_SIZE {
+             return Err(InvocationError::Dropped("request body is too large"));
+         }
  
          let (tx, rx) = oneshot::channel();
-         self.enqueue_body(body, tx);
+-        self.enqueue_body(body, tx);
 -        self.step_until_receive(rx)
 -            .await
 -            .and_then(|vec| R::Return::from_bytes(&vec).map_err(|err| err.into()))
++        self.enqueue(body, tx, remaining_setup_repairs);
 +        self.step_until_receive(rx).await.and_then(|vec| {
 +            decode_response::<R::Return>(&vec, self.incoming_response_limit).map_err(Into::into)
 +        })
@@ -229,7 +268,30 @@
      }
  
      pub(crate) fn enqueue_body(
-@@ -161,7 +210,14 @@
+         &mut self,
+         body: Vec<u8>,
+         tx: oneshot::Sender<Result<Vec<u8>, InvocationError>>,
++    ) {
++        self.enqueue(body, tx, 0);
++    }
++
++    fn enqueue(
++        &mut self,
++        body: Vec<u8>,
++        tx: oneshot::Sender<Result<Vec<u8>, InvocationError>>,
++        remaining_setup_repairs: u8,
+     ) {
+         assert!(body.len() >= 4);
+         let req_id = u32::from_le_bytes([body[0], body[1], body[2], body[3]]);
+@@ -153,6 +230,7 @@
+             body,
+             state: RequestState::NotSerialized,
+             result: tx,
++            remaining_setup_repairs,
+         });
+     }
+ 
+@@ -161,7 +239,14 @@
          mut rx: oneshot::Receiver<Result<Vec<u8>, InvocationError>>,
      ) -> Result<Vec<u8>, InvocationError> {
          loop {
@@ -245,7 +307,7 @@
              match rx.try_recv() {
                  Ok(x) => break x,
                  Err(TryRecvError::Empty) => continue,
-@@ -180,6 +236,11 @@
+@@ -180,6 +265,11 @@
      /// as dead and the sender instance recreated.
      pub async fn step(&mut self) -> Result<Vec<UpdatesLike>, ReadError> {
          self.try_fill_write();
@@ -257,7 +319,7 @@
  
          let (mut reader, mut writer) = self.stream.split();
          let sleep = sleep_until(self.next_ping);
-@@ -302,9 +363,20 @@
+@@ -302,9 +392,20 @@
              &error
          );
  
@@ -281,18 +343,38 @@
      }
  
      /// Process the result of deserializing an MTP buffer.
-@@ -322,7 +394,9 @@
+@@ -313,6 +414,7 @@
+         results: Vec<mtp::Deserialization>,
+         updates: &mut Vec<UpdatesLike>,
+     ) {
++        let mut rejections = Vec::new();
+         for result in results {
+             match result {
+                 mtp::Deserialization::OwnUpdate { msg_id, update } => {
+@@ -321,9 +423,19 @@
+                 mtp::Deserialization::Update(update) => self.process_update(updates, update),
                  mtp::Deserialization::RpcResult(result) => self.process_result(result),
                  mtp::Deserialization::RpcError(error) => self.process_error(error),
-                 mtp::Deserialization::BadMessage(bad_msg) => self.process_bad_message(bad_msg),
+-                mtp::Deserialization::BadMessage(bad_msg) => self.process_bad_message(bad_msg),
 -                mtp::Deserialization::Failure(failure) => self.process_deserialize_error(failure),
+-            }
++                mtp::Deserialization::BadMessage(bad_msg) => rejections.push(bad_msg),
++                mtp::Deserialization::SessionRecreated => {
++                    updates.push(UpdatesLike::ConnectionClosed)
++                }
 +                mtp::Deserialization::Failure(failure) => {
 +                    self.process_deserialize_error(failure, updates);
 +                }
-             }
++            }
++        }
++        // A matching reply in this frame resolves its request before a
++        // notification referring to the whole outgoing container can interrupt it.
++        for rejection in rejections {
++            self.process_bad_message(rejection);
          }
      }
-@@ -333,11 +407,15 @@
+ 
+@@ -333,11 +445,15 @@
          msg_id: MsgId,
          update: Vec<u8>,
      ) {
@@ -312,7 +394,7 @@
          ) {
              (
                  Ok(UpdatesLike::Updates(tl::enums::Updates::UpdateShortSentMessage(u))),
-@@ -350,16 +428,13 @@
+@@ -350,16 +466,13 @@
              (Ok(UpdatesLike::AffectedMessages(affected)), _) => {
                  // Check if the original request targeted a channel (e.g. channels.deleteMessages).
                  // If so, the pts belongs to that channel, not the common/user pts sequence.
@@ -336,7 +418,7 @@
                  if let Some((channel_id, message_ids)) = channel_id {
                      updates.push(UpdatesLike::AffectedChannelMessages {
                          affected,
-@@ -378,13 +453,14 @@
+@@ -378,13 +491,14 @@
              (Err(e), _) => {
                  // This shouldn't happen. We just made the request, so they shouldn't be stale.
                  // If the request failed with a failed-to-deserialize error, callers will handle it.
@@ -353,7 +435,7 @@
              Ok(u) => updates.push(u),
              Err(e) => {
                  // These are to be treated as a gap.
-@@ -418,7 +494,10 @@
+@@ -418,7 +532,10 @@
  
      fn process_error(&mut self, error: mtp::RpcResultError) {
          if let Some(req) = self.pop_request(error.msg_id) {
@@ -365,10 +447,11 @@
              let x = req.body.as_slice();
              drop(
                  req.result.send(Err(InvocationError::Rpc(
-@@ -437,15 +516,6 @@
+@@ -436,56 +553,33 @@
+ 
      fn process_bad_message(&mut self, bad_msg: mtp::BadMessage) {
          for i in (0..self.requests.len()).rev() {
-             match &self.requests[i].state {
+-            match &self.requests[i].state {
 -                RequestState::Serialized(pair)
 -                    if pair.msg_id == bad_msg.msg_id || pair.container_msg_id == bad_msg.msg_id =>
 -                {
@@ -378,14 +461,64 @@
 -                        bad_msg.description()
 -                    );
 -                }
-                 RequestState::Sent(pair)
-                     if pair.msg_id == bad_msg.msg_id || pair.container_msg_id == bad_msg.msg_id =>
-                 {
-@@ -484,8 +554,14 @@
-         }
-     }
- 
+-                RequestState::Sent(pair)
+-                    if pair.msg_id == bad_msg.msg_id || pair.container_msg_id == bad_msg.msg_id =>
+-                {
+-                    // TODO add a test to make sure we resend the request
+-                    if bad_msg.retryable() {
+-                        info!(
+-                            request = ?pair.msg_id,
+-                            "{}; re-sending request",
+-                            bad_msg.description(),
+-                        );
+-
+-                        // TODO check if actually retryable first!
+-                        self.requests[i].state = RequestState::NotSerialized;
+-                    } else {
+-                        if bad_msg.fatal() {
+-                            error!(
+-                                request = ?pair.msg_id,
+-                                "{}; cannot retry request",
+-                                bad_msg.description(),
+-                            );
+-                        } else {
+-                            warn!(
+-                                request = ?pair.msg_id,
+-                                "{}; cannot retry request",
+-                                bad_msg.description(),
+-                            );
+-                        }
+-                        let req = self.requests.swap_remove(i);
+-                        drop(req.result.send(Err(InvocationError::Dropped(
+-                            "response was non-retryable bad msg",
+-                        ))));
+-                    }
+-                }
+-                _ => {}
+-            }
+-        }
+-    }
+-
 -    fn process_deserialize_error(&mut self, failure: mtp::DeserializationFailure) {
++            let request = &mut self.requests[i];
++            if !matches!(&request.state, RequestState::Sent(pair) if pair.msg_id == bad_msg.msg_id || pair.container_msg_id == bad_msg.msg_id)
++            {
++                continue;
++            }
++            if bad_msg.retryable() && request.remaining_setup_repairs > 0 {
++                request.remaining_setup_repairs -= 1;
++                request.state = RequestState::NotSerialized;
++            } else {
++                // An RPC result can still follow this notice. Preserve uncertainty
++                // without replaying the request or reporting a confirmed refusal.
++                let request = self.requests.swap_remove(i);
++                drop(request.result.send(Err(InvocationError::Dropped(
++                    "request interrupted by a protocol rejection",
++                ))));
++            }
++        }
++    }
++
 +    fn process_deserialize_error(
 +        &mut self,
 +        failure: mtp::DeserializationFailure,
@@ -397,7 +530,7 @@
              debug!(error = ?failure.error, "got deserialization failure");
              drop(req.result.send(Err(InvocationError::from(failure.error))));
          } else {
-@@ -496,32 +572,25 @@
+@@ -496,32 +590,25 @@
          }
      }
  
@@ -442,7 +575,7 @@
      pub fn auth_key(&self) -> [u8; 256] {
          self.state.mtp.auth_key()
      }
-@@ -563,6 +632,7 @@
+@@ -563,6 +650,7 @@
          state: sender.state.into_encrypted(auth),
          requests: sender.requests,
          next_ping: Instant::now() + PING_DELAY,
@@ -450,7 +583,7 @@
      })
  }
  
-@@ -574,3 +644,7 @@
+@@ -574,3 +662,7 @@
  ) -> Result<Sender<T, mtp::Encrypted>, io::Error> {
      Sender::connect(transport, mtp::Encrypted::build().finish(auth_key), addr).await
  }
@@ -793,7 +926,7 @@
              abort_handle,
          });
          Ok(self.connections.last().unwrap())
-@@ -452,13 +537,31 @@
+@@ -452,17 +537,36 @@
                  .await
                  .map_err(InvocationError::Io)?
          } else {
@@ -804,30 +937,43 @@
 +            plain.set_response_limit(self.connection_params.max_response_bytes);
 +            crate::generate_auth_key(plain).await?
          };
+-
+-        let enums::Config::Config(remote_config) = match sender.invoke(&init_connection).await {
+-            Ok(config) => config,
+-            Err(InvocationError::Transport(transport::Error::BadStatus { status: 404 })) => {
+-                sender = connect(transport(), addr()).await?;
+-                sender.invoke(&init_connection).await?
+-            }
+-            Err(e) => return Err(e),
+-        };
 +        sender.set_incoming_limits(
 +            self.connection_params.max_response_bytes,
 +            self.connection_params.max_expanded_bytes,
 +            self.connection_params.max_incoming_nesting,
 +        );
++
++        let enums::Config::Config(remote_config) =
++            match sender.invoke_connection_setup(&init_connection).await {
++                Ok(config) => config,
++                Err(InvocationError::Transport(transport::Error::BadStatus { status: 404 })) => {
++                    let mut plain = Sender::connect(transport(), mtp::Plain::new(), addr())
++                        .await
++                        .map_err(InvocationError::Io)?;
++                    plain.set_response_limit(self.connection_params.max_response_bytes);
++                    sender = crate::generate_auth_key(plain).await?;
++                    sender.set_incoming_limits(
++                        self.connection_params.max_response_bytes,
++                        self.connection_params.max_expanded_bytes,
++                        self.connection_params.max_incoming_nesting,
++                    );
++                    sender.invoke_connection_setup(&init_connection).await?
++                }
++                Err(e) => return Err(e),
++            };
  
-         let enums::Config::Config(remote_config) = match sender.invoke(&init_connection).await {
-             Ok(config) => config,
-             Err(InvocationError::Transport(transport::Error::BadStatus { status: 404 })) => {
--                sender = connect(transport(), addr()).await?;
-+                let mut plain = Sender::connect(transport(), mtp::Plain::new(), addr())
-+                    .await
-+                    .map_err(InvocationError::Io)?;
-+                plain.set_response_limit(self.connection_params.max_response_bytes);
-+                sender = crate::generate_auth_key(plain).await?;
-+                sender.set_incoming_limits(
-+                    self.connection_params.max_response_bytes,
-+                    self.connection_params.max_expanded_bytes,
-+                    self.connection_params.max_incoming_nesting,
-+                );
-                 sender.invoke(&init_connection).await?
-             }
-             Err(e) => return Err(e),
-@@ -524,7 +627,9 @@
+         self.update_config(remote_config).await?;
+ 
+@@ -524,7 +628,9 @@
  async fn run_sender(
      mut sender: Sender<Box<dyn transport::Transport + Send>, grammers_mtproto::mtp::Encrypted>,
      mut rpc_rx: mpsc::UnboundedReceiver<Rpc>,
@@ -837,11 +983,14 @@
      home_sender: bool,
  ) -> Result<(), ReadError> {
      let mut dropped: usize = 0;
-@@ -539,9 +644,9 @@
+@@ -539,9 +645,12 @@
                          continue;
                      }
                      for new_updates in all_new_updates {
 -                        if let Err(e) = updates.try_send(new_updates) {
++                        if !home_sender && matches!(new_updates, UpdatesLike::ConnectionClosed) {
++                            continue;
++                        }
 +                        if let Err(e) = forward_update(&updates, &update_loss, new_updates) {
                              match e {
 -                                mpsc::error::TrySendError::Full(_) => {
@@ -849,7 +998,7 @@
                                      dropped += 1;
                                      if last_update_limit_warn.elapsed() >= UPDATES_DROPPED_LOG_COOLDOWN {
                                          warn!(
-@@ -554,7 +659,7 @@
+@@ -554,7 +663,7 @@
                                          last_update_limit_warn = Instant::now();
                                      }
                                  }
@@ -858,7 +1007,7 @@
                                      debug!("updates channel closed, stopping update forwarding");
                                      updates_closed = true;
                                      break;
-@@ -564,8 +669,12 @@
+@@ -564,8 +673,12 @@
                      }
                  },
                  Err(err) => {
@@ -872,7 +1021,7 @@
                      }
                      break Err(err)
                  },
-@@ -575,6 +684,15 @@
+@@ -575,6 +688,15 @@
                  None => break Ok(()),
              },
          }
@@ -888,7 +1037,7 @@
      }
  }
  
-@@ -608,7 +726,34 @@
+@@ -608,7 +730,34 @@
              Self::Disconnect { dc_id } => {
                  f.debug_struct("Disconnect").field("dc_id", dc_id).finish()
              }

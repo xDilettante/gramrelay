@@ -80,6 +80,8 @@ pub enum Deserialization {
     RpcError(RpcResultError),
     /// `bad_msg_notification` for a previously-sent message.
     BadMessage(BadMessage),
+    /// The server recreated an established protocol session. Updates may be missing.
+    SessionRecreated,
     /// Generic deserialization failure of a received message.
     Failure(DeserializationFailure),
 }
@@ -276,6 +278,12 @@ pub trait Mtp {
     /// When at least one message is serialized, the last generated `MsgId` is returned.
     /// This will either belong to the container (if used) or the last serialized message.
     fn finalize(&mut self, buffer: &mut DequeBuffer<u8>) -> Option<MsgId>;
+
+    /// Records the most recently finalized packet after its complete transport write.
+    /// [`crate::connection::State`] calls this for each completed packet. Direct
+    /// users must call it before decoding responses or starting another packet.
+    /// Clearing a finalized buffer without recording the write discards its headers.
+    fn on_packet_sent(&mut self) {}
 
     /// Deserializes a single incoming message payload into zero or more responses.
     fn deserialize(&mut self, payload: &mut [u8])

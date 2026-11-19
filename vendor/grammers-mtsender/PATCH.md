@@ -44,6 +44,11 @@ private/unpublished; see SPEC-source-distribution.md for the release boundary.
   and update state alone. A malformed reply to a matching sent request still
   reports possible update loss. The sender skips bad-message notices for
   buffered requests.
+- A reply takes precedence over a matching protocol rejection in the same frame.
+  Otherwise a matched rejection leaves an application call with an unknown
+  outcome and no sender replay. Only read-only GetConfig during connection setup
+  can make up to two clock or salt repairs. Session recreation feeds the same
+  catch-up path as connection loss on the home data center.
 
 The recorded tg-safety.patch is checked against the hash-verified archive with
 `python tools/verify_grammers.py check` (cached archive), or add `--download` to

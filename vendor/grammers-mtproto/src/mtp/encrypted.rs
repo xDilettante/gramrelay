@@ -6,6 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::collections::VecDeque;
 use std::mem;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -40,6 +41,8 @@ const NUM_FUTURE_SALTS: i32 = 64;
 /// Used to prevent small fluctuations in the system clock.
 const SALT_USE_DELAY: i32 = 60;
 const MAX_MESSAGE_AHEAD: u64 = 30 << 32;
+const SENT_HISTORY_LIMIT: usize = 2048;
+const SENT_HISTORY_AGE: Duration = Duration::from_secs(300);
 
 fn clock_correction(
     message_id: i64,
@@ -105,6 +108,13 @@ pub struct Builder {
     compression_threshold: Option<usize>,
 }
 
+struct SentHeader {
+    id: MsgId,
+    sequence: i32,
+    sent_at: Instant,
+    rejected: bool,
+}
+
 /// An implementation of the [Mobile Transport Protocol] for ciphertext
 /// (encrypted) messages.
 ///
@@ -129,6 +139,8 @@ pub struct Encrypted {
 
     /// Internal request for salts which should not be propagated.
     salt_request_msg_id: Option<MsgId>,
+    /// A valid response waiting for the rest of its frame to commit.
+    pending_salt_reply: Option<tl::types::FutureSalts>,
 
     /// The secure, random identifier for this instance.
     session_id: i64,
@@ -140,6 +152,16 @@ pub struct Encrypted {
     last_msg_id: i64,
 
     serialize_error: Option<SerializeError>,
+
+    /// Headers from the packet being built or waiting for its transport write.
+    packet_headers: Vec<(MsgId, i32)>,
+    packet_finalized: bool,
+    sent_headers: VecDeque<SentHeader>,
+    /// Rejection marks made by the current frame. A frame can roll them back.
+    applied_rejections: Vec<usize>,
+    /// Server generation ID and notification ID, ordered by unsigned wire ID.
+    last_new_session: Option<(i64, u64)>,
+    session_established: bool,
 
     /// Identifiers that need to be acknowledged to the server.
     ///
@@ -195,6 +217,7 @@ impl Builder {
             salts: Vec::new(),
             start_salt_time: None,
             salt_request_msg_id: None,
+            pending_salt_reply: None,
             session_id: {
                 let mut buffer = [0u8; 8];
                 getrandom::fill(&mut buffer).expect("failed to generate a secure session_id");
@@ -203,6 +226,12 @@ impl Builder {
             sequence: 0,
             last_msg_id: 0,
             serialize_error: None,
+            packet_headers: Vec::new(),
+            packet_finalized: false,
+            sent_headers: VecDeque::new(),
+            applied_rejections: Vec::new(),
+            last_new_session: None,
+            session_established: false,
             pending_ack: vec![],
             compression_threshold: self.compression_threshold,
             deserialization: Vec::new(),
@@ -350,7 +379,15 @@ impl Encrypted {
         buffer.extend_back(body);
 
         self.msg_count += 1;
-        Some(MsgId(msg_id))
+        let msg_id = MsgId(msg_id);
+        self.packet_headers.push((msg_id, sequence));
+        Some(msg_id)
+    }
+
+    fn sent_header_index(&self, msg_id: MsgId) -> Option<usize> {
+        self.sent_headers
+            .binary_search_by_key(&(msg_id.0 as u64), |header| header.id.0 as u64)
+            .ok()
     }
 
     fn get_current_salt(&self) -> i64 {
@@ -421,6 +458,7 @@ impl Encrypted {
             let Some((id, sequence)) = self.outgoing_header(false) else {
                 return false;
             };
+            self.packet_headers.push((MsgId(id), sequence));
             id.serialize(sink);
             sequence.serialize(sink);
 
@@ -477,6 +515,7 @@ impl Encrypted {
         // A container is accepted or rejected as a whole. Preserve receive-side
         // state once at the outer boundary, including effects of valid children
         // preceding an invalid child. Do not replenish the inflation budget.
+        let results_before = self.deserialization.len();
         let rollback = (self.nesting == 0).then(|| {
             (
                 self.time_offset,
@@ -485,15 +524,15 @@ impl Encrypted {
                 self.start_salt_time,
                 self.salt_request_msg_id,
                 self.sequence,
+                self.last_new_session,
                 self.pending_ack.len(),
-                self.deserialization.len(),
             )
         });
         self.nesting += 1;
         let result = self.process_message_inner(message);
         self.nesting -= 1;
         if result.is_err()
-            && let Some((offset, current, salts, salt_time, salt_request, sequence, acks, results)) =
+            && let Some((offset, current, salts, salt_time, salt_request, sequence, session, acks)) =
                 rollback
         {
             self.time_offset = offset;
@@ -502,8 +541,36 @@ impl Encrypted {
             self.start_salt_time = salt_time;
             self.salt_request_msg_id = salt_request;
             self.sequence = sequence;
+            self.last_new_session = session;
+            for index in self.applied_rejections.drain(..) {
+                self.sent_headers[index].rejected = false;
+            }
             self.pending_ack.truncate(acks);
-            self.deserialization.truncate(results);
+            self.deserialization.truncate(results_before);
+        }
+        if self.nesting == 0 {
+            self.applied_rejections.clear();
+            let salt_reply = self.pending_salt_reply.take();
+            if result.is_ok()
+                && let Some(reply) = salt_reply
+                && self.salt_request_msg_id == Some(MsgId(reply.req_msg_id))
+            {
+                self.install_salt_schedule(reply);
+            }
+            if result.is_ok() && !self.session_established {
+                // A completed reply proves establishment even if initial creation
+                // was never reported. Wait for the frame to commit first.
+                self.session_established =
+                    self.deserialization[results_before..].iter().any(|result| {
+                        let id = match result {
+                            Deserialization::RpcResult(result) => result.msg_id,
+                            Deserialization::RpcError(result) => result.msg_id,
+                            _ => return false,
+                        };
+                        self.sent_header_index(id)
+                            .is_some_and(|index| self.sent_headers[index].sequence % 2 == 1)
+                    });
+            }
         }
         result
     }
@@ -838,17 +905,36 @@ impl Encrypted {
         message: manual_tl::Message,
     ) -> Result<(), DeserializeError> {
         let bad_msg = decode_exact::<tl::enums::BadMsgNotification>(&message.body)?;
-
-        if self
-            .salt_request_msg_id
-            .is_some_and(|msg_id| msg_id == MsgId(bad_msg.bad_msg_id()))
+        let msg_id = MsgId(bad_msg.bad_msg_id());
+        let internal = self.salt_request_msg_id == Some(msg_id);
+        let Some(index) = self.sent_header_index(msg_id) else {
+            return Ok(());
+        };
+        let sent = &mut self.sent_headers[index];
+        if sent.rejected
+            || sent.sequence != bad_msg.bad_msg_seqno()
+            || ((bad_msg.error_code() == 48)
+                != matches!(bad_msg, tl::enums::BadMsgNotification::BadServerSalt(_)))
         {
+            return Ok(());
+        }
+        if sent.sent_at.elapsed() > SENT_HISTORY_AGE {
+            if internal {
+                // Release the waiter without authorizing a stale state correction.
+                self.salt_request_msg_id = None;
+            }
+            return Ok(());
+        }
+        sent.rejected = true;
+        self.applied_rejections.push(index);
+
+        if internal {
             // Response to internal request, do not propagate.
             self.salt_request_msg_id = None;
         } else {
             self.deserialization
                 .push(Deserialization::BadMessage(super::BadMessage {
-                    msg_id: MsgId(bad_msg.bad_msg_id()),
+                    msg_id,
                     code: bad_msg.error_code(),
                 }));
         }
@@ -858,6 +944,7 @@ impl Encrypted {
             tl::enums::BadMsgNotification::BadServerSalt(x) => {
                 self.current_salt = x.new_server_salt;
                 self.salts.clear();
+                // The correction supersedes schedules requested under the old salt.
                 self.salt_request_msg_id = None;
                 self.start_salt_time = None;
 
@@ -1063,10 +1150,11 @@ impl Encrypted {
         let tl::enums::FutureSalts::Salts(salts) =
             decode_exact::<tl::enums::FutureSalts>(&message.body)?;
 
-        if self
-            .salt_request_msg_id
-            .is_some_and(|msg_id| msg_id == MsgId(salts.req_msg_id))
-        {
+        let msg_id = MsgId(salts.req_msg_id);
+        if self.salt_request_msg_id == Some(msg_id) {
+            if self.pending_salt_reply.is_some() || self.sent_header_index(msg_id).is_none() {
+                return Ok(());
+            }
             // Response to internal request, do not propagate.
             if salts.now < 0
                 || salts.salts.0.len() > NUM_FUTURE_SALTS as usize
@@ -1078,32 +1166,38 @@ impl Encrypted {
             {
                 return Err(DeserializeError::InvalidEncoding);
             }
-            let previous = self
-                .salts
-                .iter()
-                .filter(|salt| salt.salt == self.current_salt && salt.valid_until > salts.now)
-                .max_by_key(|salt| salt.valid_since)
-                .cloned();
-            self.salt_request_msg_id = None;
-            self.start_salt_time = Some((salts.now, Instant::now()));
-            self.salts = salts.salts.0;
-            if let Some(previous) = previous
-                && !self.salts.contains(&previous)
-            {
-                // A refresh can return fewer intervals without invalidating this one.
-                self.salts.push(previous);
-            }
-            self.advance_salts(i128::from(salts.now));
-            info!("got {} usable salts", self.salts.len());
+            // Process any salt correction or session recreation before committing
+            // the schedule, independent of child order in this frame.
+            self.pending_salt_reply = Some(salts);
         } else {
             self.deserialization
                 .push(Deserialization::RpcResult(RpcResult {
-                    msg_id: MsgId(salts.req_msg_id),
+                    msg_id,
                     body: message.body,
                 }));
         }
 
         Ok(())
+    }
+
+    fn install_salt_schedule(&mut self, reply: tl::types::FutureSalts) {
+        let previous = self
+            .salts
+            .iter()
+            .filter(|salt| salt.salt == self.current_salt && salt.valid_until > reply.now)
+            .max_by_key(|salt| salt.valid_since)
+            .cloned();
+        self.salt_request_msg_id = None;
+        self.start_salt_time = Some((reply.now, Instant::now()));
+        self.salts = reply.salts.0;
+        if let Some(previous) = previous
+            && !self.salts.contains(&previous)
+        {
+            // A refresh can return fewer intervals without invalidating this one.
+            self.salts.push(previous);
+        }
+        self.advance_salts(i128::from(reply.now));
+        info!("got {} usable salts", self.salts.len());
     }
 
     fn handle_future_salt(&mut self, _message: manual_tl::Message) -> Result<(), DeserializeError> {
@@ -1208,14 +1302,34 @@ impl Encrypted {
         &mut self,
         message: manual_tl::Message,
     ) -> Result<(), DeserializeError> {
-        // TODO notify upper layers about the need to use getDifference
-        let new_session = decode_exact::<tl::enums::NewSession>(&message.body)?;
-        match new_session {
-            tl::enums::NewSession::Created(x) => {
-                self.current_salt = x.server_salt;
-                self.salts.clear();
-                self.start_salt_time = None;
+        let tl::enums::NewSession::Created(session) =
+            decode_exact::<tl::enums::NewSession>(&message.body)?;
+        let first_id = MsgId(session.first_msg_id);
+        let Some(index) = self.sent_header_index(first_id) else {
+            return Ok(());
+        };
+        let notification = message.msg_id as u64;
+        if self.sent_headers[index].sent_at.elapsed() > SENT_HISTORY_AGE
+            || self
+                .last_new_session
+                .is_some_and(|(_, last)| notification <= last)
+        {
+            return Ok(());
+        }
+        let previous = self
+            .last_new_session
+            .replace((session.unique_id, notification));
+        if previous.is_some_and(|(id, _)| id == session.unique_id) {
+            return Ok(());
+        }
+        self.current_salt = session.server_salt;
+        self.salts.clear();
+        self.start_salt_time = None;
+        if previous.is_some() || self.session_established {
+            if self.salt_request_msg_id != Some(first_id) {
+                self.salt_request_msg_id = None;
             }
+            self.deserialization.push(Deserialization::SessionRecreated);
         }
         Ok(())
     }
@@ -1418,6 +1532,22 @@ impl Mtp for Encrypted {
         if self.serialize_error.is_some() {
             return None;
         }
+        if self.packet_finalized {
+            if !buffer.is_empty() {
+                return None;
+            }
+            // A direct caller can abandon a finalized packet by clearing the buffer.
+            // This cannot add its IDs to the sent history.
+            if self
+                .packet_headers
+                .first()
+                .is_some_and(|&(id, _)| self.salt_request_msg_id == Some(id))
+            {
+                self.salt_request_msg_id = None;
+            }
+            self.packet_headers.clear();
+            self.packet_finalized = false;
+        }
         // TODO rather than taking in bytes, take requests, serialize them in place, and if too large drop the last part of the buffer
 
         // Check to see if the next salt can be used already. If it can, drop the current one and,
@@ -1473,7 +1603,7 @@ impl Mtp for Encrypted {
     }
 
     fn finalize(&mut self, buffer: &mut DequeBuffer<u8>) -> Option<MsgId> {
-        if !self.finalize_plain(buffer) || buffer.is_empty() {
+        if self.packet_finalized || !self.finalize_plain(buffer) || buffer.is_empty() {
             None
         } else {
             let (padding, padding_len) = get_padding_data_v2(buffer.len());
@@ -1483,9 +1613,30 @@ impl Mtp for Encrypted {
 
             buffer.extend_front(&msg_key);
             buffer.extend_front(&self.auth_key.key_id());
+            self.packet_finalized = true;
 
             Some(MsgId(self.last_msg_id))
         }
+    }
+
+    fn on_packet_sent(&mut self) {
+        if !mem::take(&mut self.packet_finalized) {
+            return;
+        }
+        let evict = (self.sent_headers.len() + self.packet_headers.len())
+            .saturating_sub(SENT_HISTORY_LIMIT);
+        self.sent_headers.drain(..evict);
+        let sent_at = Instant::now();
+        self.sent_headers.extend(
+            self.packet_headers
+                .drain(..)
+                .map(|(id, sequence)| SentHeader {
+                    id,
+                    sequence,
+                    sent_at,
+                    rejected: false,
+                }),
+        );
     }
 
     /// Processes an encrypted response from the server.
