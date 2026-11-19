@@ -15,6 +15,7 @@ LIBRARIES = {"tg": "", "tg-agent": "tg-agent", "tg-mtproto": "tg-mtproto"}
 
 
 def check_manifests(source: Path) -> None:
+    source = source.resolve()
     expected = {**LIBRARIES, **{name: f"vendor/{name}" for name in SDK}}
     for name, relative in expected.items():
         directory = source / relative
