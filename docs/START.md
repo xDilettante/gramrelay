@@ -40,6 +40,13 @@ Router::new()
 
 Подготовьте `TELEGRAM_BOT_TOKEN` в окружении процесса через секрет-хранилище или
 настройки хоста. Не вставляйте токен в исходник, аргументы запуска или журнал.
+В PowerShell 7.1 и новее его можно ввести с маскировкой в окне, где будет
+запущен бот. [Документация PowerShell](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/read-host?view=powershell-7.6#-maskinput)
+
+```powershell
+$env:TELEGRAM_BOT_TOKEN = Read-Host 'Токен тестового бота' -MaskInput
+```
+
 Для одного бота используйте один polling-процесс; webhook должен быть отключён
 осознанно владельцем. Пример не удаляет webhook и не сбрасывает updates.
 
