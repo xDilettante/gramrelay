@@ -130,7 +130,7 @@ ZIP. Рядом с ним должен лежать входной манифе�
 (
     set -eu
     test "$(uname -s):$(uname -m)" = Darwin:arm64
-    archive='/absolute/path/to/telegram-rust-0.1.0-alpha.1-94269339316a.zip'
+    archive='/absolute/path/to/your-closed-candidate.zip'
     manifest="${archive%.zip}.manifest.json"
     evidence='target/macos-local-evidence'
     python3 -c 'from tools.check_compat import ROOT, guard; guard(ROOT)'
