@@ -674,26 +674,24 @@ async fn timed_out_send_is_unknown_never_replayed_and_joins_backend() {
             self.0.store(true, Ordering::Release);
         }
     }
-    let client = fixture(
-        stored,
-        ClientOptions::default().request_timeout(Duration::from_millis(100)),
-        move |_, bytes| {
-            let calls = calls.clone();
-            let status = status.clone();
-            async move {
-                if let Some(reply) = self_reply(&bytes) {
-                    return Ok(reply);
-                }
-                assert_eq!(
-                    bytes[..4],
-                    tl::functions::messages::SendMessage::CONSTRUCTOR_ID.to_le_bytes()
-                );
-                calls.fetch_add(1, Ordering::SeqCst);
-                let _stop = Stop(status);
-                std::future::pending().await
+    let client = fixture(stored, ClientOptions::default(), move |_, bytes| {
+        let calls = calls.clone();
+        let status = status.clone();
+        async move {
+            if let Some(reply) = self_reply(&bytes) {
+                return Ok(reply);
             }
-        },
-    );
+            assert_eq!(
+                bytes[..4],
+                tl::functions::messages::SendMessage::CONSTRUCTOR_ID.to_le_bytes()
+            );
+            calls.fetch_add(1, Ordering::SeqCst);
+            let _stop = Stop(status);
+            // Let Tokio advance to the timeout once the write is in flight.
+            tokio::time::pause();
+            std::future::pending().await
+        }
+    });
     let account = client.account(expected());
     let peer = account
         .cached_peer(PeerId::user(42).unwrap())
@@ -709,6 +707,7 @@ async fn timed_out_send_is_unknown_never_replayed_and_joins_backend() {
         (ClientErrorKind::Timeout, Outcome::Unknown)
     );
     assert_eq!(writes.load(Ordering::SeqCst), 1);
+    tokio::time::resume();
     client.close().await.unwrap();
     assert!(stopped.load(Ordering::Acquire));
 }
