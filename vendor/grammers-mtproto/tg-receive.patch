@@ -144,7 +144,7 @@
  use grammers_crypto::MAX_PADDING_LEN;
  use grammers_tl_types::{self as tl, Cursor, Deserializable, Identifiable, Serializable};
  
-@@ -86,9 +87,13 @@
+@@ -86,11 +87,14 @@
          let seq_no = i32::deserialize(buf)?;
  
          let len = i32::deserialize(buf)?;
@@ -154,13 +154,16 @@
 +        }
          let len = len as usize;
 -        assert!(len < Message::MAX_BODY_SIZE);
+-        let mut body = vec![0; len];
+-        buf.read_exact(&mut body)?;
 +        if len >= Message::MAX_BODY_SIZE {
 +            return Err(tl::deserialize::Error::InvalidEncoding);
 +        }
-         let mut body = vec![0; len];
-         buf.read_exact(&mut body)?;
++        let body = buf.read_bytes(len)?;
  
-@@ -108,13 +113,6 @@
+         Ok(Message {
+             msg_id,
+@@ -108,13 +112,6 @@
  pub struct RpcResult {
      pub req_msg_id: i64,
      pub result: Vec<u8>,
@@ -174,7 +177,7 @@
  }
  
  impl Identifiable for RpcResult {
-@@ -174,7 +172,9 @@
+@@ -174,14 +171,13 @@
          }
  
          let len = i32::deserialize(buf)?;
@@ -183,9 +186,19 @@
 +            return Err(tl::deserialize::Error::InvalidEncoding);
 +        }
          let len = len as usize;
-         let mut messages = Vec::with_capacity(len.min(Self::MAXIMUM_LENGTH));
-         for _ in 0..len {
-@@ -221,15 +221,25 @@
+-        let mut messages = Vec::with_capacity(len.min(Self::MAXIMUM_LENGTH));
+-        for _ in 0..len {
+-            messages.push(Message::deserialize(buf)?);
+-        }
+-
+-        Ok(Self { messages })
++        Ok(Self {
++            messages: buf.read_vector(len)?,
++        })
+     }
+ }
+ 
+@@ -221,15 +217,25 @@
          Self { packed_data }
      }
  
@@ -218,7 +231,45 @@
      }
  }
  
-@@ -291,6 +301,9 @@
+@@ -260,6 +266,37 @@
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++
++    #[test]
++    fn container_storage_and_child_bodies_share_the_cursor_budget() {
++        let messages = [
++            Message {
++                msg_id: 1,
++                seq_no: 1,
++                body: vec![7; 4],
++            },
++            Message {
++                msg_id: 5,
++                seq_no: 1,
++                body: vec![8; 4],
++            },
++        ];
++        let mut bytes = MessageContainer::CONSTRUCTOR_ID.to_le_bytes().to_vec();
++        bytes.extend_from_slice(&2i32.to_le_bytes());
++        for child in &messages {
++            bytes.extend(child.to_bytes());
++        }
++        let needed = 2 * std::mem::size_of::<Message>() + 8;
++        let mut cursor = Cursor::with_budgets(&bytes, needed, 2);
++        let decoded = MessageContainer::deserialize(&mut cursor).unwrap();
++        assert_eq!(decoded.messages.len(), 2);
++        assert_eq!(decoded.messages[1].body, messages[1].body);
++        let mut short = Cursor::with_budgets(&bytes, needed - 1, 2);
++        assert!(matches!(
++            MessageContainer::deserialize(&mut short),
++            Err(tl::deserialize::Error::LimitExceeded)
++        ));
++    }
+ 
+     #[test]
+     fn gzip_decompress() {
+@@ -291,6 +328,9 @@
          let _msg_id = &rpc_result[4..12];
          let gzipped = &rpc_result[12..rpc_result.len()];
          let gzip = GzipPacked::from_bytes(gzipped).unwrap();
@@ -1646,15 +1697,16 @@
              Self::UnexpectedConstructor { id } => write!(f, "unexpected constructor: {id:08x}"),
              Self::DecryptionError(ref error) => write!(f, "failed to decrypt message: {error}"),
              Self::Transport(ref error) => {
-@@ -187,6 +229,7 @@
+@@ -187,6 +229,8 @@
          use tl::deserialize::Error as Err;
  
          match error {
 +            Err::InvalidEncoding => DeserializeError::InvalidEncoding,
++            Err::LimitExceeded => DeserializeError::LimitExceeded,
              Err::UnexpectedEof => DeserializeError::MessageBufferTooSmall,
              Err::UnexpectedConstructor { id } => DeserializeError::UnexpectedConstructor { id },
          }
-@@ -204,6 +247,12 @@
+@@ -204,6 +248,12 @@
  ///
  /// [Mobile Transport Protocol]: https://core.telegram.org/mtproto/description
  pub trait Mtp {
@@ -1667,7 +1719,7 @@
      /// Serializes one request to the input buffer.
      /// The same buffer should be used until `finalize` is called.
      ///
-@@ -230,6 +279,12 @@
+@@ -230,6 +280,12 @@
      /// This will either belong to the container (if used) or the last serialized message.
      fn finalize(&mut self, buffer: &mut DequeBuffer<u8>) -> Option<MsgId>;
  
@@ -1680,3 +1732,56 @@
      /// Deserializes a single incoming message payload into zero or more responses.
      fn deserialize(&mut self, payload: &mut [u8])
      -> Result<Vec<Deserialization>, DeserializeError>;
+--- upstream/src/mtp/plain.rs
++++ patched/src/mtp/plain.rs
+@@ -105,16 +105,18 @@
+         if len <= 0 {
+             return Err(DeserializeError::NegativeMessageLength { got: len });
+         }
+-        if (20 + len) as usize > payload.len() {
++        let len = len as usize;
++        let available = payload.len() - buf.pos();
++        if len > available {
+             return Err(DeserializeError::TooLongMessageLength {
+-                got: len as usize,
+-                max_length: payload.len() - 20,
++                got: len,
++                max_length: available,
+             });
+         }
+ 
+         Ok(vec![Deserialization::RpcResult(RpcResult {
+             msg_id: MsgId(0),
+-            body: payload[20..20 + len as usize].into(),
++            body: buf.read_bytes(len)?,
+         })])
+     }
+ }
+@@ -143,4 +145,27 @@
+         assert!(mtp.push(&mut buffer, REQUEST).is_some());
+         assert!(mtp.push(&mut buffer, REQUEST).is_none());
+     }
++
++    #[test]
++    fn plain_response_validates_length_before_copying_the_body() {
++        let lengths = [8i32, 4];
++        let bodies = lengths.map(|len| {
++            let mut payload = 0i64.to_le_bytes().to_vec();
++            payload.extend_from_slice(&1i64.to_le_bytes());
++            payload.extend_from_slice(&len.to_le_bytes());
++            payload.extend_from_slice(REQUEST);
++            Plain::new().deserialize(&mut payload)
++        });
++        let [short, complete] = bodies;
++        assert!(matches!(
++            short,
++            Err(DeserializeError::TooLongMessageLength {
++                got: 8,
++                max_length: 4
++            })
++        ));
++        assert!(
++            matches!(complete.unwrap().as_slice(), [Deserialization::RpcResult(result)] if result.body == REQUEST)
++        );
++    }
+ }

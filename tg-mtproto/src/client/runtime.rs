@@ -301,7 +301,7 @@ impl Context {
         }
         let mut cursor = tl::deserialize::Cursor::from_slice(&bytes);
         let value = R::Return::deserialize(&mut cursor)
-            .map_err(|_| error(ClientErrorKind::Decode, Outcome::Unknown))?;
+            .map_err(|cause| super::error::invocation(cause.into()))?;
         if cursor.pos() != bytes.len() {
             return Err(error(ClientErrorKind::Decode, Outcome::Unknown));
         }

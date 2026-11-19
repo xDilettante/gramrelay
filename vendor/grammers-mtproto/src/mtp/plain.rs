@@ -105,16 +105,18 @@ impl Mtp for Plain {
         if len <= 0 {
             return Err(DeserializeError::NegativeMessageLength { got: len });
         }
-        if (20 + len) as usize > payload.len() {
+        let len = len as usize;
+        let available = payload.len() - buf.pos();
+        if len > available {
             return Err(DeserializeError::TooLongMessageLength {
-                got: len as usize,
-                max_length: payload.len() - 20,
+                got: len,
+                max_length: available,
             });
         }
 
         Ok(vec![Deserialization::RpcResult(RpcResult {
             msg_id: MsgId(0),
-            body: payload[20..20 + len as usize].into(),
+            body: buf.read_bytes(len)?,
         })])
     }
 }
@@ -142,5 +144,28 @@ mod tests {
 
         assert!(mtp.push(&mut buffer, REQUEST).is_some());
         assert!(mtp.push(&mut buffer, REQUEST).is_none());
+    }
+
+    #[test]
+    fn plain_response_validates_length_before_copying_the_body() {
+        let lengths = [8i32, 4];
+        let bodies = lengths.map(|len| {
+            let mut payload = 0i64.to_le_bytes().to_vec();
+            payload.extend_from_slice(&1i64.to_le_bytes());
+            payload.extend_from_slice(&len.to_le_bytes());
+            payload.extend_from_slice(REQUEST);
+            Plain::new().deserialize(&mut payload)
+        });
+        let [short, complete] = bodies;
+        assert!(matches!(
+            short,
+            Err(DeserializeError::TooLongMessageLength {
+                got: 8,
+                max_length: 4
+            })
+        ));
+        assert!(
+            matches!(complete.unwrap().as_slice(), [Deserialization::RpcResult(result)] if result.body == REQUEST)
+        );
     }
 }

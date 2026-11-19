@@ -7,7 +7,7 @@ Published VCS commit `e61cf8585e1e9969ab81eda9fb4725a1500e2d86`.
 Original copyright headers retained; distributed under Apache-2.0.
 
 The local patch covers the manifest, authentication clock calculation,
-connection.rs, manual_tl.rs, mtp/encrypted.rs and mtp/mod.rs.
+connection.rs, manual_tl.rs, mtp/encrypted.rs, mtp/plain.rs and mtp/mod.rs.
 
 The manifest directly binds the sibling hardened TL package, without a registry
 fallback or root override requirement. This private source package is not a
@@ -72,8 +72,9 @@ redelivery and the higher-level recovery policy.
 
 The sender integration installs limits before InitConnection and after 404
 reconnection. Plain authorization handshake responses are checked by Sender
-before typed decoding. Limits constrain encoded/expanded bytes, not allocations
-made by arbitrary user-provided Rust deserializers. Whole-client lifecycle,
+before typed decoding. The TL cursor also accounts for plain and encrypted
+message bodies, containers and copied RPC results under its collection budgets.
+Host-provided deserializers control their own allocations. Whole-client lifecycle,
 identity, permissions and application acknowledgements are tg-mtproto concerns.
 
 Run source verification from the repository root:

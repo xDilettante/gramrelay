@@ -230,6 +230,7 @@ impl From<tl::deserialize::Error> for DeserializeError {
 
         match error {
             Err::InvalidEncoding => DeserializeError::InvalidEncoding,
+            Err::LimitExceeded => DeserializeError::LimitExceeded,
             Err::UnexpectedEof => DeserializeError::MessageBufferTooSmall,
             Err::UnexpectedConstructor { id } => DeserializeError::UnexpectedConstructor { id },
         }

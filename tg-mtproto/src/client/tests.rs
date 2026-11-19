@@ -236,6 +236,28 @@ async fn typed_raw_rpc_uses_the_pinned_wire_path_and_close_affects_every_clone()
 }
 
 #[tokio::test]
+async fn decoded_work_limit_surfaces_as_capacity_with_unknown_outcome() {
+    struct BarePeerList;
+    impl tl::Serializable for BarePeerList {
+        fn serialize(&self, sink: &mut impl FnMut(&[u8])) {
+            tl::functions::Ping { ping_id: 1 }.serialize(sink);
+        }
+    }
+    impl tl::RemoteCall for BarePeerList {
+        type Return = tl::RawVec<tl::types::InputPeerEmpty>;
+    }
+
+    let (_directory, session) = session().await;
+    let client = fixture(session, ClientOptions::default(), |_, _| async {
+        Ok(1_048_577_u32.to_le_bytes().to_vec())
+    });
+    let error = client.invoke(&BarePeerList).await.unwrap_err();
+    assert_eq!(error.kind(), ClientErrorKind::Capacity);
+    assert_eq!(error.outcome(), Outcome::Unknown);
+    client.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn timed_out_blocking_work_is_joined_without_stalling_session_heartbeat() {
     let directory = tempfile::tempdir().unwrap();
     let session = Session::open(

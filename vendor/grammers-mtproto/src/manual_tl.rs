@@ -94,8 +94,7 @@ impl Deserializable for Message {
         if len >= Message::MAX_BODY_SIZE {
             return Err(tl::deserialize::Error::InvalidEncoding);
         }
-        let mut body = vec![0; len];
-        buf.read_exact(&mut body)?;
+        let body = buf.read_bytes(len)?;
 
         Ok(Message {
             msg_id,
@@ -176,12 +175,9 @@ impl Deserializable for MessageContainer {
             return Err(tl::deserialize::Error::InvalidEncoding);
         }
         let len = len as usize;
-        let mut messages = Vec::with_capacity(len.min(Self::MAXIMUM_LENGTH));
-        for _ in 0..len {
-            messages.push(Message::deserialize(buf)?);
-        }
-
-        Ok(Self { messages })
+        Ok(Self {
+            messages: buf.read_vector(len)?,
+        })
     }
 }
 
@@ -270,6 +266,37 @@ impl Deserializable for GzipPacked {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn container_storage_and_child_bodies_share_the_cursor_budget() {
+        let messages = [
+            Message {
+                msg_id: 1,
+                seq_no: 1,
+                body: vec![7; 4],
+            },
+            Message {
+                msg_id: 5,
+                seq_no: 1,
+                body: vec![8; 4],
+            },
+        ];
+        let mut bytes = MessageContainer::CONSTRUCTOR_ID.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&2i32.to_le_bytes());
+        for child in &messages {
+            bytes.extend(child.to_bytes());
+        }
+        let needed = 2 * std::mem::size_of::<Message>() + 8;
+        let mut cursor = Cursor::with_budgets(&bytes, needed, 2);
+        let decoded = MessageContainer::deserialize(&mut cursor).unwrap();
+        assert_eq!(decoded.messages.len(), 2);
+        assert_eq!(decoded.messages[1].body, messages[1].body);
+        let mut short = Cursor::with_budgets(&bytes, needed - 1, 2);
+        assert!(matches!(
+            MessageContainer::deserialize(&mut short),
+            Err(tl::deserialize::Error::LimitExceeded)
+        ));
+    }
 
     #[test]
     fn gzip_decompress() {
