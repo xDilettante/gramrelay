@@ -99,6 +99,73 @@ Audit job проверяет основной lock и по одному неза
 дублированный набор не принимается. Локальные actionlint и проверка Python-шага
 на шести входах/пропуске/дубликате/ошибке аудитора прошли; это не запуск CI.
 
+## Локальная приёмка закрытого ZIP на Apple Silicon
+
+Нужен Mac с Apple Silicon, Xcode Command Line Tools, Python 3.11+, Git и rustup.
+Сверьте SHA-256 закрытого ZIP с [записью кандидата](../tasks/todo.md) и распакуйте
+его в новый каталог на Mac. Запустите команды из распакованного корня в нативной
+оболочке. Укажите абсолютный путь к исходному ZIP. Рядом с ним должен лежать
+входной манифест с тем же базовым именем.
+
+```bash
+(
+    set -eu
+    test "$(uname -s):$(uname -m)" = Darwin:arm64
+    archive='/absolute/path/to/telegram-rust-0.1.0-alpha.1-94269339316a.zip'
+    manifest="${archive%.zip}.manifest.json"
+    evidence='target/macos-local-evidence'
+    python3 -c 'from tools.check_compat import ROOT, guard; guard(ROOT)'
+    mkdir -p "$evidence"
+    verify_source() {
+        python3 - "$archive" "$manifest" <<'PY'
+import stat
+import sys
+from pathlib import Path
+from tools.source_bundle import MAX_ARCHIVE, MAX_MANIFEST, read_bounded, verify_bundle
+
+archive, manifest = map(Path, sys.argv[1:])
+document, files = verify_bundle(read_bounded(archive, MAX_ARCHIVE), read_bounded(manifest, MAX_MANIFEST))
+for name, (data, mode) in files.items():
+    path = Path(name)
+    if path.is_symlink() or path.read_bytes() != data or stat.S_IMODE(path.stat().st_mode) != mode:
+        raise SystemExit(f"Source differs from archive: {name}")
+print(document["commit"], document["archive_sha256"], len(files))
+PY
+    }
+    verify_source > "$evidence/source-before.log"
+    rustup toolchain install 1.89.0 --profile minimal --no-self-update
+    rustup toolchain install 1.100.0 --profile minimal --component rustfmt,clippy --no-self-update
+    cargo +1.100.0 fetch --locked
+    export CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=4
+    python3 -m unittest discover -s tools/tests -v > "$evidence/python.log" 2>&1
+    python3 tools/schema.py check > "$evidence/schema.log" 2>&1
+    for version in 1.89.0 1.100.0; do
+        rustup run "$version" rustc -Vv > "$evidence/rustc-$version.log"
+        grep -Fx 'host: aarch64-apple-darwin' "$evidence/rustc-$version.log"
+        python3 tools/check_compat.py --toolchain "$version"
+        if [ "$version" = 1.100.0 ]; then
+            cargo +1.100.0 fmt --all -- --check > "$evidence/fmt.log" 2>&1
+            cargo +1.100.0 clippy --locked --workspace --all-features --all-targets \
+                --target-dir "target/compat-$version" -- -D warnings > "$evidence/clippy.log" 2>&1
+        fi
+        python3 -c 'from tools.check_compat import ROOT, guard; guard(ROOT)'
+        cargo "+$version" clean --target-dir "target/compat-$version" --profile dev
+    done
+    RUSTUP_TOOLCHAIN=1.100.0 python3 tools/source_bundle.py check "$archive" \
+        --manifest "$manifest" --consumer --target-dir target/macos-relocated-consumer \
+        > "$evidence/consumer.log" 2>&1
+    verify_source > "$evidence/source-after.log"
+    cmp "$evidence/source-before.log" "$evidence/source-after.log"
+    python3 -c 'from tools.check_compat import ROOT, guard; guard(ROOT)'
+    cargo +1.100.0 clean --target-dir target/macos-relocated-consumer --profile dev
+)
+```
+
+Сохраните `macos-local-evidence`, оба каталога `compat-*-evidence` и
+`macos-relocated-consumer-evidence` с `consumer.Cargo.lock`. Для каждой версии Rust
+ожидаются 28 пройденных стадий, а в `rustc -Vv` — host `aarch64-apple-darwin`.
+Отдельный lock потребителя можно проверить аудитом на доверенном компьютере.
+
 MSRV относится к проверенному исходному кандидату и его Cargo.lock. Новый
 compatible upstream-релиз может потребовать более новый Rust; Cargo учитывает
 rust-version при разрешении, но независимый внешний lock также нужно проверять.
