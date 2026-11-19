@@ -3,13 +3,19 @@
 GramRelay — SDK для Telegram на Rust. Чтобы написать бота, начните с
 типизированного клиента Bot API в крейте `tg`.
 
+Исходники доступны для ознакомления. На собственный код GramRelay
+распространяется уведомление «все права защищены». [Условия](LICENSE)
+
 ## Первый бот на Bot API
 
 [Пошаговое руководство](docs/START.md) показывает `/start`, кнопку и ответ на
-callback. Эту команду можно запустить из корня checkout с подготовленным
-кэшем Cargo. Она проверяет обработчики в памяти с синтетическими данными.
+callback. Получите полный checkout и подготовьте кэш Cargo. Последняя команда
+проверяет обработчики в памяти с синтетическими данными.
 
 ```powershell
+git clone https://github.com/xDilettante/gramrelay.git
+cd gramrelay
+cargo fetch --locked
 cargo run --locked --offline -p tg --example command_callback --features test-kit
 ```
 
@@ -361,4 +367,4 @@ cargo run -p tg --example polling
 
 Текущая версия пакетов — `0.1.0-alpha.1`. Минимальная версия Rust — 1.89.
 [Подключение из исходников](docs/INSTALL-SOURCE.md) · [Архитектура](docs/ARCHITECTURE.md) ·
-[Условия закрытой поставки](docs/PRIVATE-DISTRIBUTION.md) · [Лицензия](LICENSE)
+[Упаковка для частного реестра](docs/PRIVATE-DISTRIBUTION.md) · [Лицензия](LICENSE)

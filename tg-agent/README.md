@@ -284,7 +284,7 @@ cargo run --locked --offline -p tg-agent --example update_store
 ## Управляемый рантайм
 
 ```toml
-tg-agent = { path = "C:/dev/Rust/TelegramRust/tg-agent", features = ["bot"] }
+tg-agent = { path = "../gramrelay/tg-agent", features = ["bot"] }
 ```
 
 Опция bot открывает tg_agent::runtime::{PollOptions, ConsumerOptions, RuntimeError} и методы UpdateFeed::run_polling_until / run_consumer_until. По умолчанию tg-agent включает только хранилище.
@@ -307,8 +307,8 @@ cargo run --locked --offline -p tg-agent --features bot --example durable_bot
 
 ```toml
 [dependencies]
-tg = { path = "C:/dev/Rust/TelegramRust" }
-tg-agent = { path = "C:/dev/Rust/TelegramRust/tg-agent", features = ["webhook"] }
+tg = { path = "../gramrelay" }
+tg-agent = { path = "../gramrelay/tg-agent", features = ["webhook"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 ```
 

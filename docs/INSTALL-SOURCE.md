@@ -1,20 +1,21 @@
 # Подключение alpha из исходников
 
-Используйте полный checkout Telegram Rust: основной crate, tg-agent, tg-mtproto
+Используйте полный checkout GramRelay: основной crate, tg-agent, tg-mtproto
 и каталог vendor поставляются вместе. Обычный проект может подключить нужные
 компоненты без таблицы patch и без копирования внутренних настроек SDK:
 
 ```toml
 [dependencies]
-tg = { path = "../TelegramRust" }
-tg-agent = { path = "../TelegramRust/tg-agent", features = ["mcp", "mtproto"] }
-tg-mtproto = { path = "../TelegramRust/tg-mtproto" }
+tg = { path = "../gramrelay" }
+tg-agent = { path = "../gramrelay/tg-agent", features = ["mcp", "mtproto"] }
+tg-mtproto = { path = "../gramrelay/tg-mtproto" }
 ```
 
 Каждый компонент подключается независимо. Обычному Bot API-приложению достаточно
 tg. Прямые зависимости сохраняют проверенные исправления SDK и при подключении
 библиотек из другого workspace. Для Git-зависимости укажите URL полного
-репозитория и полный rev нужного коммита у каждого выбранного компонента.
+репозитория GramRelay и полный `rev` нужного коммита у каждого выбранного
+компонента. [Репозиторий на GitHub](https://github.com/xDilettante/gramrelay)
 
 Проверка собственного checkout, без настоящего Telegram:
 
@@ -91,10 +92,9 @@ python tools/source_bundle.py check <archive.zip> --manifest <archive.manifest.j
 Это подготовка alpha из исходников. Реестровые .crate-кандидаты остаются в Q3.
 Для реестра нужны отдельные идентификаторы
 исправленных SDK либо проверенные upstream-релизы, окончательные имена,
-метаданные, а также проверка нормализованных архивов. Собственный код остаётся
-[закрытым](PRIVATE-DISTRIBUTION.md); публичная лицензия ему не предоставлена.
-publish=false и зависимости без version предотвращают случайную упаковку,
-которая потеряет исправления. Публикация требует отдельного поручения.
+метаданные, а также проверка нормализованных архивов. Условия доступа к
+собственному коду закреплены в [LICENSE](../LICENSE). `publish = false` и
+зависимости без `version` предотвращают случайную упаковку с потерей исправлений.
 
 [Контракт и команды](../SPEC-source-distribution.md),
 [проверка исходников grammers](../tools/verify_grammers.py),
