@@ -1,10 +1,13 @@
 # GramRelay
 
-![Обложка GramRelay — Rust SDK for Telegram](docs/images/gramrelay-cover-telegram.jpg)
+![GramRelay на Rust для Telegram — Bot API, MTProto и CLI/MCP](docs/images/gramrelay-cover-stack.jpg)
 
 GramRelay — независимый SDK для Telegram на Rust. Чтобы написать бота, начните с
 типизированного клиента Bot API в крейте `tg`.
-[Документация Telegram Bot API](https://core.telegram.org/bots/api)
+
+[Bot API](docs/START.md) · [MTProto](docs/MTPROTO.md) · [CLI/MCP](docs/AGENT-INDEX.md)
+
+[Документация Telegram Bot API](https://core.telegram.org/bots/api) · [Сайт Rust](https://rust-lang.org/)
 
 Исходники доступны для ознакомления. На собственный код GramRelay
 распространяется уведомление «все права защищены». [Условия](LICENSE)
@@ -23,8 +26,7 @@ cargo run --locked --offline -p tg --example command_callback --features test-ki
 ```
 
 [Рецепты Bot API](docs/RECIPES.md) помогают перейти к файлам, обработке ошибок
-и работе с обновлениями. Для отдельных задач доступны
-[руководство MTProto](docs/MTPROTO.md) и [указатель CLI/MCP](docs/AGENT-INDEX.md).
+и работе с обновлениями.
 
 ## Подключение
 
