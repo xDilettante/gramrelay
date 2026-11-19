@@ -19,6 +19,7 @@ class ExternalGraph(unittest.TestCase):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(ROOT / relative / "Cargo.toml", destination)
             check_manifests(source)
+            check_manifests(source / "tg-agent" / "..")
             path = source / "tg-agent/Cargo.toml"
             original = path.read_text()
             for modified in (
