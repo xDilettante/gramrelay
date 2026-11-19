@@ -411,6 +411,8 @@ backup rollback and copied credentials cannot be prevented by a per-file owner
 lease. Zeroization covers owned key/plaintext buffers on a best-effort basis;
 the runtime, operating system and upstream copies are outside that guarantee.
 
+## Receive updates
+
 Claim one lazy receiver with `account.updates(UpdateMode::Resume)?`. With no
 acknowledged baseline, Resume returns a durable MissingBaseline gap. An initial
 `UpdateMode::StartNow` explicitly chooses the current server state; that empty
