@@ -5,6 +5,8 @@
 GramRelay — независимый SDK для Telegram на Rust. Чтобы написать бота, начните с
 типизированного клиента Bot API в крейте `tg`.
 
+[![Релиз v0.1.0-alpha.1](https://img.shields.io/badge/release-v0.1.0--alpha.1-blue)](https://github.com/xDilettante/gramrelay/releases/tag/v0.1.0-alpha.1) · [Скачать проверенный ZIP с исходниками](https://github.com/xDilettante/gramrelay/releases/download/v0.1.0-alpha.1/gramrelay-v0.1.0-alpha.1-source.zip)
+
 [Bot API](docs/START.md) · [MTProto](docs/MTPROTO.md) · [CLI/MCP](docs/AGENT-INDEX.md)
 
 [Документация Telegram Bot API](https://core.telegram.org/bots/api) · [Сайт Rust](https://rust-lang.org/)
@@ -172,109 +174,7 @@ InputFile::bytes поддерживает уже имеющийся буфер. 
 
 | Состояние ошибки | Значение |
 |---|---|
-| NotSent | Запрос не передан HTTP-клиенту: локальная валидация, ошибка подготовки файла, перегрузка или deadline до dispatch |
-| Rejected | Получен корректный однозначный отказ Bot API |
-| Unknown | Эффект мог произойти: тайм-аут после dispatch, транспортный сбой, повреждённый ответ, 5xx или превышение лимита ответа |
-
-```rust,no_run
-use tg::{Bot, ChatId, EffectOutcome};
-
-async fn example(bot: &Bot, chat: ChatId) -> tg::Result<()> {
-    match bot.send_message(chat, "Отчёт").await {
-        Ok(sent) => println!("message_id={}", i64::from(sent.message_id)),
-        Err(error) if error.outcome() == EffectOutcome::Unknown => {
-            // Сохранить неопределённую попытку в приложении; не отправлять заново вслепую.
-            return Err(error);
-        }
-        Err(error) => return Err(error),
-    }
-    Ok(())
-}
-```
-
-retry_after и migrate_to_chat_id доступны через Error. Без RetryPolicy они не запускают повтор; миграция никогда не меняет адресата автоматически. Ошибки сохраняют категорию и числовые коды, но не содержат сырых URL, текстов запросов, серверных descriptions и цепочек ошибок транспорта с токеном.
-
-Внешняя отмена future не возвращает Error и не отменяет уже выполненное действие Telegram. Если future уже выполнялась, приложение должно считать её результат неизвестным. Постоянный журнал операций, подавление повторных бизнес-действий и гарантия exactly-once в этот прототип не входят.
-
-## Настройки
-
-RichText собирает entities без HTML-экранирования переменных и считает UTF-16 offsets:
-
-```rust
-use tg::{EntityKind, RichText};
-let text = RichText::new("Отчёт: ")
-    .append(RichText::styled("готов 🦀", EntityKind::Bold)?);
-// bot.send_message(chat, text).await?;
-# Ok::<(), tg::Error>(())
-```
-
-entity(range, kind) принимает байтовый диапазон Rust-строки; try_from_entities проверяет готовые UTF-16 spans. Helper проверяет границы, вложенность и metadata; его Debug скрывает текст. text()/entities()/into_parts() позволяют использовать результат в api::methods. Для явной разметки есть parse_mode(ParseMode::Html/MarkdownV2/Markdown); смешивание parse_mode и entities даёт локальную ошибку. Длину отрисованной разметки проверяет Telegram. Это отдельный helper от дерева api::types::RichText для sendRichMessage.
-
-on_message_event(MessageEvent, handler) подключает business/edited/channel/guest-сообщения явно; polling-подписки задаются отдельно. ctx.reply сохраняет chat/thread/business/direct-message topic и эфемерного получателя. Для callback есть reply() с проверкой доступности сообщения и ephemeral_reply() по ID callback; answer() вызывается отдельно. Guest-сообщения требуют answer_guest(). Ошибки контекста не превращаются в обычную отправку в другой чат. Короткоживущие ephemeral ID проходят проверку 15-секундного окна по UTC-часам компьютера перед отправкой; доставка остаётся решением Telegram.
-
-ctx.reply_document(InputFile::path(...)) сохраняет тот же контекст для документа. У callback также есть reply_document() и ephemeral_reply_document(). Файл открывается после проверки контекста при await; оставшееся время ephemeral-ответа ограничивает подготовку, upload и чтение ответа.
-
-Bot::builder(token) поддерживает:
-
-| Настройка | Значение по умолчанию |
-|---|---|
-| timeout | 30 секунд на подготовку, upload и чтение ответа |
-| max_upload_bytes | 50 000 000 байт суммарно для новых файлов запроса |
-| max_download_bytes | 20 000 000 байт на скачивание |
-| max_attachments | 50 файлов на запрос |
-| max_response_bytes | 1 MiB, проверяется также без Content-Length |
-| max_in_flight | 32; превышение возвращает Capacity без очереди |
-| api_url | https://api.telegram.org/ |
-| redirects и повторы | Отключены |
-| системные и environment proxy | Отключены |
-
-Это начальные настройки прототипа, а не результаты нагрузочного подбора. Локальные лимиты не гарантируют принятие запроса сервером Telegram. TLS проверяет сертификаты. Переопределение api_url — доверенная настройка; HTTP разрешается отдельным флагом только для literal loopback IP в mock-тестах. Не включайте подробное wire logging транспорта с настоящим токеном.
-
-## Закреплённая схема API
-
-В schema/bot-api.json сохранена структура Bot API 10.4: 193 метода, 425 типов и SHA-256 официального источника. Все методы доступны через bot.api(), структуры запросов — в api::methods, полные wire-типы — в api::types, каталог — в api::catalog. Корневые Message/Update/User/Chat и результаты удобных методов используют эти же полные типы. Необязательные объекты и варианты union используют Box для ограничения размера значений; конструкторы, setters и From принимают обычные значения. Изменения API прототипа перечислены в [руководстве миграции](docs/MIGRATION.md).
-
-```rust
-use tg::{Bot, ChatId, api::methods};
-
-async fn full_api(bot: &Bot) -> tg::Result<()> {
-    let sent = bot.api().send_message("Привет!".into())
-        .chat_id(ChatId::from(123456789).into())
-        .protect_content(true)
-        .await?;
-    let request = methods::GetChat::new(sent.chat.id.into());
-    bot.call(request).await?;
-    Ok(())
-}
-```
-
-Сборка запроса не отправляет его. Оба способа используют тот же транспорт, ограничения и семантику Unknown. schema/method-policy.json закрепляет эффекты всех методов за точным хешем схемы; метаданные не предоставляют агенту разрешений. Возвращаемые токены и поля с credentials используют SecretString: Debug скрыт, чтение требует expose_secret(). Сериализация SecretString намеренно сохраняет значение для отправки в API.
-
-Wire InputFile — строковая ссылка на file ID, URL или attach://name. Новые файлы привязываются к сгенерированному запросу через attach; пути открываются только при await:
-
-```rust
-use tg::{Bot, ChatId, InputFile};
-
-async fn upload(bot: &Bot) -> tg::Result<()> {
-    bot.api().send_photo("attach://image".into())
-        .chat_id(ChatId::from(123456789).into())
-        .attach("image", InputFile::path("photo.jpg"))
-        .await?;
-    Ok(())
-}
-```
-
-Это работает и для вложенных media group и rich messages. Имя привязки содержит до 64 ASCII-букв/цифр/подчёркиваний, начинается с буквы и отличается от имён параметров. Лимит max_attachments по умолчанию равен 50; лишние, повторные и отсутствующие привязки отклоняются до отправки. Общий размер ограничен max_upload_bytes. Ссылки распознаются только в типизированных файловых полях; обычный текст attach://… остаётся текстом. String-поля Telegram с файловой семантикой закреплены в schema/file-policy.json. Существующий file ID указывается прямо в wire-параметре, не через attach.
-
-Скачивание использует File из getFile:
-
-```rust
-let file = bot.api().get_file(file_id).await?;
-let bytes = bot.download_file(&file).max_bytes(1_000_000).bytes().await?;
-// Для потока: bot.download_file(&file).to_writer(&mut writer).await?;
-```
-
-max_bytes только уменьшает общий max_download_bytes. Проверяются заявленный размер и фактически прочитанные chunks. Endpoint строится под доверенным api_url; некорректные пути не становятся URL или локальными файлами. to_writer не создаёт/не закрывает/не flush-ит назначение; при ошибке или отмене в нём может остаться префикс. Для bytes частичный успешный результат не возвращается. Автоматических повторов нет.
+| NotSent | Запрос не передан HTTP-клиенту: локальная валидация, ошибка подготовки файла, перегрузка или deadline до …5415 tokens truncated…0438 фактически прочитанные chunks. Endpoint строится под доверенным api_url; некорректные пути не становятся URL или локальными файлами. to_writer не создаёт/не закрывает/не flush-ит назначение; при ошибке или отмене в нём может остаться префикс. Для bytes частичный успешный результат не возвращается. Автоматических повторов нет.
 
 Проверенные чтения можно повторять явно:
 
