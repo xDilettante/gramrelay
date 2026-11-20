@@ -2,10 +2,11 @@
 
 ![GramRelay на Rust для Telegram — Bot API, MTProto и CLI/MCP](docs/images/gramrelay-cover-isometric.jpg)
 
-GramRelay — независимый SDK для Telegram на Rust. Чтобы написать бота, начните с
-типизированного клиента Bot API в крейте `tg`.
+GramRelay — независимый SDK для Telegram на Rust. Чтобы написать бота, начните
+с крейта `tg`. Его типизированный Rust-клиент поддерживает все **193 метода** и
+**425 типов** Bot API 10.4. Методы доступны через `bot.api()`.
 
-[![Релиз v0.1.0-alpha.1](https://img.shields.io/badge/release-v0.1.0--alpha.1-blue)](https://github.com/xDilettante/gramrelay/releases/tag/v0.1.0-alpha.1) [![Статус GitHub Actions](https://github.com/xDilettante/gramrelay/actions/workflows/compatibility.yml/badge.svg?branch=main)](https://github.com/xDilettante/gramrelay/actions/workflows/compatibility.yml) [![Минимальная версия Rust 1.89.0](https://img.shields.io/badge/Rust_MSRV-1.89.0-dea584?logo=rust)](Cargo.toml) · [История изменений](CHANGELOG.md)
+[![Релиз v0.1.0-alpha.1](https://img.shields.io/badge/release-v0.1.0--alpha.1-blue)](https://github.com/xDilettante/gramrelay/releases/tag/v0.1.0-alpha.1) [![Bot API 10.4 — 100%](https://img.shields.io/badge/Bot_API_10.4-100%25-2CA5E0?logo=telegram&logoColor=white)](#закреплённая-схема-api) [![Статус GitHub Actions](https://github.com/xDilettante/gramrelay/actions/workflows/compatibility.yml/badge.svg?branch=main)](https://github.com/xDilettante/gramrelay/actions/workflows/compatibility.yml) [![Минимальная версия Rust 1.89.0](https://img.shields.io/badge/Rust_MSRV-1.89.0-dea584?logo=rust)](Cargo.toml) · [История изменений](CHANGELOG.md)
 
 [Скачать проверенный ZIP с исходниками](https://github.com/xDilettante/gramrelay/releases/download/v0.1.0-alpha.1/gramrelay-v0.1.0-alpha.1-source.zip)
 
@@ -236,7 +237,7 @@ Bot::builder(token) поддерживает:
 
 ## Закреплённая схема API
 
-В schema/bot-api.json сохранена структура Bot API 10.4: 193 метода, 425 типов и SHA-256 официального источника. Все методы доступны через bot.api(), структуры запросов — в api::methods, полные wire-типы — в api::types, каталог — в api::catalog. Корневые Message/Update/User/Chat и результаты удобных методов используют эти же полные типы. Необязательные объекты и варианты union используют Box для ограничения размера значений; конструкторы, setters и From принимают обычные значения. Изменения API прототипа перечислены в [руководстве миграции](docs/MIGRATION.md).
+В schema/bot-api.json сохранены структура Bot API 10.4 и SHA-256 официального источника. Структуры запросов — в api::methods, полные wire-типы — в api::types, каталог — в api::catalog. Корневые Message/Update/User/Chat и результаты удобных методов используют эти же полные типы. Необязательные объекты и варианты union используют Box для ограничения размера значений; конструкторы, setters и From принимают обычные значения. Изменения API прототипа перечислены в [руководстве миграции](docs/MIGRATION.md).
 
 ```rust
 use tg::{Bot, ChatId, api::methods};
