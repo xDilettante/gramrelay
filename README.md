@@ -5,7 +5,9 @@
 GramRelay — независимый SDK для Telegram на Rust. Чтобы написать бота, начните с
 типизированного клиента Bot API в крейте `tg`.
 
-[![Релиз v0.1.0-alpha.1](https://img.shields.io/badge/release-v0.1.0--alpha.1-blue)](https://github.com/xDilettante/gramrelay/releases/tag/v0.1.0-alpha.1) · [Скачать проверенный ZIP с исходниками](https://github.com/xDilettante/gramrelay/releases/download/v0.1.0-alpha.1/gramrelay-v0.1.0-alpha.1-source.zip)
+[![Релиз v0.1.0-alpha.1](https://img.shields.io/badge/release-v0.1.0--alpha.1-blue)](https://github.com/xDilettante/gramrelay/releases/tag/v0.1.0-alpha.1) [![Статус GitHub Actions](https://github.com/xDilettante/gramrelay/actions/workflows/compatibility.yml/badge.svg?branch=main)](https://github.com/xDilettante/gramrelay/actions/workflows/compatibility.yml) [![Минимальная версия Rust 1.89.0](https://img.shields.io/badge/Rust_MSRV-1.89.0-dea584?logo=rust)](Cargo.toml)
+
+[Скачать проверенный ZIP с исходниками](https://github.com/xDilettante/gramrelay/releases/download/v0.1.0-alpha.1/gramrelay-v0.1.0-alpha.1-source.zip)
 
 [Bot API](docs/START.md) · [MTProto](docs/MTPROTO.md) · [CLI/MCP](docs/AGENT-INDEX.md)
 
