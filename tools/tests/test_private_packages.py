@@ -188,8 +188,9 @@ class PrivatePackages(unittest.TestCase):
             root = fixture(Path(temporary) / "source")
             versions = packages.stage_manifests(root, "file:///local/index")
             directory = root / "tg-agent"
-            manifest = ('[package]\nname="tg-agent"\nversion="0.1.0-alpha.1"\npublish=false\nlicense-file="LICENSE"\n'
-                        '[dependencies.rmcp]\nversion="=3.11.0-tg.1"\nregistry-index="file:///local/index"\n')
+            manifest = (f'[package]\nname="tg-agent"\nversion="{versions["tg-agent"]}"\n'
+                        'publish=false\nlicense-file="LICENSE"\n'
+                        f'[dependencies.rmcp]\nversion="={versions["rmcp"]}"\nregistry-index="file:///local/index"\n')
             output = Path(temporary) / "agent.crate"
             # Keep this synthetic archive's selected manifest consistent with its
             # source; actual full-manifest semantics are covered by the rehearsal.
