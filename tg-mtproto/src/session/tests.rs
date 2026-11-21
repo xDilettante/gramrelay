@@ -712,17 +712,8 @@ async fn idle_heartbeat_renews_ownership_beyond_the_original_expiry() {
 async fn an_expired_owner_cannot_overwrite_or_release_a_successor() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("session.sqlite");
-    let session = open(
-        &path,
-        SessionOptions::default().lease(Duration::from_millis(150)),
-    )
-    .await;
+    let session = open(&path, SessionOptions::default()).await;
     let connection = rusqlite::Connection::open(&path).unwrap();
-    let until: i64 = connection
-        .query_row("SELECT lease_until_ms FROM mtproto_session", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
     let worker = session.clone();
     let (entered, waiting) = tokio::sync::oneshot::channel();
     let (release, blocked) = std::sync::mpsc::channel();
@@ -741,14 +732,22 @@ async fn an_expired_owner_cannot_overwrite_or_release_a_successor() {
             .await
     });
     waiting.await.unwrap();
-    tokio::time::sleep(Duration::from_millis(
-        (until - now().unwrap()).max(0) as u64 + 15,
-    ))
-    .await;
-    let successor = open(&path, SessionOptions::default()).await;
-    let owner: Vec<u8> = connection
-        .query_row("SELECT owner FROM mtproto_session", [], |row| row.get(0))
+    // Expire the persisted lease while the old worker is blocked before its write.
+    connection
+        .execute(
+            "UPDATE mtproto_session SET lease_until_ms = 0 WHERE id = 1",
+            [],
+        )
         .unwrap();
+    let successor = open(&path, SessionOptions::default()).await;
+    let owner_and_revision = || {
+        connection
+            .query_row("SELECT owner, revision FROM mtproto_session", [], |row| {
+                Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?))
+            })
+            .unwrap()
+    };
+    let before = owner_and_revision();
     release.send(()).unwrap();
     assert_eq!(
         old.await.unwrap().unwrap_err().kind(),
@@ -758,10 +757,7 @@ async fn an_expired_owner_cannot_overwrite_or_release_a_successor() {
         session.close().await.unwrap_err().kind(),
         SessionErrorKind::Fenced
     );
-    let current: Vec<u8> = connection
-        .query_row("SELECT owner FROM mtproto_session", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(owner, current);
+    assert_eq!(before, owner_and_revision());
     assert!(successor.remembered_account().is_ok());
     drop(connection);
     successor.close().await.unwrap();
