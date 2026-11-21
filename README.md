@@ -85,11 +85,15 @@ async fn example(bot: &Bot, received_json: &str) -> Result<(), Box<dyn std::erro
 
 Хост проверяет право пользователя выполнять прикладное действие. Callback data не является доказательством такого права. Update можно передать вручную в Router::dispatch или получать через управляемый polling. Неизвестные поля, в том числе внутри Message, сохраняются; повреждённые известные объекты и два известных вида события в одном Update отклоняет декодер. Webhook подключается отдельно; доступны управляемые режимы с памятью и устойчивым SQLite-feed.
 
+В `InlineKeyboardMarkup::row` можно сочетать `InlineKeyboardButton::callback`, `url` и `copy_text`. Метод `.style(ButtonStyle::Primary)` задаёт стиль. Разметку из `tg::api::types` можно передать в `reply_markup(markup.into())`.
+
 ## Webhook-адаптер
 
 Опция webhook включает tg::webhook::{WebhookSecret, WebhookIngress, WebhookOptions, WebhookSink}. Ingress проверяет единственный X-Telegram-Bot-Api-Secret-Token до чтения тела, резервирует квоту и разбирает полный Update. Пользовательский WebhookSink получает событие и исходный deadline; его успешный результат должен означать обработку или commit, а не запись в очередь памяти. Нельзя начинать новый deadline после ожидания тела/очереди.
 
 WebhookIngress::router() встраивается в существующий Axum/TLS-сервер хоста. serve_until(listener, stop) запускает ограниченный HTTP/1-сервер: по умолчанию 64 соединения, 5 секунд на заголовки и 60 секунд жизни соединения. Он слушает переданный loopback listener; для доверенного TLS reverse proxy с другим адресом нужен явный trusted_proxy(true). По умолчанию путь /telegram, тело 1 MiB, 16 принятых запросов и 16 MiB резервирования, общий request_timeout 30 секунд. Остановка закрывает listener и admission, завершает принятые запросы в shutdown_timeout (30 секунд), затем отменяет и дожидается своих connection tasks. Удалённый webhook автоматически не устанавливается и не удаляется.
+
+Управляемый сервер продолжает принимать соединения после временных ошибок `accept`. При нехватке дескрипторов или буферов следующий `accept` откладывается на 100 мс. Отмена прерывает это ожидание.
 
 Этот низкоуровневый слой не проверяет getMe и не занимает источник: хост обязан проверить личность, удерживать Bot::claim_update_source(), координировать источник между процессами и выбрать дедупликацию. Bot::webhook объединяет процессное владение, Router и дедупликацию в памяти. UpdateFeed::webhook в tg-agent объединяет HTTP-адаптер с SQLite и возобновляемым source lease. Оба режима используют входящую диагностику tracing/metrics; разрешения на чтение и действия остаются частью A1.
 
@@ -144,11 +148,15 @@ async fn main() -> tg::Result<()> {
 
 Router::with_state передаёт обработчикам явное общее состояние. Доступны command, on_message, callback, on_callback и on_update; выполняется первый совпавший маршрут. Ответ MessageContext::reply сохраняет chat_id, message_id, тему и business connection.
 
+`Router::callback_prefix("chart:", handler)` принимает callback с параметрами, например `chart:BTC`. Для тех же данных точный маршрут `callback(...)` имеет приоритет над префиксом. Остальные маршруты работают в порядке регистрации.
+
 Polling проверяет getMe и getWebhookInfo, не удаляет существующий webhook и разрешает один управляемый poller на bot ID внутри процесса. Ручные вызовы get_updates и другие процессы требуют координации приложения.
 
 По умолчанию пачка содержит до 100 событий, одновременно работают до 16 групп чатов; внутри чата порядок последовательный. При неизвестной области события вся пачка обрабатывается последовательно. Следующий offset отправляется только после успешного завершения всей пачки. Ошибка, паника или тайм-аут обработчика останавливает polling без подтверждения этой пачки. После перезапуска уже выполненные действия могут повториться: постоянный журнал ещё не интегрирован.
 
-run_polling обрабатывает Ctrl-C и завершает принятую работу в пределах shutdown timeout. Для встраивания в приложение используйте run_polling_until с PollingOptions и CancellationToken: этот вариант не регистрирует обработчик сигналов. Серверный poll_timeout должен быть меньше общего deadline клиента. Первые значения по умолчанию — 20 секунд для long polling и 30 секунд для обработчика/остановки. Транспортные ошибки возвращаются вызывающему коду; автоматического перезапуска пока нет.
+`run_polling` обрабатывает Ctrl-C и завершает принятые задачи в пределах `shutdown_timeout`. Для встраивания в приложение используйте `run_polling_until` с `PollingOptions` и `CancellationToken`. Серверный `poll_timeout` должен быть меньше общего тайм-аута клиента. Значения по умолчанию — 20 секунд для long polling и по 30 секунд на обработчик и завершение работы.
+
+По умолчанию временная ошибка завершает polling. Передайте `PollingOptions::default().reconnect(PollingReconnect::default())` в `run_polling_until`, чтобы повторять `getUpdates` с тем же offset после временного сбоя. Политика учитывает `retry_after`, прерывает ожидание при отмене и завершает polling на десятом последовательном сбое. `max_consecutive_errors(None)` снимает этот лимит. Ошибки стартовых проверок и ответы сверх лимита тела завершают polling сразу. С `tracing` задержка видна в событии `polling_reconnect`.
 
 ## Файлы
 
@@ -197,23 +205,35 @@ async fn example(bot: &Bot, chat: ChatId) -> tg::Result<()> {
 }
 ```
 
-retry_after и migrate_to_chat_id доступны через Error. Без RetryPolicy они не запускают повтор; миграция никогда не меняет адресата автоматически. Ошибки сохраняют категорию и числовые коды, но не содержат сырых URL, текстов запросов, серверных descriptions и цепочек ошибок транспорта с токеном.
+`Error` хранит категорию, числовые коды и параметры `retry_after` и `migrate_to_chat_id`. Адресат при миграции меняется по решению приложения. Для явной диагностики включите `Bot::builder(token).retain_remote_descriptions(true)` и вызовите `error.untrusted_remote_description()`. Это очищенный текст ограниченной длины, который всё ещё может содержать данные запроса. `Display`, `Debug`, метрики и результаты операций агентов сохраняют безопасное представление ошибок.
 
 Внешняя отмена future не возвращает Error и не отменяет уже выполненное действие Telegram. Если future уже выполнялась, приложение должно считать её результат неизвестным. Постоянный журнал операций, подавление повторных бизнес-действий и гарантия exactly-once в этот прототип не входят.
 
 ## Настройки
 
-RichText собирает entities без HTML-экранирования переменных и считает UTF-16 offsets:
+`EntityText` (также `RichText`) собирает entities без HTML-экранирования переменных и считает смещения UTF-16.
 
 ```rust
-use tg::{EntityKind, RichText};
-let text = RichText::new("Отчёт: ")
-    .append(RichText::styled("готов 🦀", EntityKind::Bold)?);
+use tg::{EntityKind, EntityText};
+let text = EntityText::new("Отчёт: ")
+    .append(EntityText::styled("готов 🦀", EntityKind::Bold)?);
 // bot.send_message(chat, text).await?;
 # Ok::<(), tg::Error>(())
 ```
 
 entity(range, kind) принимает байтовый диапазон Rust-строки; try_from_entities проверяет готовые UTF-16 spans. Helper проверяет границы, вложенность и metadata; его Debug скрывает текст. text()/entities()/into_parts() позволяют использовать результат в api::methods. Для явной разметки есть parse_mode(ParseMode::Html/MarkdownV2/Markdown); смешивание parse_mode и entities даёт локальную ошибку. Длину отрисованной разметки проверяет Telegram. Это отдельный helper от дерева api::types::RichText для sendRichMessage.
+
+`RichDoc` собирает блоки для `sendRichMessage`. Передайте документ в `bot.send_rich_message(chat, doc)` или вызовите `ctx.reply_rich(doc)`, чтобы сохранить контекст ответа. Эти запросы проверяют документ перед отправкой. `build()` выполняет ту же проверку и возвращает `InputRichMessage` для типизированного `bot.api()`.
+
+```rust
+use tg::{RichDoc, rich_message::{HeadingLevel, RichTable}};
+
+let report = RichDoc::new()
+    .heading(HeadingLevel::H2, "Состояние сервисов")
+    .table(RichTable::new().header_row(["Сервис", "Статус"]).row(["API", "Готов"]))
+    .build()?;
+# Ok::<(), tg::Error>(())
+```
 
 on_message_event(MessageEvent, handler) подключает business/edited/channel/guest-сообщения явно; polling-подписки задаются отдельно. ctx.reply сохраняет chat/thread/business/direct-message topic и эфемерного получателя. Для callback есть reply() с проверкой доступности сообщения и ephemeral_reply() по ID callback; answer() вызывается отдельно. Guest-сообщения требуют answer_guest(). Ошибки контекста не превращаются в обычную отправку в другой чат. Короткоживущие ephemeral ID проходят проверку 15-секундного окна по UTC-часам компьютера перед отправкой; доставка остаётся решением Telegram.
 

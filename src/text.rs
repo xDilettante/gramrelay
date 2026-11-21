@@ -116,6 +116,10 @@ pub struct RichText {
     entities: Vec<MessageEntity>,
 }
 
+/// Alias for [`RichText`] clarifying that it models `MessageEntity`-based text rather than
+/// Bot API 10.1+ [`crate::api::types::RichText`] trees.
+pub type EntityText = RichText;
+
 impl fmt::Debug for RichText {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RichText")
@@ -375,19 +379,25 @@ fn validate_metadata(entity: &MessageEntity) -> Result<()> {
             if entity.unix_time.is_none() {
                 return Err(invalid("unix_time"));
             }
-            if let Some(format) = &entity.date_time_format {
-                let mut rest = format.as_str();
-                if rest != "r" {
-                    rest = rest.strip_prefix('w').unwrap_or(rest);
-                    rest = rest.strip_prefix(['d', 'D']).unwrap_or(rest);
-                    rest = rest.strip_prefix(['t', 'T']).unwrap_or(rest);
-                    if !rest.is_empty() {
-                        return Err(invalid("date_time_format"));
-                    }
-                }
+            if let Some(format) = &entity.date_time_format
+                && !is_valid_date_time_format(format)
+            {
+                return Err(invalid("date_time_format"));
             }
         }
         _ => {}
     }
     Ok(())
+}
+
+/// Validate Telegram's `date_time_format` grammar (`r` or `w?[dD]?[tT]?`).
+pub(crate) fn is_valid_date_time_format(format: &str) -> bool {
+    let mut rest = format;
+    if rest == "r" {
+        return true;
+    }
+    rest = rest.strip_prefix('w').unwrap_or(rest);
+    rest = rest.strip_prefix(['d', 'D']).unwrap_or(rest);
+    rest = rest.strip_prefix(['t', 'T']).unwrap_or(rest);
+    rest.is_empty()
 }

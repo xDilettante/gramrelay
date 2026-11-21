@@ -5,6 +5,71 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+/// Reconnect settings for the managed `getUpdates` loop.
+///
+/// Enable with [`PollingOptions::reconnect`]. The default backoff grows from one
+/// second to thirty seconds, with jitter. The tenth consecutive failure ends
+/// polling unless the limit is changed.
+///
+/// Startup checks and replies that exceed the configured body limit return their
+/// errors immediately.
+#[derive(Debug, Clone)]
+pub struct PollingReconnect {
+    initial_delay: Duration,
+    max_delay: Duration,
+    max_consecutive_errors: Option<u32>,
+}
+
+impl Default for PollingReconnect {
+    fn default() -> Self {
+        Self {
+            initial_delay: Duration::from_secs(1),
+            max_delay: Duration::from_secs(30),
+            max_consecutive_errors: Some(10),
+        }
+    }
+}
+
+impl PollingReconnect {
+    /// Set the initial backoff before jitter. Must be greater than zero.
+    pub fn initial_delay(mut self, delay: Duration) -> Self {
+        self.initial_delay = delay;
+        self
+    }
+
+    /// Cap the local backoff. Telegram's `retry_after` may require a longer wait.
+    pub fn max_delay(mut self, delay: Duration) -> Self {
+        self.max_delay = delay;
+        self
+    }
+
+    /// Stop on this many consecutive failures. `None` keeps trying until
+    /// cancellation or a permanent error. A successful poll resets the count.
+    pub fn max_consecutive_errors(mut self, limit: Option<u32>) -> Self {
+        self.max_consecutive_errors = limit;
+        self
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.initial_delay.is_zero() || self.initial_delay > self.max_delay {
+            return Err(Error::local(
+                ErrorKind::Validation,
+                "reconnect_initial_delay",
+            ));
+        }
+        if Instant::now().checked_add(self.max_delay).is_none() {
+            return Err(Error::local(ErrorKind::Validation, "reconnect_max_delay"));
+        }
+        if self.max_consecutive_errors == Some(0) {
+            return Err(Error::local(
+                ErrorKind::Validation,
+                "reconnect_max_consecutive_errors",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Bounds for the in-memory polling runtime. Durable recovery is a separate integration.
 #[derive(Debug, Clone)]
 pub struct PollingOptions {
@@ -16,6 +81,7 @@ pub struct PollingOptions {
     empty_poll_delay: Duration,
     start_offset: Option<i64>,
     allowed_updates: Vec<String>,
+    reconnect: Option<PollingReconnect>,
 }
 impl Default for PollingOptions {
     fn default() -> Self {
@@ -28,6 +94,7 @@ impl Default for PollingOptions {
             empty_poll_delay: Duration::from_millis(250),
             start_offset: None,
             allowed_updates: vec!["message".into(), "callback_query".into()],
+            reconnect: None,
         }
     }
 }
@@ -67,6 +134,13 @@ impl PollingOptions {
         self
     }
 
+    /// Retry transient `getUpdates` failures with the same offset. By default,
+    /// the managed loop returns each failure to the caller immediately.
+    pub fn reconnect(mut self, policy: PollingReconnect) -> Self {
+        self.reconnect = Some(policy);
+        self
+    }
+
     fn validate(&self, bot: &Bot) -> Result<()> {
         if !(1..=100).contains(&self.batch_limit) {
             return Err(Error::local(ErrorKind::Validation, "batch_limit"));
@@ -88,6 +162,9 @@ impl PollingOptions {
             if timeout.is_zero() || Instant::now().checked_add(timeout).is_none() {
                 return Err(Error::local(ErrorKind::Validation, field));
             }
+        }
+        if let Some(reconnect) = &self.reconnect {
+            reconnect.validate()?;
         }
         Ok(())
     }
@@ -138,6 +215,8 @@ impl Bot {
 
         let router = Arc::new(router);
         let mut offset = options.start_offset;
+        let mut consecutive_errors = 0_u32;
+        let mut backoff = Duration::ZERO;
         loop {
             if stop.is_cancelled() {
                 return Ok(());
@@ -150,9 +229,46 @@ impl Bot {
             if let Some(offset) = offset {
                 request = request.offset(offset);
             }
-            let updates = tokio::select! {
+            let received = tokio::select! {
                 _ = stop.cancelled() => return Ok(()),
-                result = request => result?,
+                result = request => result,
+            };
+            let updates = match received {
+                Ok(updates) => {
+                    consecutive_errors = 0;
+                    backoff = Duration::ZERO;
+                    updates
+                }
+                Err(error) => {
+                    let Some(policy) = &options.reconnect else {
+                        return Err(error);
+                    };
+                    consecutive_errors = consecutive_errors.saturating_add(1);
+                    if !transient_poll_error(&error)
+                        || policy
+                            .max_consecutive_errors
+                            .is_some_and(|limit| consecutive_errors >= limit)
+                    {
+                        return Err(error);
+                    }
+                    backoff = backoff
+                        .saturating_mul(2)
+                        .clamp(policy.initial_delay, policy.max_delay);
+                    let jittered = backoff.mul_f64(0.5 + 0.5 * fastrand::f64());
+                    let delay = jittered.max(error.retry_after().unwrap_or_default());
+                    let Some(wake) = tokio::time::Instant::now().checked_add(delay) else {
+                        return Err(error);
+                    };
+                    #[cfg(feature = "tracing")]
+                    crate::telemetry::polling_reconnect(error.kind(), consecutive_errors, delay);
+                    // Only the receive is retried. At this point the current offset
+                    // acknowledges at most the last fully processed batch.
+                    tokio::select! {
+                        _ = stop.cancelled() => return Ok(()),
+                        _ = tokio::time::sleep_until(wake) => {}
+                    }
+                    continue;
+                }
             };
             let next = next_offset(&updates, offset, options.batch_limit)?;
             if updates.is_empty() {
@@ -178,6 +294,22 @@ impl Bot {
             // Only a subsequent getUpdates request can acknowledge the completed batch.
             offset = next;
         }
+    }
+}
+
+fn transient_poll_error(error: &Error) -> bool {
+    match error.kind() {
+        ErrorKind::Timeout | ErrorKind::Transport => true,
+        ErrorKind::Http => error
+            .http_status()
+            .is_some_and(|status| (500..600).contains(&status)),
+        ErrorKind::Telegram => {
+            error.api_error_code() == Some(429)
+                && error
+                    .http_status()
+                    .is_some_and(|status| status == 429 || (200..300).contains(&status))
+        }
+        _ => false,
     }
 }
 

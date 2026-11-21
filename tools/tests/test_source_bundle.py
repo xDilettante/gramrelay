@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import shlex
 from pathlib import Path
 import subprocess
@@ -121,8 +122,11 @@ class SourceBundle(unittest.TestCase):
             repo.mkdir()
             hooks = root / "empty-hooks"
             hooks.mkdir()
+            env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+            env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+
             def git(*arguments):
-                return subprocess.check_output(["git", "-c", f"core.hooksPath={hooks}", "-c", "commit.gpgsign=false", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", *arguments], cwd=repo, stderr=subprocess.DEVNULL)
+                return subprocess.check_output(["git", "-c", f"core.hooksPath={hooks}", "-c", "commit.gpgsign=false", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", *arguments], cwd=repo, env=env)
             git("init", "-q")
             (repo / "src").mkdir()
             (repo / "Cargo.toml").write_bytes(CARGO)

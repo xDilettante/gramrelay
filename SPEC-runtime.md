@@ -6,7 +6,7 @@ Module ID: bot-runtime. Depends on the existing client/protocol slice.
 
 - Lazy get_me, get_updates and get_webhook_info requests use the shared HTTP path and typed results.
 - get_updates exposes explicit offset, limit, server timeout and allowed_updates. Negative offsets are rejected by the managed poller; the raw API's negative-offset behavior is intentionally not exposed by this helper because it discards queued events.
-- Router<State> registers ordinary async command/message/callback/update handlers. MessageContext and CallbackContext expose the correct event and explicit shared state. Reply preserves chat, message/thread and business context.
+- Router<State> registers ordinary async command/message/callback/update handlers. Callback prefixes match nonempty byte prefixes up to 64 UTF-8 bytes. An exact callback registration suppresses prefix matching for the same callback data. Other routing precedence remains registration order. MessageContext and CallbackContext expose the correct event and explicit shared state. Reply preserves chat, message/thread and business context.
 - Command matching is exact; bot mentions are checked against the bot username. The managed runtime obtains identity with getMe.
 - One library-managed poller per bot ID in this process, including separate Bot instances and clones. Raw manual get_updates calls and other processes require caller coordination.
 - Polling validates its configuration and refuses to start when an active webhook is found; it never deletes the webhook implicitly.
@@ -14,11 +14,12 @@ Module ID: bot-runtime. Depends on the existing client/protocol slice.
 - If any event has no identifiable chat scope (including inline callbacks without a message), the batch is serialized conservatively; it must not race a potentially related known chat. Future typed event support can restore more concurrency.
 - The next offset is requested only after the entire prior batch succeeds. Handler errors/panics/timeouts stop the poller without acknowledging that batch. Completed side effects can therefore be repeated on application restart; persistent idempotency arrives with journal integration.
 - Shutdown stops intake and drains already accepted handlers within a configured deadline. The API supports an explicit cancellation token for tests/embedding.
-- Unknown writes are never automatically retried. The first runtime version returns transport errors to its supervisor; read retry policy is a later explicit addition.
+- Unknown writes are never automatically retried. By default the runtime returns polling failures to the caller. Applications can opt in with `PollingOptions::reconnect(PollingReconnect::default())`. On timeouts, transport failures, HTTP 5xx and explicit Telegram 429 refusals, the loop repeats only `getUpdates` at the same offset. The capped local backoff uses jitter, observes Telegram's `retry_after` as a minimum wait and is interrupted by cancellation. Successful polls reset the consecutive error count. Permanent errors and handler failures still terminate the loop.
+- Startup identity and webhook checks return their errors immediately. The response-size limit takes precedence over status-based recovery, so an oversized response terminates polling even with HTTP 5xx. The `tracing` feature emits `polling_reconnect` with the error kind, consecutive failure count and delay.
 
 ## Tests
 
-Local mocks prove exact getUpdates JSON and typed decoding, context replies, bot-mention filtering, state and callbacks, per-chat order, bounded concurrency, offset barriers and gaps, no ack after failure, single ownership, webhook conflict and graceful cancellation. Malformed known events must still fail decoding; unknown nested fields survive.
+Local mocks prove exact getUpdates JSON and typed decoding, context replies, bot-mention filtering, state and callbacks, per-chat order, bounded concurrency, offset barriers and gaps, no ack after failure, single ownership, webhook conflict and graceful cancellation. Reconnect tests check an unchanged offset across failures, a server-provided delay, bounded consecutive failures and cancellation during backoff. Malformed known events must still fail decoding; unknown nested fields survive.
 
 ## Complete wire-model integration (C1)
 
@@ -40,7 +41,7 @@ Guest messages require answerGuestQuery, not an ordinary chat send. A guest Mess
 
 ## Deferred integration
 
-Durable storage, webhook endpoint authentication and retry/backoff follow in subsequent tasks. They must be integrated before full-goal completion. This module does not claim exactly-once processing.
+Durable storage and webhook authentication are separate integrations. Polling reconnect keeps its offset in memory. This module does not claim exactly-once processing.
 
 ## Commands
 

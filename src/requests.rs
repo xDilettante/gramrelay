@@ -1,10 +1,12 @@
 use crate::{
-    Bot, CallbackQueryId, ChatId, Error, ErrorKind, InlineKeyboardMarkup, Message, MessageId,
-    ParseMode, Result, RichText,
-    api::types::{EphemeralMessageParameters, MessageEntity, ReplyParameters},
+    Bot, CallbackQueryId, ChatId, Error, ErrorKind, InlineKeyboardMarkup, InputFile, Message,
+    MessageId, ParseMode, Result, RichDoc, RichText,
+    api::types::{EphemeralMessageParameters, InputRichMessage, MessageEntity, ReplyParameters},
+    typed_api::{CollectAttachments, prepare_multipart},
 };
 use serde::Serialize;
 use std::{
+    collections::BTreeSet,
     future::{Future, IntoFuture},
     pin::Pin,
 };
@@ -322,6 +324,180 @@ impl<'a> IntoFuture for SendDocument<'a> {
                             .await?;
                         Ok((self.bot.post("sendDocument")?.multipart(form), readers))
                     },
+                    timeout,
+                )
+                .await
+        })
+    }
+}
+
+/// Input accepted by [`Bot::send_rich_message`] and contextual `reply_rich` helpers.
+///
+/// Accepts either a [`RichDoc`] (validated lazily when awaited) or a pre-built
+/// [`InputRichMessage`].
+pub struct RichMessageInput(Result<InputRichMessage>);
+
+impl std::fmt::Debug for RichMessageInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RichMessageInput").finish_non_exhaustive()
+    }
+}
+
+impl From<InputRichMessage> for RichMessageInput {
+    fn from(value: InputRichMessage) -> Self {
+        Self(Ok(value))
+    }
+}
+
+impl From<RichDoc> for RichMessageInput {
+    fn from(value: RichDoc) -> Self {
+        Self(value.build())
+    }
+}
+
+#[must_use = "requests are lazy; await the request to execute it"]
+pub struct SendRichMessage<'a> {
+    bot: &'a Bot,
+    delivery: crate::delivery::Delivery,
+    rich_message: Result<InputRichMessage>,
+    disable_notification: Option<bool>,
+    reply_markup: Option<InlineKeyboardMarkup>,
+    attachments: Vec<(String, InputFile)>,
+}
+
+#[derive(Serialize)]
+struct RichMessageParams {
+    #[serde(flatten)]
+    delivery: crate::delivery::Delivery,
+    rich_message: InputRichMessage,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    disable_notification: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reply_markup: Option<InlineKeyboardMarkup>,
+}
+
+impl std::fmt::Debug for SendRichMessage<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SendRichMessage").finish_non_exhaustive()
+    }
+}
+
+impl<'a> SendRichMessage<'a> {
+    pub(crate) fn new(bot: &'a Bot, chat: ChatId, rich: RichMessageInput) -> Self {
+        Self::with_delivery(bot, crate::delivery::Delivery::chat(chat), rich)
+    }
+
+    pub(crate) fn for_callback(bot: &'a Bot, id: CallbackQueryId, rich: RichMessageInput) -> Self {
+        Self::with_delivery(bot, crate::delivery::Delivery::callback(id), rich)
+    }
+
+    pub(crate) fn with_delivery(
+        bot: &'a Bot,
+        delivery: crate::delivery::Delivery,
+        rich: RichMessageInput,
+    ) -> Self {
+        Self {
+            bot,
+            delivery,
+            rich_message: rich.0,
+            disable_notification: None,
+            reply_markup: None,
+            attachments: Vec::new(),
+        }
+    }
+
+    pub fn disable_notification(mut self, value: bool) -> Self {
+        self.disable_notification = Some(value);
+        self
+    }
+
+    pub fn reply_markup(mut self, keyboard: InlineKeyboardMarkup) -> Self {
+        self.reply_markup = Some(keyboard);
+        self
+    }
+
+    pub fn reply_to(self, id: MessageId) -> Self {
+        self.reply_parameters(ReplyParameters::new().message_id(id))
+    }
+
+    pub fn reply_to_ephemeral(self, id: i64) -> Self {
+        self.reply_parameters(ReplyParameters::new().ephemeral_message_id(id))
+    }
+
+    pub fn reply_parameters(mut self, params: ReplyParameters) -> Self {
+        self.delivery.reply_parameters = Some(Box::new(params));
+        self
+    }
+
+    pub fn direct_messages_topic_id(mut self, id: i64) -> Self {
+        self.delivery.direct_messages_topic_id = Some(id);
+        self
+    }
+
+    pub fn ephemeral_message_parameters(mut self, params: EphemeralMessageParameters) -> Self {
+        self.delivery.ephemeral_message_parameters = Some(Box::new(params));
+        self
+    }
+
+    pub fn message_thread_id(mut self, id: i64) -> Self {
+        self.delivery.message_thread_id = Some(id);
+        self
+    }
+
+    pub fn business_connection_id(mut self, id: impl Into<String>) -> Self {
+        self.delivery.business_connection_id = Some(id.into());
+        self
+    }
+
+    /// Bind a named multipart attachment referenced via `attach://<name>` in the rich message.
+    pub fn attach(mut self, name: impl Into<String>, file: InputFile) -> Self {
+        self.attachments.push((name.into(), file));
+        self
+    }
+}
+
+impl<'a> IntoFuture for SendRichMessage<'a> {
+    type Output = Result<Message>;
+    type IntoFuture = RequestFuture<'a, Message>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move {
+            let timeout = self.delivery.validate()?;
+            let rich_message = self.rich_message?;
+            if let Some(keyboard) = &self.reply_markup {
+                keyboard.validate()?;
+            }
+            let mut references = BTreeSet::new();
+            rich_message.collect_attachments(&mut references);
+            let params = RichMessageParams {
+                delivery: self.delivery,
+                rich_message,
+                disable_notification: self.disable_notification,
+                reply_markup: self.reply_markup,
+            };
+            if self.attachments.is_empty() {
+                if !references.is_empty() {
+                    return Err(Error::local(ErrorKind::Validation, "attachments"));
+                }
+                return self
+                    .bot
+                    .perform_with_timeout(
+                        "sendRichMessage",
+                        async { Ok(self.bot.post("sendRichMessage")?.json(&params)) },
+                        timeout,
+                    )
+                    .await;
+            }
+            self.bot
+                .perform_upload(
+                    "sendRichMessage",
+                    prepare_multipart(
+                        self.bot,
+                        "sendRichMessage",
+                        &params,
+                        &references,
+                        self.attachments,
+                    ),
                     timeout,
                 )
                 .await

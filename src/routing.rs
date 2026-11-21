@@ -9,9 +9,26 @@ type Handler<C> = Arc<dyn Fn(C) -> RequestFuture<'static, ()> + Send + Sync>;
 enum Route<S> {
     Command(String, Handler<MessageContext<S>>),
     Message(MessageEvent, Handler<MessageContext<S>>),
-    Callback(String, Handler<CallbackContext<S>>),
-    AnyCallback(Handler<CallbackContext<S>>),
+    Callback(CallbackPattern, Handler<CallbackContext<S>>),
     Update(Handler<UpdateContext<S>>),
+}
+
+enum CallbackPattern {
+    Exact(String),
+    Prefix(String),
+    Any,
+}
+
+impl CallbackPattern {
+    fn matches(&self, data: Option<&str>, has_exact_route: bool) -> bool {
+        match self {
+            Self::Exact(expected) => data == Some(expected.as_str()),
+            Self::Prefix(prefix) => {
+                !has_exact_route && data.is_some_and(|data| data.starts_with(prefix))
+            }
+            Self::Any => true,
+        }
+    }
 }
 
 /// An explicit message-bearing update route. Polling subscriptions remain separately configured.
@@ -42,6 +59,7 @@ impl MessageEvent {
 }
 
 /// Ordered routes with explicit shared state. Only the first matching handler runs.
+/// An exact callback registration takes precedence over prefix matching for that data.
 pub struct Router<S = ()> {
     state: Arc<S>,
     username: Option<String>,
@@ -110,7 +128,20 @@ impl<S: Send + Sync + 'static> Router<S> {
         Fut: Future<Output = Result<()>> + Send + 'static,
     {
         self.routes.push(Route::Callback(
-            data.into(),
+            CallbackPattern::Exact(data.into()),
+            Arc::new(move |ctx| Box::pin(handler(ctx))),
+        ));
+        self
+    }
+    /// Match callback data starting with a nonempty prefix of at most 64 UTF-8 bytes.
+    /// An exact registration suppresses prefix matching for the same data.
+    pub fn callback_prefix<F, Fut>(mut self, prefix: impl Into<String>, handler: F) -> Self
+    where
+        F: Fn(CallbackContext<S>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<()>> + Send + 'static,
+    {
+        self.routes.push(Route::Callback(
+            CallbackPattern::Prefix(prefix.into()),
             Arc::new(move |ctx| Box::pin(handler(ctx))),
         ));
         self
@@ -120,9 +151,10 @@ impl<S: Send + Sync + 'static> Router<S> {
         F: Fn(CallbackContext<S>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<()>> + Send + 'static,
     {
-        self.routes.push(Route::AnyCallback(Arc::new(move |ctx| {
-            Box::pin(handler(ctx))
-        })));
+        self.routes.push(Route::Callback(
+            CallbackPattern::Any,
+            Arc::new(move |ctx| Box::pin(handler(ctx))),
+        ));
         self
     }
     pub fn on_update<F, Fut>(mut self, handler: F) -> Self
@@ -148,8 +180,15 @@ impl<S: Send + Sync + 'static> Router<S> {
                 Route::Command(name, _) if !valid_name(name, 32) => {
                     return Err(Error::local(ErrorKind::Validation, "command"));
                 }
-                Route::Callback(data, _) if !(1..=64).contains(&data.len()) => {
+                Route::Callback(CallbackPattern::Exact(data), _)
+                    if !(1..=64).contains(&data.len()) =>
+                {
                     return Err(Error::local(ErrorKind::Validation, "callback_data"));
+                }
+                Route::Callback(CallbackPattern::Prefix(prefix), _)
+                    if !(1..=64).contains(&prefix.len()) =>
+                {
+                    return Err(Error::local(ErrorKind::Validation, "callback_prefix"));
                 }
                 _ => {}
             }
@@ -173,6 +212,15 @@ impl<S: Send + Sync + 'static> Router<S> {
         if update.known_event_count() > 1 {
             return Err(Error::local(ErrorKind::Validation, "update_kind"));
         }
+        let has_exact_callback = update
+            .callback_query
+            .as_ref()
+            .and_then(|query| query.data.as_deref())
+            .is_some_and(|data| {
+                self.routes.iter().any(|route| {
+                    matches!(route, Route::Callback(CallbackPattern::Exact(expected), _) if expected == data)
+                })
+            });
         for route in &self.routes {
             match route {
                 Route::Command(name, handler) if self.matches_command(&update, name) => {
@@ -197,22 +245,11 @@ impl<S: Send + Sync + 'static> Router<S> {
                         .await;
                     }
                 }
-                Route::Callback(data, handler)
-                    if update
-                        .callback_query
-                        .as_ref()
-                        .is_some_and(|query| query.data.as_deref() == Some(data)) =>
+                Route::Callback(pattern, handler)
+                    if update.callback_query.as_ref().is_some_and(|query| {
+                        pattern.matches(query.data.as_deref(), has_exact_callback)
+                    }) =>
                 {
-                    if let Some(query) = update.callback_query.take() {
-                        return handler(CallbackContext {
-                            query: *query,
-                            bot: bot.clone(),
-                            state: self.state.clone(),
-                        })
-                        .await;
-                    }
-                }
-                Route::AnyCallback(handler) => {
                     if let Some(query) = update.callback_query.take() {
                         return handler(CallbackContext {
                             query: *query,
@@ -314,6 +351,20 @@ impl<S> MessageContext<S> {
             file,
         )
     }
+    /// Reply with a rich message preserving chat, thread, business, direct-message and ephemeral scope.
+    pub fn reply_rich(
+        &self,
+        rich: impl Into<crate::RichMessageInput>,
+    ) -> crate::SendRichMessage<'_> {
+        crate::SendRichMessage::with_delivery(
+            &self.bot,
+            crate::delivery::Delivery::reply(
+                &self.message,
+                self.event == MessageEvent::GuestMessage,
+            ),
+            rich.into(),
+        )
+    }
     pub fn answer_guest(
         &self,
         result: crate::api::types::InlineQueryResult,
@@ -369,6 +420,36 @@ impl<S> CallbackContext<S> {
             crate::delivery::Delivery::reply(message, false),
             file,
         ))
+    }
+    pub fn reply_rich(
+        &self,
+        rich: impl Into<crate::RichMessageInput>,
+    ) -> Result<crate::SendRichMessage<'_>> {
+        let message = self
+            .query
+            .message
+            .as_ref()
+            .and_then(|message| message.accessible())
+            .ok_or_else(|| Error::local(ErrorKind::Validation, "callback_message"))?;
+        Ok(crate::SendRichMessage::with_delivery(
+            &self.bot,
+            crate::delivery::Delivery::reply(message, false),
+            rich.into(),
+        ))
+    }
+    pub fn ephemeral_reply_rich(
+        &self,
+        rich: impl Into<crate::RichMessageInput>,
+    ) -> Result<crate::SendRichMessage<'_>> {
+        if self
+            .query
+            .message
+            .as_ref()
+            .is_some_and(|message| message.chat().is_direct_messages.is_some())
+        {
+            return Err(Error::local(ErrorKind::Validation, "ephemeral_chat"));
+        }
+        Ok(self.bot.reply_ephemeral_rich(self.query.id.clone(), rich))
     }
     pub fn ephemeral_reply_document(
         &self,
