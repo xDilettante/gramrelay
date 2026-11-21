@@ -1,6 +1,6 @@
 use crate::{
     AnswerCallbackQuery, CallbackQueryId, ChatId, EffectOutcome, Error, ErrorKind, InputFile,
-    Result, RichText, SendDocument, SendMessage,
+    Result, RichMessageInput, RichText, SendDocument, SendMessage, SendRichMessage,
 };
 use reqwest::{Client, RequestBuilder, Url};
 use serde::{Deserialize, de::DeserializeOwned};
@@ -28,6 +28,7 @@ struct Inner {
     max_upload_bytes: u64,
     max_download_bytes: u64,
     max_attachments: usize,
+    retain_remote_descriptions: bool,
     in_flight: Semaphore,
 }
 
@@ -44,6 +45,7 @@ pub struct BotBuilder {
     max_download_bytes: u64,
     max_attachments: usize,
     max_in_flight: usize,
+    retain_remote_descriptions: bool,
 }
 
 impl fmt::Debug for Bot {
@@ -78,6 +80,7 @@ impl Bot {
             max_download_bytes: 20_000_000,
             max_attachments: 50,
             max_in_flight: 32,
+            retain_remote_descriptions: false,
         }
     }
 
@@ -108,6 +111,24 @@ impl Bot {
         file: InputFile,
     ) -> SendDocument<'_> {
         SendDocument::with_delivery(self, crate::delivery::Delivery::callback(id), file)
+    }
+
+    /// Create a lazy rich-message request. Accepts a [`crate::RichDoc`] or [`crate::api::types::InputRichMessage`].
+    pub fn send_rich_message(
+        &self,
+        chat: ChatId,
+        rich: impl Into<RichMessageInput>,
+    ) -> SendRichMessage<'_> {
+        SendRichMessage::new(self, chat, rich.into())
+    }
+
+    /// Send an ephemeral rich-message reply visible to the callback's caller.
+    pub fn reply_ephemeral_rich(
+        &self,
+        id: CallbackQueryId,
+        rich: impl Into<RichMessageInput>,
+    ) -> SendRichMessage<'_> {
+        SendRichMessage::for_callback(self, id, rich.into())
     }
 
     pub(crate) fn upload_limit(&self) -> u64 {
@@ -173,8 +194,12 @@ impl Bot {
         timeout: Option<Duration>,
     ) -> Result<T> {
         let limit = self.inner.max_response_bytes;
+        let redact_token = self
+            .inner
+            .retain_remote_descriptions
+            .then(|| self.inner.token.clone());
         self.exchange(method, prepare, timeout, move |response| {
-            decode_response(response, limit)
+            decode_response(response, limit, redact_token)
         })
         .await
     }
@@ -202,8 +227,12 @@ impl Bot {
         timeout: Option<Duration>,
     ) -> Result<T> {
         let limit = self.inner.max_response_bytes;
+        let redact_token = self
+            .inner
+            .retain_remote_descriptions
+            .then(|| self.inner.token.clone());
         self.exchange_prepared(method, prepare, timeout, move |response| {
-            decode_response(response, limit)
+            decode_response(response, limit, redact_token)
         })
         .await
     }
@@ -310,6 +339,14 @@ impl BotBuilder {
         self.max_in_flight = limit;
         self
     }
+    /// Retain a bounded, sanitized copy of Telegram's error `description` on [`Error`].
+    ///
+    /// Disabled by default. Retained text remains untrusted and is exposed only through
+    /// [`Error::untrusted_remote_description`], never through `Display` or `Debug`.
+    pub fn retain_remote_descriptions(mut self, retain: bool) -> Self {
+        self.retain_remote_descriptions = retain;
+        self
+    }
 
     pub fn build(self) -> Result<Bot> {
         let valid_token = self.token.split_once(':').is_some_and(|(id, secret)| {
@@ -379,15 +416,141 @@ impl BotBuilder {
                 max_upload_bytes: self.max_upload_bytes,
                 max_download_bytes: self.max_download_bytes,
                 max_attachments: self.max_attachments,
+                retain_remote_descriptions: self.retain_remote_descriptions,
                 in_flight: Semaphore::new(self.max_in_flight),
             }),
         })
     }
 }
 
+const MAX_REMOTE_DESCRIPTION_BYTES: usize = 256;
+
+fn sanitize_remote_description(raw: &str, token: &str) -> Option<String> {
+    let mut redacted = raw.replace(token, "[REDACTED]");
+    if let Some((id, secret)) = token.split_once(':') {
+        let upper = format!("{id}%3A{secret}");
+        let lower = format!("{id}%3a{secret}");
+        redacted = redacted
+            .replace(&upper, "[REDACTED]")
+            .replace(&lower, "[REDACTED]");
+        if secret.len() >= 8 {
+            redacted = redacted.replace(secret, "[REDACTED]");
+        }
+    }
+    let mut normalized = String::with_capacity(redacted.len().min(MAX_REMOTE_DESCRIPTION_BYTES));
+    let mut pending_space = false;
+    for ch in redacted.chars() {
+        if ch.is_control() || ch.is_whitespace() {
+            pending_space = !normalized.is_empty();
+            continue;
+        }
+        let extra = usize::from(pending_space) + ch.len_utf8();
+        if normalized.len() + extra > MAX_REMOTE_DESCRIPTION_BYTES {
+            break;
+        }
+        if pending_space {
+            normalized.push(' ');
+            pending_space = false;
+        }
+        normalized.push(ch);
+    }
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn extract_remote_description(body: &[u8]) -> Option<String> {
+    struct OptionalString(Option<String>);
+
+    impl<'de> Deserialize<'de> for OptionalString {
+        fn deserialize<D: serde::Deserializer<'de>>(
+            deserializer: D,
+        ) -> std::result::Result<Self, D::Error> {
+            struct Visitor;
+            impl<'de> serde::de::Visitor<'de> for Visitor {
+                type Value = OptionalString;
+
+                fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str("any JSON value")
+                }
+                fn visit_str<E: serde::de::Error>(
+                    self,
+                    v: &str,
+                ) -> std::result::Result<Self::Value, E> {
+                    Ok(OptionalString(Some(v.to_owned())))
+                }
+                fn visit_string<E: serde::de::Error>(
+                    self,
+                    v: String,
+                ) -> std::result::Result<Self::Value, E> {
+                    Ok(OptionalString(Some(v)))
+                }
+                fn visit_bool<E: serde::de::Error>(
+                    self,
+                    _: bool,
+                ) -> std::result::Result<Self::Value, E> {
+                    Ok(OptionalString(None))
+                }
+                fn visit_i64<E: serde::de::Error>(
+                    self,
+                    _: i64,
+                ) -> std::result::Result<Self::Value, E> {
+                    Ok(OptionalString(None))
+                }
+                fn visit_u64<E: serde::de::Error>(
+                    self,
+                    _: u64,
+                ) -> std::result::Result<Self::Value, E> {
+                    Ok(OptionalString(None))
+                }
+                fn visit_f64<E: serde::de::Error>(
+                    self,
+                    _: f64,
+                ) -> std::result::Result<Self::Value, E> {
+                    Ok(OptionalString(None))
+                }
+                fn visit_unit<E: serde::de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(OptionalString(None))
+                }
+                fn visit_none<E: serde::de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(OptionalString(None))
+                }
+                fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                    self,
+                    mut seq: A,
+                ) -> std::result::Result<Self::Value, A::Error> {
+                    while seq.next_element::<serde::de::IgnoredAny>()?.is_some() {}
+                    Ok(OptionalString(None))
+                }
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    mut map: A,
+                ) -> std::result::Result<Self::Value, A::Error> {
+                    while map
+                        .next_entry::<serde::de::IgnoredAny, serde::de::IgnoredAny>()?
+                        .is_some()
+                    {}
+                    Ok(OptionalString(None))
+                }
+            }
+            deserializer.deserialize_any(Visitor)
+        }
+    }
+
+    #[derive(Deserialize)]
+    struct DescriptionOnly {
+        #[serde(default)]
+        description: Option<OptionalString>,
+    }
+
+    serde_json::from_slice::<DescriptionOnly>(body)
+        .ok()
+        .and_then(|envelope| envelope.description)
+        .and_then(|optional| optional.0)
+}
+
 async fn decode_response<T: DeserializeOwned>(
     mut response: reqwest::Response,
     limit: usize,
+    redact_token: Option<String>,
 ) -> Result<T> {
     let status = response.status();
     if response.content_length().is_some_and(|n| n > limit as u64) {
@@ -446,6 +609,11 @@ async fn decode_response<T: DeserializeOwned>(
     if let Some(parameters) = envelope.parameters {
         error.retry_after = parameters.retry_after.map(Duration::from_secs);
         error.migrate_to_chat_id = parameters.migrate_to_chat_id;
+    }
+    if let Some(token) = redact_token.as_deref()
+        && let Some(description) = extract_remote_description(&body)
+    {
+        error.remote_description = sanitize_remote_description(&description, token);
     }
     Err(error)
 }

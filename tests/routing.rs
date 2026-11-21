@@ -112,6 +112,46 @@ async fn callback_context_answers_exact_data() {
 }
 
 #[tokio::test]
+async fn exact_callbacks_take_priority_over_prefixes_and_fallback_order_is_preserved() {
+    let bot = Bot::new("123456:OFFLINE_TEST_TOKEN").unwrap();
+    let router = Router::with_state(Mutex::new(Vec::new()))
+        .callback_prefix("chart:", |ctx| async move {
+            ctx.state().lock().unwrap().push("prefix");
+            Ok(())
+        })
+        .callback("chart:help", |ctx| async move {
+            ctx.state().lock().unwrap().push("exact");
+            Ok(())
+        })
+        .on_callback(|ctx| async move {
+            ctx.state().lock().unwrap().push("fallback");
+            Ok(())
+        });
+    for data in [Some("chart:help"), Some("chart:BTC"), Some("other"), None] {
+        let mut event = json!({"update_id":2,"callback_query":{
+            "id":"query-1","from":{"id":1,"is_bot":false,"first_name":"User"},
+            "chat_instance":"instance"
+        }});
+        if let Some(data) = data {
+            event["callback_query"]["data"] = json!(data);
+        }
+        router
+            .dispatch(&bot, serde_json::from_value(event).unwrap())
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        *router.state().lock().unwrap(),
+        ["exact", "prefix", "fallback", "fallback"]
+    );
+
+    let invalid = Router::new().callback_prefix("я".repeat(33), |_| async { Ok(()) });
+    let error = invalid.dispatch(&bot, update("/start")).await.unwrap_err();
+    assert_eq!(error.field(), Some("callback_prefix"));
+    assert_eq!(error.outcome(), EffectOutcome::NotSent);
+}
+
+#[tokio::test]
 async fn first_matching_route_runs_once_and_bad_registration_is_local() {
     let bot = Bot::new("123456:OFFLINE_TEST_TOKEN").unwrap();
     let router = Router::with_state(AtomicUsize::new(0))

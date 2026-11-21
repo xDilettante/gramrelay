@@ -30,8 +30,8 @@ pub enum EffectOutcome {
     Unknown,
 }
 
-/// A safe diagnostic. Raw HTTP errors, URLs and remote descriptions are omitted.
-#[derive(Debug)]
+/// A safe diagnostic. Raw HTTP errors, URLs and remote descriptions are omitted from
+/// `Display`, `Debug` and error chains.
 pub struct Error {
     kind: ErrorKind,
     outcome: EffectOutcome,
@@ -40,6 +40,22 @@ pub struct Error {
     pub(crate) api_error_code: Option<i64>,
     pub(crate) retry_after: Option<Duration>,
     pub(crate) migrate_to_chat_id: Option<ChatId>,
+    pub(crate) remote_description: Option<String>,
+}
+
+impl fmt::Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Deliberately omit remote_description so Debug remains safe for logs and receipts.
+        f.debug_struct("Error")
+            .field("kind", &self.kind)
+            .field("outcome", &self.outcome)
+            .field("field", &self.field)
+            .field("http_status", &self.http_status)
+            .field("api_error_code", &self.api_error_code)
+            .field("retry_after", &self.retry_after)
+            .field("migrate_to_chat_id", &self.migrate_to_chat_id)
+            .finish()
+    }
 }
 
 impl Error {
@@ -61,6 +77,7 @@ impl Error {
             api_error_code: None,
             retry_after: None,
             migrate_to_chat_id: None,
+            remote_description: None,
         }
     }
 
@@ -94,6 +111,14 @@ impl Error {
     /// The caller must authorize a new target before trying it.
     pub fn migrate_to_chat_id(&self) -> Option<ChatId> {
         self.migrate_to_chat_id
+    }
+    /// Bounded, sanitized copy of Telegram's remote error `description`, retained only when
+    /// explicitly opted in via `BotBuilder::retain_remote_descriptions(true)`.
+    ///
+    /// Still untrusted remote text that may reflect user data or request parameters; never
+    /// emitted by `Display`, `Debug`, telemetry, or agent receipts.
+    pub fn untrusted_remote_description(&self) -> Option<&str> {
+        self.remote_description.as_deref()
     }
 }
 

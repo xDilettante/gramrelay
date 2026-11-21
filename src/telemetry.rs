@@ -103,9 +103,27 @@ mod enabled {
             ErrorKind::Handler => "handler",
         }
     }
+
+    #[cfg(all(feature = "bot", feature = "tracing"))]
+    pub(crate) fn polling_reconnect(
+        error: ErrorKind,
+        consecutive_errors: u32,
+        delay: std::time::Duration,
+    ) {
+        tracing::debug!(
+            target: "tg",
+            event = "polling_reconnect",
+            method = "getUpdates",
+            error_kind = kind(error),
+            consecutive_errors,
+            delay_seconds = delay.as_secs_f64(),
+        );
+    }
 }
 #[cfg(any(feature = "tracing", feature = "metrics"))]
 pub(crate) use enabled::Attempt;
+#[cfg(all(feature = "bot", feature = "tracing"))]
+pub(crate) use enabled::polling_reconnect;
 
 #[cfg(not(any(feature = "tracing", feature = "metrics")))]
 pub(crate) struct Attempt;

@@ -39,10 +39,173 @@ async fn explicit_refusal_exposes_parameters_but_not_private_description() {
     assert_eq!(error.retry_after(), Some(Duration::from_secs(3)));
     assert_eq!(error.migrate_to_chat_id(), Some(ChatId::from(-100789)));
     assert!(error.source().is_none());
+    assert!(error.untrusted_remote_description().is_none());
     let diagnostic = format!("{error:?} {error}");
     for private in [TOKEN, "Private body", "Sensitive message"] {
         assert!(!diagnostic.contains(private));
     }
+}
+
+#[tokio::test]
+async fn opt_in_remote_description_is_sanitized_bounded_and_kept_out_of_display_and_debug() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "ok": false,
+            "error_code": 400,
+            "description": format!(
+                "  Bad Request:\n\x1b[31mcan't parse\r\ttoken {TOKEN} and secret OFFLINE_TEST_TOKEN\0 "
+            )
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let bot = Bot::builder(TOKEN)
+        .api_url(server.uri())
+        .allow_http_loopback(true)
+        .retain_remote_descriptions(true)
+        .build()
+        .unwrap();
+    let error = bot
+        .send_message(ChatId::from(1), "Sensitive message")
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Telegram);
+    assert_eq!(error.outcome(), EffectOutcome::Rejected);
+    assert_eq!(error.api_error_code(), Some(400));
+
+    let description = error
+        .untrusted_remote_description()
+        .expect("opt-in remote description must be retained");
+    assert!(description.starts_with("Bad Request:"));
+    assert!(description.contains("[REDACTED]"));
+    assert!(!description.contains(TOKEN));
+    assert!(!description.contains("OFFLINE_TEST_TOKEN"));
+    assert!(!description.chars().any(char::is_control));
+    assert!(description.len() <= 256);
+
+    let diagnostic = format!("{error:?} {error}");
+    for private in [TOKEN, "OFFLINE_TEST_TOKEN", "Bad Request", "can't parse"] {
+        assert!(!diagnostic.contains(private));
+    }
+}
+
+#[tokio::test]
+async fn opt_in_remote_description_truncates_multibyte_utf8_safely() {
+    let server = MockServer::start().await;
+    let long_description = format!("Ошибка: {}", "ж".repeat(300));
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "ok": false,
+            "error_code": 400,
+            "description": long_description
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let bot = Bot::builder(TOKEN)
+        .api_url(server.uri())
+        .allow_http_loopback(true)
+        .retain_remote_descriptions(true)
+        .build()
+        .unwrap();
+    let error = bot.send_message(ChatId::from(1), "Test").await.unwrap_err();
+    let description = error
+        .untrusted_remote_description()
+        .expect("truncated description must be present");
+    assert!(description.starts_with("Ошибка: "));
+    assert!(description.len() <= 256);
+    assert!(description.len() >= 250);
+}
+
+#[tokio::test]
+async fn opt_in_whitespace_only_remote_description_is_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "ok": false,
+            "error_code": 400,
+            "description": " \r\n\t\x1b "
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let bot = Bot::builder(TOKEN)
+        .api_url(server.uri())
+        .allow_http_loopback(true)
+        .retain_remote_descriptions(true)
+        .build()
+        .unwrap();
+    let error = bot.send_message(ChatId::from(1), "Test").await.unwrap_err();
+    assert!(error.untrusted_remote_description().is_none());
+}
+
+#[tokio::test]
+async fn non_string_description_does_not_fail_decoding_on_success_or_refusal() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true,
+            "description": {"extra": 123},
+            "result": {"message_id": 7, "date": 1, "chat": {"id": 1, "type": "private"}}
+        })))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "ok": false,
+            "error_code": 400,
+            "description": 12345
+        })))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    let bot = Bot::builder(TOKEN)
+        .api_url(server.uri())
+        .allow_http_loopback(true)
+        .retain_remote_descriptions(true)
+        .build()
+        .unwrap();
+
+    let sent = bot.send_message(ChatId::from(1), "Ok").await.unwrap();
+    assert_eq!(i64::from(sent.message_id), 7);
+
+    let error = bot.send_message(ChatId::from(1), "Fail").await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Telegram);
+    assert_eq!(error.outcome(), EffectOutcome::Rejected);
+    assert_eq!(error.api_error_code(), Some(400));
+    assert!(error.untrusted_remote_description().is_none());
+}
+
+#[tokio::test]
+async fn opt_in_remote_description_redacts_url_encoded_short_token() {
+    let short_token = "42:abc";
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "ok": false,
+            "error_code": 400,
+            "description": "Bad Request: upper 42%3Aabc lower 42%3aabc raw 42:abc"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let bot = Bot::builder(short_token)
+        .api_url(server.uri())
+        .allow_http_loopback(true)
+        .retain_remote_descriptions(true)
+        .build()
+        .unwrap();
+
+    let error = bot.send_message(ChatId::from(1), "Test").await.unwrap_err();
+    let description = error.untrusted_remote_description().unwrap();
+    assert!(!description.contains("42%3Aabc"));
+    assert!(!description.contains("42%3aabc"));
+    assert!(!description.contains("42:abc"));
+    assert_eq!(description.matches("[REDACTED]").count(), 3);
 }
 
 #[tokio::test]

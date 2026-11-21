@@ -1,4 +1,4 @@
-use crate::{Bot, Error, ErrorKind, InputFile, RequestFuture};
+use crate::{Bot, Error, ErrorKind, InputFile, RequestFuture, files::UploadReaders};
 use reqwest::multipart::Form;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{collections::BTreeSet, fmt, future::IntoFuture};
@@ -111,41 +111,59 @@ impl<'a, M: Method> IntoFuture for Call<'a, M> {
                 .perform_upload(
                     M::NAME,
                     async {
-                        let params = serde_json::to_value(&self.params)
-                            .map_err(|_| Error::local(ErrorKind::Validation, "parameters"))?;
                         let references = self.params.attachment_references();
-                        validate_bindings(
-                            &params,
+                        prepare_multipart(
+                            self.bot,
+                            M::NAME,
+                            &self.params,
                             &references,
-                            &self.attachments,
-                            self.bot.attachment_limit(),
-                        )?;
-                        let mut form = Form::new();
-                        let object = params
-                            .as_object()
-                            .ok_or_else(|| Error::local(ErrorKind::Validation, "parameters"))?;
-                        for (name, value) in object {
-                            let value = value
-                                .as_str()
-                                .map(str::to_owned)
-                                .unwrap_or_else(|| value.to_string());
-                            form = form.text(name.clone(), value);
-                        }
-                        let mut remaining = self.bot.upload_limit();
-                        let mut readers = crate::files::UploadReaders::default();
-                        for (name, file) in self.attachments {
-                            let (part, length) =
-                                file.into_part(remaining, &mut readers, None).await?;
-                            remaining -= length;
-                            form = form.part(name, part);
-                        }
-                        Ok((self.bot.post(M::NAME)?.multipart(form), readers))
+                            self.attachments,
+                        )
+                        .await
                     },
                     timeout,
                 )
                 .await
         })
     }
+}
+
+pub(crate) async fn prepare_multipart(
+    bot: &Bot,
+    method: &'static str,
+    params: &(impl Serialize + Sync),
+    references: &BTreeSet<String>,
+    files: Vec<(String, InputFile)>,
+) -> crate::Result<(reqwest::RequestBuilder, UploadReaders)> {
+    let params = serde_json::to_value(params)
+        .map_err(|_| Error::local(ErrorKind::Validation, "parameters"))?;
+    validate_bindings(&params, references, &files, bot.attachment_limit())?;
+    let mut form = Form::new();
+    let object = params
+        .as_object()
+        .ok_or_else(|| Error::local(ErrorKind::Validation, "parameters"))?;
+    for (name, value) in object {
+        let value = value
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| value.to_string());
+        form = form.text(name.clone(), value);
+    }
+    let mut remaining = bot.upload_limit();
+    let mut readers = UploadReaders::default();
+    for (name, file) in files {
+        let (part, length) = file.into_part(remaining, &mut readers, None).await?;
+        remaining -= length;
+        form = form.part(name, part);
+    }
+    Ok((bot.post(method)?.multipart(form), readers))
+}
+
+pub(crate) fn is_valid_attachment_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.as_bytes()[0].is_ascii_alphabetic()
+        && name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
 }
 
 fn validate_bindings(
@@ -159,10 +177,7 @@ fn validate_bindings(
     }
     let mut names = BTreeSet::new();
     for (name, _) in files {
-        if name.is_empty()
-            || name.len() > 64
-            || !name.as_bytes()[0].is_ascii_alphabetic()
-            || !name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
+        if !is_valid_attachment_name(name)
             || !names.insert(name.clone())
             || params.get(name).is_some()
         {

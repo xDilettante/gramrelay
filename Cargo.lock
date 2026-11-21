@@ -2585,6 +2585,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "libc",
  "metrics",
  "reqwest",
  "serde",
@@ -2596,6 +2597,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "windows-sys 0.61.2",
  "wiremock",
 ]
 

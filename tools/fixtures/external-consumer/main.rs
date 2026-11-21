@@ -8,7 +8,10 @@ use std::{
     time::Duration,
 };
 use tg::{
-    CallbackQueryId, ChatId, EffectOutcome, ErrorKind, InputFile,
+    ButtonStyle, CallbackContext, CallbackQueryId, CancellationToken, ChatId, EffectOutcome,
+    ErrorKind, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, PollingOptions,
+    PollingReconnect, RichDoc, Router,
+    rich_message::HeadingLevel,
     test_kit::{MockResponse, MockTransport, Step},
 };
 use tg_agent::{
@@ -26,7 +29,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::time::timeout(Duration::from_secs(15), exercise()).await??;
     println!(
-        "external fixture: Bot message/callback/upload/Unknown, MCP discovery, MT real-TL and joined close passed"
+        "external fixture: Bot message/callback/RichDoc/upload/reconnect/Unknown, MCP discovery, MT real-TL and joined close passed"
     );
     Ok(())
 }
@@ -40,7 +43,8 @@ async fn exercise() -> Result<(), Box<dyn std::error::Error>> {
             "answerCallbackQuery",
             MockResponse::json(json!({"ok":true,"result":true})),
         ),
-        Step::reply("sendDocument", MockResponse::json(message)),
+        Step::reply("sendDocument", MockResponse::json(message.clone())),
+        Step::reply("sendRichMessage", MockResponse::json(message)),
         Step::timeout("sendMessage"),
     ])?;
     let bot = mock
@@ -63,14 +67,37 @@ async fn exercise() -> Result<(), Box<dyn std::error::Error>> {
         InputFile::bytes("fixture.bin", vec![1, 2, 3]),
     )
     .await?;
+    let report = RichDoc::new()
+        .heading(HeadingLevel::H2, "External report")
+        .photo_attach("chart", None);
+    let keyboard = InlineKeyboardMarkup::new().row([
+        InlineKeyboardButton::url("Details", "https://example.com").style(ButtonStyle::Primary),
+        InlineKeyboardButton::copy_text("Copy", "external"),
+    ]);
+    bot.send_rich_message(ChatId::from(1), report)
+        .reply_markup(keyboard)
+        .attach(
+            "chart",
+            InputFile::bytes("chart.png", b"LOCAL_CHART".to_vec()),
+        )
+        .await?;
     let error = bot
         .send_message(ChatId::from(1), "uncertain")
         .await
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Timeout);
     assert_eq!(error.outcome(), EffectOutcome::Unknown);
-    assert_eq!(mock.requests()?.len(), 4);
+    let requests = mock.requests()?;
+    assert_eq!(requests.len(), 5);
+    let rich = &requests[3];
+    assert_eq!(rich.method(), "sendRichMessage");
+    assert!(rich.upload_complete());
+    let body = std::str::from_utf8(rich.body())?;
+    assert!(body.contains("attach://chart") && body.contains("LOCAL_CHART"));
+    assert!(body.contains(r#""style":"primary""#) && body.contains("copy_text"));
     mock.assert_finished()?;
+
+    exercise_polling().await?;
 
     let catalog = extended_catalog();
     assert_eq!(catalog.tools.len(), 16);
@@ -148,5 +175,46 @@ async fn exercise() -> Result<(), Box<dyn std::error::Error>> {
         session.remembered_account().unwrap_err().kind(),
         tg_mtproto::SessionErrorKind::Closed
     );
+    Ok(())
+}
+
+async fn exercise_polling() -> Result<(), Box<dyn std::error::Error>> {
+    let mock = MockTransport::new([
+        Step::reply(
+            "getMe",
+            MockResponse::json(json!({"ok":true,"result":{
+                "id":0,"is_bot":true,"first_name":"External","username":"external_bot"
+            }})),
+        ),
+        Step::reply(
+            "getWebhookInfo",
+            MockResponse::json(json!({"ok":true,"result":{
+                "url":"","has_custom_certificate":false,"pending_update_count":0
+            }})),
+        ),
+        Step::transport_error("getUpdates"),
+        Step::reply(
+            "getUpdates",
+            MockResponse::json(json!({"ok":true,"result":[{
+                "update_id":1,"callback_query":{"id":"external-callback","chat_instance":"external",
+                    "from":{"id":1,"is_bot":false,"first_name":"User"},"data":"chart:BTC"}
+            }]})),
+        ),
+    ])?;
+    let stop = CancellationToken::new();
+    let router = Router::with_state(stop.clone()).callback_prefix(
+        "chart:",
+        |ctx: CallbackContext<CancellationToken>| async move {
+            assert_eq!(ctx.query.data.as_deref(), Some("chart:BTC"));
+            ctx.state().cancel();
+            Ok(())
+        },
+    );
+    let reconnect = PollingReconnect::default().initial_delay(Duration::from_millis(1));
+    let options = PollingOptions::default()
+        .poll_timeout(0)
+        .reconnect(reconnect);
+    mock.bot()?.run_polling_until(router, options, stop).await?;
+    mock.assert_finished()?;
     Ok(())
 }

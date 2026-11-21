@@ -6,10 +6,11 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicI64, AtomicUsize, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tg::{
-    Bot, CancellationToken, EffectOutcome, Error, ErrorKind, MessageContext, PollingOptions, Router,
+    Bot, CancellationToken, EffectOutcome, Error, ErrorKind, MessageContext, PollingOptions,
+    PollingReconnect, Router,
 };
 use tokio::sync::Notify;
 use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers::path};
@@ -66,6 +67,191 @@ fn options() -> PollingOptions {
 
 fn event(id: i64, chat: i64, text: &str) -> Value {
     json!({"update_id":id,"message":{"message_id":id,"date":1,"chat":{"id":chat,"type":"private"},"text":text}})
+}
+
+#[tokio::test]
+async fn reconnect_retries_transient_polls_at_the_same_offset_and_honors_retry_after() {
+    let fixture = Fixture::new().await;
+    let stop = CancellationToken::new();
+    let signal_stop = stop.clone();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let captured = calls.clone();
+    Mock::given(path(fixture.updates_path()))
+        .respond_with(move |request: &Request| {
+            let mut calls = captured.lock().unwrap();
+            let body: Value = request.body_json().unwrap();
+            calls.push((body.get("offset").and_then(Value::as_i64), Instant::now()));
+            match calls.len() {
+                1 => ResponseTemplate::new(200)
+                    .set_body_json(json!({"ok":true,"result":[event(10,1,"first")]})),
+                2 => ResponseTemplate::new(503),
+                3 => ResponseTemplate::new(429).set_body_json(json!({
+                    "ok":false,"error_code":429,"parameters":{"retry_after":1}
+                })),
+                4 => ResponseTemplate::new(200)
+                    .set_body_json(json!({"ok":true,"result":[]}))
+                    .set_delay(Duration::from_secs(5)),
+                5 => ResponseTemplate::new(200)
+                    .set_body_json(json!({"ok":true,"result":[event(11,1,"second")]})),
+                _ => {
+                    signal_stop.cancel();
+                    ResponseTemplate::new(200).set_body_json(json!({"ok":true,"result":[]}))
+                }
+            }
+        })
+        .expect(6)
+        .mount(&fixture.server)
+        .await;
+    let handled = Arc::new(Mutex::new(Vec::new()));
+    let router = Router::with_state(handled.clone()).on_update(
+        |ctx: tg::UpdateContext<Arc<Mutex<Vec<i64>>>>| async move {
+            ctx.state().lock().unwrap().push(ctx.update.update_id);
+            Ok(())
+        },
+    );
+    let reconnect = PollingReconnect::default()
+        .initial_delay(Duration::from_millis(1))
+        .max_delay(Duration::from_millis(5));
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        fixture
+            .bot
+            .run_polling_until(router, options().reconnect(reconnect), stop),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(*handled.lock().unwrap(), vec![10, 11]);
+    let calls = calls.lock().unwrap();
+    let offsets: Vec<_> = calls.iter().map(|(offset, _)| *offset).collect();
+    assert_eq!(
+        offsets,
+        [None, Some(11), Some(11), Some(11), Some(11), Some(12)]
+    );
+    assert!(calls[3].1.duration_since(calls[2].1) >= Duration::from_secs(1));
+}
+
+#[tokio::test]
+async fn reconnect_stops_at_the_failure_limit_and_never_retries_authorization_or_conflict() {
+    for (status, attempts, enabled) in [
+        (503, 1, false),
+        (503, 2, true),
+        (401, 1, true),
+        (409, 1, true),
+    ] {
+        let fixture = Fixture::new().await;
+        Mock::given(path(fixture.updates_path()))
+            .respond_with(ResponseTemplate::new(status).set_body_json(json!({
+                "ok":false,"error_code":status
+            })))
+            .expect(attempts)
+            .mount(&fixture.server)
+            .await;
+        let reconnect = PollingReconnect::default()
+            .initial_delay(Duration::from_millis(1))
+            .max_delay(Duration::from_millis(5))
+            .max_consecutive_errors(Some(2));
+        let options = if enabled {
+            options().reconnect(reconnect)
+        } else {
+            options()
+        };
+        let error = tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture
+                .bot
+                .run_polling_until(Router::new(), options, CancellationToken::new()),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(error.http_status(), Some(status));
+    }
+}
+
+#[tokio::test]
+async fn cancellation_interrupts_a_server_backoff() {
+    let fixture = Fixture::new().await;
+    let request_seen = Arc::new(Notify::new());
+    let signal = request_seen.clone();
+    Mock::given(path(fixture.updates_path()))
+        .respond_with(move |_: &Request| {
+            signal.notify_one();
+            ResponseTemplate::new(429).set_body_json(json!({
+                "ok":false,"error_code":429,"parameters":{"retry_after":60}
+            }))
+        })
+        .expect(1)
+        .mount(&fixture.server)
+        .await;
+    let stop = CancellationToken::new();
+    let run = fixture.bot.run_polling_until(
+        Router::new(),
+        options().reconnect(PollingReconnect::default()),
+        stop.clone(),
+    );
+    let cancel = async {
+        request_seen.notified().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        stop.cancel();
+    };
+    let (result, ()) =
+        tokio::time::timeout(Duration::from_secs(5), async { tokio::join!(run, cancel) })
+            .await
+            .unwrap();
+    result.unwrap();
+}
+
+#[tokio::test]
+async fn oversized_server_error_stops_polling_without_retrying() {
+    let fixture = Fixture::new().await;
+    let bot = Bot::builder(&fixture.token)
+        .api_url(fixture.server.uri())
+        .allow_http_loopback(true)
+        .max_response_bytes(512)
+        .build()
+        .unwrap();
+    Mock::given(path(fixture.updates_path()))
+        .respond_with(ResponseTemplate::new(503).set_body_string("x".repeat(1024)))
+        .expect(1)
+        .mount(&fixture.server)
+        .await;
+    let error = bot
+        .run_polling_until(
+            Router::new(),
+            options().reconnect(PollingReconnect::default().max_consecutive_errors(Some(2))),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::ResponseTooLarge);
+    assert_eq!(error.outcome(), EffectOutcome::Unknown);
+}
+
+#[tokio::test]
+async fn reconnect_does_not_retry_startup_checks() {
+    let fixture = Fixture::new().await;
+    Mock::given(path(format!("/bot{}/getWebhookInfo", fixture.token)))
+        .respond_with(ResponseTemplate::new(503))
+        .with_priority(1)
+        .expect(1)
+        .mount(&fixture.server)
+        .await;
+    Mock::given(path(fixture.updates_path()))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&fixture.server)
+        .await;
+    let error = fixture
+        .bot
+        .run_polling_until(
+            Router::new(),
+            options().reconnect(PollingReconnect::default().max_consecutive_errors(Some(2))),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.http_status(), Some(503));
 }
 
 #[derive(Default)]
@@ -179,7 +365,7 @@ async fn handler_failure_stops_without_acknowledging_the_batch() {
         .run_polling_until(
             Router::new()
                 .on_message(|_: MessageContext| async { Err(Error::handler("application")) }),
-            options(),
+            options().reconnect(PollingReconnect::default()),
             CancellationToken::new(),
         )
         .await
@@ -323,6 +509,17 @@ async fn cancelled_or_invalid_startup_does_not_touch_the_network() {
         .await
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Validation);
+    assert_eq!(error.outcome(), EffectOutcome::NotSent);
+    let error = fixture
+        .bot
+        .run_polling_until(
+            Router::new(),
+            options().reconnect(PollingReconnect::default().max_consecutive_errors(Some(0))),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.field(), Some("reconnect_max_consecutive_errors"));
     assert_eq!(error.outcome(), EffectOutcome::NotSent);
     assert!(fixture.server.received_requests().await.unwrap().is_empty());
 }

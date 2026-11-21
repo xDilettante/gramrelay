@@ -1,5 +1,25 @@
 # История изменений
 
+## Не выпущено
+
+### Добавлено
+
+- `PollingOptions::reconnect` включает восстановление `getUpdates` с прежним `offset`, задержкой с jitter и учётом `retry_after`. Отмена прерывает ожидание. `tracing` добавляет событие `polling_reconnect`. Стартовые `getMe` и `getWebhookInfo`, `401` и `409`, `ResponseTooLarge` и ошибки обработчиков завершают цикл.
+- `BotBuilder::retain_remote_descriptions(true)` открывает явный доступ к `Error::untrusted_remote_description()`. Описание извлекается из ответов с ошибкой, ограничивается по длине UTF-8 и очищается от управляющих символов и токена, включая форму с `%3A`. Стандартные ошибки, метрики и квитанции `tg-agent` сохраняют безопасное представление.
+- Модуль `rich_message` (`RichDoc`, `RichSpan`, `RichTable`, `RichTableCell`, `RichList`, `RichButton`, `HeadingLevel`, `TextAlign`, `VerticalAlign`, `ButtonStyle`) с локальной валидацией в `RichDoc::build() -> Result<InputRichMessage>` и `TryFrom<RichDoc>`.
+- Алиас `tg::EntityText = tg::RichText` для разграничения с `tg::api::types::RichText`.
+- Контекстные и прямые Rich-ответы на общем `Delivery` и общем multipart-пути: `Bot::send_rich_message`, `Bot::reply_ephemeral_rich`, `MessageContext::reply_rich`, `CallbackContext::reply_rich`, `CallbackContext::ephemeral_reply_rich`.
+- Расширенные корневые `InlineKeyboardButton` (`callback`, `url`, `copy_text`, `style`) и `InlineKeyboardMarkup` на базе сгенерированных типов `api::types` с конверсиями `From` в обе стороны и локальной валидацией.
+- Маршрутизация параметризованных callback через `Router::callback_prefix` с приоритетом точного маршрута над префиксным.
+
+### Исправлено
+
+- `WebhookIngress::serve_until` продолжает работу после временного сбоя `listener.accept()`. При нехватке ресурсов следующий приём откладывается. Отмена прерывает паузу, фатальная ошибка завершает сервер.
+
+### Проверено
+
+- На Windows x64 прошли 723 теста рабочего пространства со всеми возможностями, 17 doctests и 67 целевых тестов на Rust 1.89.0. Clippy с `-D warnings`, форматирование и `cargo audit` прошли.
+
 ## [v0.1.0-alpha.1] — 2026-11-20
 
 Первый альфа-релиз GramRelay. Минимальная поддерживаемая версия Rust — **1.89.0**.

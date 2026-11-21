@@ -23,6 +23,7 @@ mod files;
 mod polling;
 mod requests;
 mod retry;
+pub mod rich_message;
 #[cfg(feature = "bot")]
 mod routing;
 mod source;
@@ -47,13 +48,17 @@ pub use downloads::Download;
 pub use error::{EffectOutcome, Error, ErrorKind, Result};
 pub use files::InputFile;
 #[cfg(feature = "bot")]
-pub use polling::PollingOptions;
-pub use requests::{AnswerCallbackQuery, RequestFuture, SendDocument, SendMessage};
+pub use polling::{PollingOptions, PollingReconnect};
+pub use requests::{
+    AnswerCallbackQuery, RequestFuture, RichMessageInput, SendDocument, SendMessage,
+    SendRichMessage,
+};
 pub use retry::RetryPolicy;
+pub use rich_message::{ButtonStyle, RichDoc};
 #[cfg(feature = "bot")]
 pub use routing::{CallbackContext, MessageContext, MessageEvent, Router, UpdateContext};
 pub use source::UpdateSourceGuard;
-pub use text::{EntityKind, ParseMode, RichText};
+pub use text::{EntityKind, EntityText, ParseMode, RichText};
 #[cfg(feature = "bot")]
 pub use tokio_util::sync::CancellationToken;
 pub use types::{
