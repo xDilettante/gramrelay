@@ -2575,7 +2575,7 @@ dependencies = [
 
 [[package]]
 name = "tg"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "axum",
  "bytes",
@@ -2603,7 +2603,7 @@ dependencies = [
 
 [[package]]
 name = "tg-agent"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "base64 0.23.1",
  "getrandom 0.4.3",
@@ -2626,7 +2626,7 @@ dependencies = [
 
 [[package]]
 name = "tg-mtproto"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "bytes",
  "chacha20poly1305",
